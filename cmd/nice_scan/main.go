@@ -25,6 +25,7 @@ var (
 	cfg         = types.DefaultConfig()
 	jsonOutput  bool
 	interactive bool
+	reportFile  string
 )
 
 func main() {
@@ -56,6 +57,7 @@ func main() {
 	root.PersistentFlags().StringSliceVar(&headers, "header", nil, "custom headers (key:value)")
 	root.PersistentFlags().BoolVar(&cfg.FollowRedirects, "follow-redirects", true, "follow redirects")
 	root.PersistentFlags().IntVar(&cfg.MaxRedirects, "max-redirects", 5, "max redirects to follow")
+	root.PersistentFlags().StringVarP(&reportFile, "report", "R", "", "save detailed HTML report to file")
 
 	root.AddCommand(scanCmd())
 	root.AddCommand(techCmd())
@@ -125,6 +127,10 @@ func scanCmd() *cobra.Command {
 				engine.NewXSSAnalyzer(),
 				engine.NewCORSAnalyzer(),
 				engine.NewHTTPMethodsAnalyzer(),
+				engine.NewTokenExtractor(),
+				engine.NewAuthAnalyzer(),
+				engine.NewPrivilegeEscalationAnalyzer(),
+				engine.NewDataExtractionAnalyzer(),
 			)
 
 			if interactive {
@@ -149,6 +155,16 @@ func scanCmd() *cobra.Command {
 			} else {
 				renderer.RenderResult(result)
 				renderer.RenderTransportStats(client.Stats())
+			}
+
+			if reportFile != "" {
+				report := engine.GenerateReport(result)
+				html := report.RenderHTML()
+				if err := os.WriteFile(reportFile, []byte(html), 0644); err != nil {
+					return fmt.Errorf("failed to write report: %w", err)
+				}
+				fmt.Println()
+				fmt.Println(lipgloss.NewStyle().Foreground(lipgloss.Color("#7DCFFF")).Render("  Report saved: " + reportFile))
 			}
 
 			return nil
