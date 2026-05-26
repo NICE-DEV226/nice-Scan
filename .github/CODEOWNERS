@@ -1,0 +1,10 @@
+# Default owners
+* @NICE-DEV226
+
+# Core subsystems
+/internal/transport/ @NICE-DEV226
+/internal/engine/    @NICE-DEV226
+/internal/fingerprint/ @NICE-DEV226
+
+# GitHub config
+/.github/ @NICE-DEV226

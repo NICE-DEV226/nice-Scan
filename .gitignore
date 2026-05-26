@@ -1,0 +1,49 @@
+# Binaries
+nice_scan.exe
+nice_scan
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Build
+bin/
+build/
+dist/
+/tmp/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.helm/
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Go
+vendor/
+go.work
+
+# Test
+/cov*
+/coverage*
+profile.out
+*.prof
+
+# Output
+/output/
+/reports/
+*.html
+*.sarif
+
+# Env
+.env
+.env.local
+.env.production
