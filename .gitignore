@@ -1,6 +1,6 @@
 # Binaries
-nice_scan.exe
-nice_scan
+/nice_scan.exe
+/nice_scan
 *.exe
 *.dll
 *.so
