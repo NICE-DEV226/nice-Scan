@@ -79,7 +79,7 @@ func spinnerStyle() lipgloss.Style {
 
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
-		tea.SetWindowTitle("NICE_SCAN — Modern Security Reconnaissance Engine"),
+		tea.SetWindowTitle("NICE_SCAN — Fast. Precise. Intelligent."),
 		m.spinner.Tick,
 		m.waitForScan(),
 	)

@@ -7,63 +7,64 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const logoArt = `
-    _   ___ ___ _____   ___  _   _ 
-   / \ |_ _/ ___|  ___| / _ \| \ | |
-  / _ \ | |\___ \ |_   / /_ \|  \| |
- / ___ \| | ___) |  _| / ___ \| |\  |
-/_/   \_\_|____/|_|   \/   \_\_| \_|
-`
-
-const logoSub = "  Fast. Precise. Intelligent."
-
-func RenderLogo() string {
-	title := lipgloss.NewStyle().
-		Foreground(accentCyan).
-		Bold(true).
-		Render(logoArt)
-
-	tagline := lipgloss.NewStyle().
-		Foreground(textMuted).
-		Render(logoSub)
-
-	return lipgloss.JoinVertical(lipgloss.Left, title, tagline)
-}
+var (
+	logoAccent = lipgloss.Color("#7DCFFF")
+	logoMuted  = lipgloss.Color("#565F89")
+	logoDim    = lipgloss.Color("#3B4261")
+	logoBorder = lipgloss.Color("#2F3346")
+)
 
 func RenderLogoCompact() string {
-	line1 := "  _   ___ ___ _____   ___  _   _ "
-	line2 := " / \\ |_ _/ ___|  ___| / _ \\| \\ | |"
-	line3 := "/ _ \\ | |\\___ \\ |_  / /_ \\|  \\| |"
-	line4 := "/ ___ \\| | ___) |  _| / ___ \\| |\\  |"
-	line5 := "/_/   \\_\\_|____/|_|   \\/   \\_\\_| \\_|"
+	top := lipgloss.NewStyle().
+		Foreground(logoAccent).
+		Bold(true).
+		Render("  NICE_SCAN")
 
-	cyan := lipgloss.NewStyle().Foreground(accentCyan).Bold(true)
-	muted := lipgloss.NewStyle().Foreground(textMuted)
+	version := lipgloss.NewStyle().
+		Foreground(logoMuted).
+		Render("v0.1.0")
 
-	lines := []string{
-		cyan.Render(line1),
-		cyan.Render(line2),
-		cyan.Render(line3),
-		cyan.Render(line4),
-		cyan.Render(line5),
-		"",
-		muted.Render("  Fast. Precise. Intelligent."),
-	}
+	tagline := lipgloss.NewStyle().
+		Foreground(logoMuted).
+		Render("  Fast. Precise. Intelligent.")
 
-	return strings.Join(lines, "\n")
+	header := lipgloss.JoinHorizontal(lipgloss.Left,
+		top,
+		lipgloss.NewStyle().Width(2).Render(""),
+		version,
+	)
+
+	block := lipgloss.JoinVertical(lipgloss.Left,
+		header,
+		tagline,
+	)
+
+	panel := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(logoBorder).
+		Padding(0, 2).
+		Render(block)
+
+	return panel
 }
 
 func RenderLogoOneLine() string {
 	return lipgloss.NewStyle().
-		Foreground(accentCyan).
+		Foreground(logoAccent).
 		Bold(true).
 		Render("NICE_SCAN")
 }
 
-func TabTitle() string {
-	return "\x1b]0;NICE_SCAN \x07"
-}
-
 func SetTabTitle(title string) {
 	fmt.Print("\x1b]0;" + title + " \x07")
+}
+
+func SetTab() {
+	SetTabTitle("NICE_SCAN — Fast. Precise. Intelligent.")
+}
+
+func RenderSeparator() string {
+	return lipgloss.NewStyle().
+		Foreground(logoBorder).
+		Render(strings.Repeat("─", 40))
 }

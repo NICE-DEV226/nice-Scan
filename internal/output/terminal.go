@@ -126,7 +126,7 @@ func NewTerminal() *TerminalRenderer {
 }
 
 func (r *TerminalRenderer) RenderBanner() {
-	SetTabTitle("NICE_SCAN — Modern Security Reconnaissance Engine")
+	SetTab()
 
 	fmt.Fprintln(os.Stdout)
 	fmt.Fprintln(os.Stdout, RenderLogoCompact())
