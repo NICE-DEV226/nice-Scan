@@ -121,6 +121,10 @@ func scanCmd() *cobra.Command {
 				engine.NewHeaderAnalyzer(),
 				engine.NewTLSAnalyzer(),
 				engine.NewExposureAnalyzer(),
+				engine.NewSQLiAnalyzer(),
+				engine.NewXSSAnalyzer(),
+				engine.NewCORSAnalyzer(),
+				engine.NewHTTPMethodsAnalyzer(),
 			)
 
 			if interactive {
@@ -232,7 +236,7 @@ func shellCmd() *cobra.Command {
 				return err
 			}
 			defer model.Close()
-			p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
+			p := tea.NewProgram(model, tea.WithAltScreen())
 			if _, err := p.Run(); err != nil {
 				return err
 			}

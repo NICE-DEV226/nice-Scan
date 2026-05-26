@@ -94,7 +94,7 @@ func (s *Scanner) buildProbes(target string) []*types.Request {
 		return nil
 	}
 
-	probes := []string{
+	pathProbes := []string{
 		"/robots.txt",
 		"/sitemap.xml",
 		"/.env",
@@ -106,10 +106,43 @@ func (s *Scanner) buildProbes(target string) []*types.Request {
 	var reqs []*types.Request
 	baseURL := target
 
-	for _, path := range probes {
+	for _, path := range pathProbes {
 		reqs = append(reqs, &types.Request{
 			Method:  "GET",
 			URL:     baseURL + path,
+			Timeout: s.opts.Timeout,
+		})
+	}
+
+	// CORS probes
+	reqs = append(reqs, &types.Request{
+		Method:  "GET",
+		URL:     baseURL + "/",
+		Headers: map[string]string{"Origin": "https://evil.com"},
+		Timeout: s.opts.Timeout,
+	})
+
+	// HTTP Methods probe
+	reqs = append(reqs, &types.Request{
+		Method:  "OPTIONS",
+		URL:     baseURL + "/",
+		Timeout: s.opts.Timeout,
+	})
+
+	// SQLi probes — common parameter names
+	sqliParams := []string{"id", "q", "search", "page", "name", "user", "cat", "prod", "order", "pid"}
+	xssPayload := "<script>alert(1)</script>"
+	sqliPayload := "1'"
+
+	for _, p := range sqliParams {
+		reqs = append(reqs, &types.Request{
+			Method:  "GET",
+			URL:     baseURL + "/?" + p + "=" + sqliPayload,
+			Timeout: s.opts.Timeout,
+		})
+		reqs = append(reqs, &types.Request{
+			Method:  "GET",
+			URL:     baseURL + "/?" + p + "=" + xssPayload,
 			Timeout: s.opts.Timeout,
 		})
 	}
