@@ -231,6 +231,7 @@ func shellCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer model.Close()
 			p := tea.NewProgram(model, tea.WithAltScreen())
 			if _, err := p.Run(); err != nil {
 				return err
