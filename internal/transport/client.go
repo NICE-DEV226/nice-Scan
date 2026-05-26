@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"nice_scan/internal/types"
+	"github.com/nice-scan/nice_scan/internal/types"
 )
 
 const (
@@ -318,9 +318,7 @@ func (c *Client) execute(ctx context.Context, req *types.Request) (*types.Respon
 	if httpResp.TLS != nil {
 		resp.TLS = httpResp.TLS
 		resp.TLSVersion = tlsVersionString(httpResp.TLS.Version)
-		if len(httpResp.TLS.CipherSuite) > 0 {
-			resp.TLSCipher = tls.CipherSuiteName(httpResp.TLS.CipherSuite)
-		}
+		resp.TLSCipher = tls.CipherSuiteName(httpResp.TLS.CipherSuite)
 	}
 
 	body, err := io.ReadAll(io.LimitReader(httpResp.Body, c.opts.maxBodySize))

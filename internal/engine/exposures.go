@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"nice_scan/internal/types"
+	"github.com/nice-scan/nice_scan/internal/types"
 )
 
 type ExposureAnalyzer struct {

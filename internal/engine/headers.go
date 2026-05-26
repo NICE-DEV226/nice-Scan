@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"nice_scan/internal/types"
+	"github.com/nice-scan/nice_scan/internal/types"
 )
 
 type HeaderAnalyzer struct{}

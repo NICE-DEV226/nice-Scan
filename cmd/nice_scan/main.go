@@ -8,11 +8,11 @@ import (
 	"strings"
 	"syscall"
 
-	"nice_scan/internal/engine"
-	"nice_scan/internal/fingerprint"
-	"nice_scan/internal/output"
-	"nice_scan/internal/transport"
-	"nice_scan/internal/types"
+	"github.com/nice-scan/nice_scan/internal/engine"
+	"github.com/nice-scan/nice_scan/internal/fingerprint"
+	"github.com/nice-scan/nice_scan/internal/output"
+	"github.com/nice-scan/nice_scan/internal/transport"
+	"github.com/nice-scan/nice_scan/internal/types"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"

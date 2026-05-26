@@ -3,11 +3,10 @@ package fingerprint
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"regexp"
 	"strings"
 
-	"nice_scan/internal/types"
+	"github.com/nice-scan/nice_scan/internal/types"
 )
 
 type Fingerprinter struct {

@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"nice_scan/internal/transport"
-	"nice_scan/internal/types"
+	"github.com/nice-scan/nice_scan/internal/transport"
+	"github.com/nice-scan/nice_scan/internal/types"
 )
 
 type Analyzer interface {
@@ -30,6 +30,7 @@ type ScanStats struct {
 	Completed int
 	Failed    int
 	Findings  int
+	Workers   int
 	StartTime time.Time
 	Duration  time.Duration
 }
@@ -58,17 +59,8 @@ func (s *Scanner) RegisterAnalyzers(analyzers ...Analyzer) {
 }
 
 func (s *Scanner) Scan(ctx context.Context, targets []string) *ScanResult {
-	s.mu.Lock()
-	s.stats = ScanStats{
-		StartTime: time.Now(),
-		Total:     len(targets),
-		Target:    formatTargets(targets),
-	}
-	s.mu.Unlock()
-
 	result := &ScanResult{}
 	var allResults []*types.Result
-	var allFindings []types.Finding
 
 	reqs := make([]*types.Request, 0, len(targets))
 	for _, target := range targets {
@@ -81,9 +73,20 @@ func (s *Scanner) Scan(ctx context.Context, targets []string) *ScanResult {
 		reqs = append(reqs, s.buildProbes(target)...)
 	}
 
+	s.mu.Lock()
+	s.stats = ScanStats{
+		StartTime: time.Now(),
+		Total:     len(reqs),
+		Target:    formatTargets(targets),
+		Workers:   s.opts.Workers,
+	}
+	s.mu.Unlock()
+
 	results := make(chan *types.Result, len(reqs))
 
 	go s.client.DoBatch(ctx, reqs, results, s.opts.Workers)
+
+	findingMap := make(map[string]types.Finding)
 
 	for res := range results {
 		s.mu.Lock()
@@ -99,8 +102,26 @@ func (s *Scanner) Scan(ctx context.Context, targets []string) *ScanResult {
 		if res.Response != nil {
 			findings := s.analyzeResponse(ctx, res.Response)
 			res.Findings = findings
-			allFindings = append(allFindings, findings...)
+			for _, f := range findings {
+				key := f.Name
+				if existing, ok := findingMap[key]; ok {
+					if existing.Evidence != f.Evidence {
+						existing.Evidence = existing.Evidence + " | " + f.Evidence
+					}
+					if f.Confidence > existing.Confidence {
+						existing.Confidence = f.Confidence
+					}
+					findingMap[key] = existing
+				} else {
+					findingMap[key] = f
+				}
+			}
 		}
+	}
+
+	allFindings := make([]types.Finding, 0, len(findingMap))
+	for _, f := range findingMap {
+		allFindings = append(allFindings, f)
 	}
 
 	s.mu.Lock()

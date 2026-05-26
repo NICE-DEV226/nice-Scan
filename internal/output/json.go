@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"nice_scan/internal/engine"
+	"github.com/nice-scan/nice_scan/internal/engine"
 )
 
 type JSONRenderer struct {

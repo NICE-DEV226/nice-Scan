@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"nice_scan/internal/engine"
-	"nice_scan/internal/transport"
-	"nice_scan/internal/types"
+	"github.com/nice-scan/nice_scan/internal/engine"
+	"github.com/nice-scan/nice_scan/internal/transport"
+	"github.com/nice-scan/nice_scan/internal/types"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -99,6 +99,10 @@ func (r *TerminalRenderer) RenderResult(res *engine.ScanResult) {
 }
 
 func (r *TerminalRenderer) renderDashboard(stats engine.ScanStats) {
+	workers := 64
+	if stats.Workers > 0 {
+		workers = stats.Workers
+	}
 	targetLabel := labelStyle.Render("Target")
 	targetVal := valueStyle.Render(stats.Target)
 
@@ -111,11 +115,11 @@ func (r *TerminalRenderer) renderDashboard(stats engine.ScanStats) {
 			r.statLine("Failed", fmt.Sprintf("%d", stats.Failed)),
 			r.statLine("Findings", fmt.Sprintf("%d", stats.Findings)),
 			r.statLine("Duration", stats.Duration.Round(time.Millisecond).String()),
-			r.statLine("Workers", fmt.Sprintf("%d", 64)),
+			r.statLine("Workers", fmt.Sprintf("%d", workers)),
 		),
 	))
 
-	fmt.Fprintln(os.Stdout, statLine)
+	fmt.Fprintln(os.Stdout, statLine.String())
 }
 
 func (r *TerminalRenderer) statLine(label, value string) string {
