@@ -43,8 +43,7 @@ type Model struct {
 	ready    bool
 	quitting bool
 
-	cfg    *types.Config
-	client *transport.Client
+	cfg *types.Config
 }
 
 func NewModel(cfg *types.Config) (*Model, error) {
@@ -303,12 +302,4 @@ func truncate(s string, n int) string {
 	return s[:n-1] + "…"
 }
 
-func filterBySeverity(findings []types.Finding, sev types.Severity) []types.Finding {
-	var f []types.Finding
-	for _, fi := range findings {
-		if fi.Severity == sev {
-			f = append(f, fi)
-		}
-	}
-	return f
-}
+
