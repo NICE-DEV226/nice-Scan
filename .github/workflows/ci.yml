@@ -27,6 +27,7 @@ jobs:
         with:
           version: latest
           args: --timeout=5m
+          skip-cache: true
 
       - name: Build
         run: go build -v ./...
