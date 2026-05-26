@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nice-scan/nice_scan/internal/engine"
+	"github.com/nice-scan/nice_scan/internal/output"
 	"github.com/nice-scan/nice_scan/internal/types"
 
 	"github.com/charmbracelet/bubbles/progress"
@@ -78,6 +79,7 @@ func spinnerStyle() lipgloss.Style {
 
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
+		tea.SetWindowTitle("NICE_SCAN — Modern Security Reconnaissance Engine"),
 		m.spinner.Tick,
 		m.waitForScan(),
 	)
@@ -226,7 +228,8 @@ func (m *Model) renderRunning() string {
 }
 
 func (m *Model) renderHeader() string {
-	title := titleStyle.Render("NICE_SCAN")
+	logo := output.RenderLogoOneLine()
+	title := titleStyle.Render(logo)
 	spinner := m.spinner.View()
 	target := mutedStyle.Render(m.targets[0])
 

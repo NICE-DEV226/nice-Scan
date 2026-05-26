@@ -126,23 +126,10 @@ func NewTerminal() *TerminalRenderer {
 }
 
 func (r *TerminalRenderer) RenderBanner() {
-	title := lipgloss.NewStyle().Foreground(accentCyan).Bold(true).Render("NICE_SCAN")
-	version := lipgloss.NewStyle().Foreground(textMuted).Render("v0.1.0")
-	tagline := lipgloss.NewStyle().Foreground(textMuted).Render("  Fast. Precise. Intelligent.")
-
-	header := lipgloss.JoinHorizontal(lipgloss.Center,
-		title,
-		" ",
-		version,
-	)
-
-	block := lipgloss.JoinVertical(lipgloss.Left,
-		header,
-		tagline,
-	)
+	SetTabTitle("NICE_SCAN — Modern Security Reconnaissance Engine")
 
 	fmt.Fprintln(os.Stdout)
-	fmt.Fprintln(os.Stdout, lipgloss.NewStyle().Padding(0, 2).Render(block))
+	fmt.Fprintln(os.Stdout, RenderLogoCompact())
 	fmt.Fprintln(os.Stdout)
 }
 
