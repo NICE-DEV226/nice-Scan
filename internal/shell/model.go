@@ -67,6 +67,7 @@ var (
 		{"tech", "Technology detection", "<url>"},
 		{"tls", "TLS configuration analysis", "<url>"},
 		{"clear", "Clear output", ""},
+		{"list", "Show session targets and findings", ""},
 		{"help", "Show available commands", ""},
 		{"exit", "Exit the shell", ""},
 	}
@@ -111,13 +112,15 @@ func (s *session) display() string {
 type Model struct {
 	input textinput.Model
 
-	output []string
-	session session
-	cfg     *types.Config
-	client  *transport.Client
-	ready   bool
-	quitting bool
-	width   int
+	output       []string
+	session      session
+	cfg          *types.Config
+	client       *transport.Client
+	ready        bool
+	quitting     bool
+	width        int
+	height       int
+	scrollOffset int
 }
 
 func NewModel(cfg *types.Config) (*Model, error) {
@@ -156,6 +159,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
+		m.height = msg.Height
 		m.ready = true
 		return m, nil
 
@@ -169,6 +173,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.autocomplete()
 			return m, nil
 
+		case "pgup":
+			m.scrollOffset += m.scrollPageSize()
+			m.clampScroll()
+			return m, nil
+
+		case "pgdown":
+			m.scrollOffset -= m.scrollPageSize()
+			m.clampScroll()
+			return m, nil
+
+		case "home":
+			m.scrollOffset = m.maxScrollOffset()
+			m.clampScroll()
+			return m, nil
+
+		case "end":
+			m.scrollOffset = 0
+			return m, nil
+
 		case "enter":
 			line := strings.TrimSpace(m.input.Value())
 			if line == "" {
@@ -177,6 +200,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			m.output = append(m.output, promptStyle.Render("❯ "+line))
 			m.input.Reset()
+			m.scrollOffset = 0
 
 			cmd, args := parseLine(line)
 			switch cmd {
@@ -188,6 +212,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "help", "?":
 				m.output = append(m.output, m.helpText()...)
+				return m, nil
+			case "list", "ls":
+				m.output = append(m.output, m.listSession()...)
 				return m, nil
 			case "scan", "tech", "tls":
 				if len(args) == 0 {
@@ -204,6 +231,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case cmdResultMsg:
 		m.output = append(m.output, msg...)
+		m.scrollOffset = 0
 		return m, nil
 	}
 
@@ -231,8 +259,17 @@ func (m *Model) View() string {
 	}
 
 	visible := m.output
-	if len(visible) > 80 {
-		visible = visible[len(visible)-80:]
+	pageSize := m.scrollPageSize()
+	if len(visible) > pageSize {
+		start := len(visible) - pageSize - m.scrollOffset
+		if start < 0 {
+			start = 0
+		}
+		end := start + pageSize
+		if end > len(visible) {
+			end = len(visible)
+		}
+		visible = visible[start:end]
 	}
 
 	for _, line := range visible {
@@ -241,7 +278,13 @@ func (m *Model) View() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(clDim).Padding(0, 2).Render(panelSep))
+	scrollInfo := ""
+	total := len(m.output)
+	showing := len(visible)
+	if total > showing {
+		scrollInfo = fmt.Sprintf("  (pg↑↓ scroll · %d/%d lines)", showing, total)
+	}
+	b.WriteString(lipgloss.NewStyle().Foreground(clDim).Padding(0, 2).Render(panelSep + scrollInfo))
 	b.WriteString("\n")
 	b.WriteString("\n")
 	b.WriteString(m.input.View())
@@ -367,6 +410,81 @@ func (m *Model) autocomplete() {
 	}
 }
 
+func (m *Model) listSession() []string {
+	m.session.mu.Lock()
+	defer m.session.mu.Unlock()
+
+	if len(m.session.targets) == 0 {
+		return []string{lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render("  No targets scanned yet.")}
+	}
+
+	var lines []string
+	lines = append(lines, "")
+	lines = append(lines, lipgloss.NewStyle().Foreground(clName).Bold(true).Padding(0, 2).Render("  Session Summary"))
+	lines = append(lines, "")
+	lines = append(lines, lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render(fmt.Sprintf("  %d targets  ·  %d findings  ·  %d requests  ·  %s",
+		len(m.session.targets), len(m.session.findings), m.session.requests, m.session.duration.Round(time.Second))))
+
+	lines = append(lines, "")
+	lines = append(lines, lipgloss.NewStyle().Foreground(clDim).Padding(0, 2).Render("  Targets:"))
+	for _, t := range m.session.targets {
+		lines = append(lines, lipgloss.NewStyle().Foreground(clCyan).Padding(0, 4).Render("  ▸ "+t))
+	}
+
+	if len(m.session.findings) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, lipgloss.NewStyle().Foreground(clDim).Padding(0, 2).Render("  Findings by Severity:"))
+		bySev := map[types.Severity][]string{}
+		order := []types.Severity{types.SeverityCritical, types.SeverityHigh, types.SeverityMedium, types.SeverityLow, types.SeverityInfo}
+		for _, f := range m.session.findings {
+			bySev[f.Severity] = append(bySev[f.Severity], f.Name)
+		}
+		for _, sev := range order {
+			items := bySev[sev]
+			if len(items) == 0 {
+				continue
+			}
+			label := severityLabel[sev]
+			sym := severitySym[sev]
+			cl := severityColor[sev]
+			lines = append(lines, lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(fmt.Sprintf("  %s %s  (%d)", sym, label, len(items))))
+			for _, item := range items {
+				lines = append(lines, lipgloss.NewStyle().Foreground(clMuted).Padding(0, 6).Render("  · "+item))
+			}
+		}
+	}
+
+	lines = append(lines, "")
+	return lines
+}
+
+func (m *Model) scrollPageSize() int {
+	available := m.height - 7
+	if available < 10 {
+		available = 10
+	}
+	return available
+}
+
+func (m *Model) maxScrollOffset() int {
+	pageSize := m.scrollPageSize()
+	total := len(m.output)
+	if total <= pageSize {
+		return 0
+	}
+	return total - pageSize
+}
+
+func (m *Model) clampScroll() {
+	max := m.maxScrollOffset()
+	if m.scrollOffset > max {
+		m.scrollOffset = max
+	}
+	if m.scrollOffset < 0 {
+		m.scrollOffset = 0
+	}
+}
+
 func (m *Model) helpText() []string {
 	var lines []string
 	lines = append(lines, "")
@@ -380,7 +498,7 @@ func (m *Model) helpText() []string {
 		lines = append(lines, line)
 	}
 	lines = append(lines, "")
-	lines = append(lines, lipgloss.NewStyle().Foreground(clDim).Padding(0, 2).Render("  Navigation:  ↑↓ history  ·  Tab complete  ·  Ctrl+C quit"))
+	lines = append(lines, lipgloss.NewStyle().Foreground(clDim).Padding(0, 2).Render("  Navigation:  ↑↓ history  ·  Tab complete  ·  PgUp/PgDn scroll  ·  Ctrl+C quit"))
 	lines = append(lines, "")
 	return lines
 }
