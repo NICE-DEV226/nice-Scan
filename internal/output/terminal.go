@@ -128,10 +128,48 @@ func (r *TerminalRenderer) RenderResult(res *engine.ScanResult) {
 	r.renderDashboard(res.Stats)
 	fmt.Fprintln(os.Stdout)
 
+	r.renderCheckGrid(res)
+	fmt.Fprintln(os.Stdout)
+
 	r.renderFindingsOverview(res.Findings)
 	fmt.Fprintln(os.Stdout)
 
 	r.renderEmptyState(res.Findings)
+}
+
+func (r *TerminalRenderer) renderCheckGrid(res *engine.ScanResult) {
+	if len(res.AnalyzerNames) == 0 {
+		return
+	}
+
+	colCount := 2
+	perCol := (len(res.AnalyzerNames) + colCount - 1) / colCount
+
+	var rows []string
+	for row := 0; row < perCol; row++ {
+		var cells []string
+		for col := 0; col < colCount; col++ {
+			idx := row + col*perCol
+			if idx >= len(res.AnalyzerNames) {
+				break
+			}
+			name := res.AnalyzerNames[idx]
+			cell := lipgloss.NewStyle().Foreground(textPrimary).Width(20).Render(name) +
+				lipgloss.NewStyle().Foreground(textMuted).Render("●")
+			cells = append(cells, cell)
+		}
+		rows = append(rows, strings.Join(cells, "  "))
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left, rows...)
+	panel := r.styles.panel.Render(
+		lipgloss.JoinVertical(lipgloss.Left,
+			lipgloss.NewStyle().Foreground(textPrimary).Bold(true).Padding(0, 2).Render("Analysis Modules"),
+			"",
+			content,
+		),
+	)
+	fmt.Fprintln(os.Stdout, panel)
 }
 
 func (r *TerminalRenderer) RenderTransportStats(s transport.RequestStats) {

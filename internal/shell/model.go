@@ -327,6 +327,14 @@ func (m *Model) exec(cmd string, target string) tea.Cmd {
 				engine.NewHeaderAnalyzer(),
 				engine.NewTLSAnalyzer(),
 				engine.NewExposureAnalyzer(),
+				engine.NewSQLiAnalyzer(),
+				engine.NewXSSAnalyzer(),
+				engine.NewCORSAnalyzer(),
+				engine.NewHTTPMethodsAnalyzer(),
+				engine.NewTokenExtractor(),
+				engine.NewAuthAnalyzer(),
+				engine.NewPrivilegeEscalationAnalyzer(),
+				engine.NewDataExtractionAnalyzer(),
 			)
 			result := scanner.Scan(ctx, []string{target})
 			findings = result.Findings

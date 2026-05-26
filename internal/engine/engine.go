@@ -36,11 +36,12 @@ type ScanStats struct {
 }
 
 type ScanResult struct {
-	Target   string
-	Results  []*types.Result
-	Findings []types.Finding
-	Stats    ScanStats
-	Error    error
+	Target        string
+	Results       []*types.Result
+	Findings      []types.Finding
+	Stats         ScanStats
+	Error         error
+	AnalyzerNames []string
 }
 
 func NewScanner(cfg *types.Config, client *transport.Client) *Scanner {
@@ -84,6 +85,11 @@ func (s *Scanner) Scan(ctx context.Context, targets []string) *ScanResult {
 	result.Results = allResults
 	if result.Findings == nil {
 		result.Findings = allFindings
+	}
+
+	result.AnalyzerNames = make([]string, len(s.analyzers))
+	for i, a := range s.analyzers {
+		result.AnalyzerNames[i] = a.Name()
 	}
 
 	return result
