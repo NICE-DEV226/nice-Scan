@@ -282,10 +282,32 @@ func (r *TerminalRenderer) renderSeverityGroup(sev types.Severity, findings []ty
 }
 
 func (r *TerminalRenderer) renderFinding(f types.Finding, color lipgloss.Color) {
-	name := lipgloss.NewStyle().
-		Foreground(textPrimary).
-		Padding(0, 0, 0, 4).
-		Render(f.Name)
+	var version string
+	if f.Metadata != nil {
+		version = f.Metadata["version"]
+	}
+
+	name := f.Name
+	if version != "" {
+		name = lipgloss.NewStyle().
+			Foreground(textPrimary).
+			Padding(0, 0, 0, 4).
+			Render(f.Name)
+
+		ver := lipgloss.NewStyle().
+			Foreground(accentCyan).
+			Padding(0, 0, 0, 4).
+			Render(version)
+
+		fmt.Fprintln(os.Stdout, name)
+		fmt.Fprintln(os.Stdout, ver)
+	} else {
+		name = lipgloss.NewStyle().
+			Foreground(textPrimary).
+			Padding(0, 0, 0, 4).
+			Render(f.Name)
+		fmt.Fprintln(os.Stdout, name)
+	}
 
 	var desc string
 	if f.Evidence != "" {
@@ -300,7 +322,6 @@ func (r *TerminalRenderer) renderFinding(f types.Finding, color lipgloss.Color) 
 		Padding(0, 0, 0, 4).
 		Render(fmt.Sprintf("%.0f%% confidence", f.Confidence*100))
 
-	fmt.Fprintln(os.Stdout, name)
 	if desc != "" {
 		fmt.Fprintln(os.Stdout, desc)
 	}

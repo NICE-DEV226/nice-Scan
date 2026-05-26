@@ -393,6 +393,12 @@ func (m *Model) renderFindings(findings []types.Finding, stats engine.ScanStats)
 		for _, f := range group {
 			name := lipgloss.NewStyle().Foreground(clName).Padding(0, 4).Render(f.Name)
 			lines = append(lines, name)
+			if f.Metadata != nil {
+				if v, ok := f.Metadata["version"]; ok && v != "" {
+					ver := lipgloss.NewStyle().Foreground(clCyan).Padding(0, 6).Render(v)
+					lines = append(lines, ver)
+				}
+			}
 			if f.Evidence != "" {
 				ev := truncate(f.Evidence, 68)
 				lines = append(lines, lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render(ev))
