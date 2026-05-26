@@ -108,34 +108,6 @@ func (s *session) display() string {
 	return strings.Join(parts, " · ")
 }
 
-func severity(sev string) types.Severity {
-	switch sev {
-	case "critical":
-		return types.SeverityCritical
-	case "high":
-		return types.SeverityHigh
-	case "medium":
-		return types.SeverityMedium
-	case "low":
-		return types.SeverityLow
-	default:
-		return types.SeverityInfo
-	}
-}
-
-func colorForSev(sev string) lipgloss.Color {
-	switch sev {
-	case "critical", "high":
-		return clCoral
-	case "medium":
-		return clAmber
-	case "low":
-		return clCyan
-	default:
-		return clMuted
-	}
-}
-
 type Model struct {
 	input textinput.Model
 
