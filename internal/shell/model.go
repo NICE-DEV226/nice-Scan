@@ -163,6 +163,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 		return m, nil
 
+	case tea.MouseMsg:
+		switch msg.Type {
+		case tea.MouseWheelUp:
+			m.scrollOffset += 3
+			m.clampScroll()
+			return m, nil
+		case tea.MouseWheelDown:
+			m.scrollOffset -= 3
+			m.clampScroll()
+			return m, nil
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c":
@@ -173,13 +186,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.autocomplete()
 			return m, nil
 
-		case "pgup":
-			m.scrollOffset += m.scrollPageSize()
+		case "shift+up", "pgup":
+			m.scrollOffset += 3
 			m.clampScroll()
 			return m, nil
 
-		case "pgdown":
-			m.scrollOffset -= m.scrollPageSize()
+		case "shift+down", "pgdown":
+			m.scrollOffset -= 3
 			m.clampScroll()
 			return m, nil
 
