@@ -8,51 +8,35 @@ import (
 )
 
 var (
-	logoAccent = lipgloss.Color("#7DCFFF")
-	logoMuted  = lipgloss.Color("#565F89")
-	logoDim    = lipgloss.Color("#3B4261")
-	logoBorder = lipgloss.Color("#2F3346")
+	loBorder = lipgloss.Color("#2F3346")
+	loMark   = lipgloss.Color("#7DCFFF")
+	loName   = lipgloss.Color("#C0CAF5")
+	loMuted  = lipgloss.Color("#565F89")
 )
 
 func RenderLogoCompact() string {
-	top := lipgloss.NewStyle().
-		Foreground(logoAccent).
-		Bold(true).
-		Render("  NICE_SCAN")
+	n := lipgloss.NewStyle().Foreground(loMark).Bold(true).Render("N")
+	s := lipgloss.NewStyle().Foreground(loMark).Bold(true).Render("S")
+	pipe := lipgloss.NewStyle().Foreground(loBorder).Render("│")
+	top := lipgloss.NewStyle().Foreground(loBorder).Render("┌───┐")
+	bot := lipgloss.NewStyle().Foreground(loBorder).Render("└───┘")
 
-	version := lipgloss.NewStyle().
-		Foreground(logoMuted).
-		Render("v0.1.0")
+	name := lipgloss.NewStyle().Foreground(loName).Bold(true).Render("NICE_SCAN")
+	ver := lipgloss.NewStyle().Foreground(loMuted).Render("v0.1.0")
+	tag := lipgloss.NewStyle().Foreground(loMuted).Render("Fast. Precise. Intelligent.")
 
-	tagline := lipgloss.NewStyle().
-		Foreground(logoMuted).
-		Render("  Fast. Precise. Intelligent.")
+	line1 := top + "  " + name + "  " + ver
+	line2 := pipe + " " + n + " " + pipe
+	line3 := pipe + " " + s + " " + pipe + "  " + tag
+	line4 := bot
 
-	header := lipgloss.JoinHorizontal(lipgloss.Left,
-		top,
-		lipgloss.NewStyle().Width(2).Render(""),
-		version,
-	)
-
-	block := lipgloss.JoinVertical(lipgloss.Left,
-		header,
-		tagline,
-	)
-
-	panel := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(logoBorder).
-		Padding(0, 2).
-		Render(block)
-
-	return panel
+	return strings.Join([]string{line1, line2, line3, line4}, "\n")
 }
 
 func RenderLogoOneLine() string {
-	return lipgloss.NewStyle().
-		Foreground(logoAccent).
-		Bold(true).
-		Render("NICE_SCAN")
+	n := lipgloss.NewStyle().Foreground(loMark).Bold(true).Render("N")
+	s := lipgloss.NewStyle().Foreground(loMark).Bold(true).Render("S")
+	return n + s
 }
 
 func SetTabTitle(title string) {
@@ -61,10 +45,4 @@ func SetTabTitle(title string) {
 
 func SetTab() {
 	SetTabTitle("NICE_SCAN — Fast. Precise. Intelligent.")
-}
-
-func RenderSeparator() string {
-	return lipgloss.NewStyle().
-		Foreground(logoBorder).
-		Render(strings.Repeat("─", 40))
 }
