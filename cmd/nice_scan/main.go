@@ -1,6 +1,6 @@
 package main
 
-import (
+	import (
 	"context"
 	"fmt"
 	"os"
@@ -12,15 +12,18 @@ import (
 	"github.com/nice-scan/nice_scan/internal/fingerprint"
 	"github.com/nice-scan/nice_scan/internal/output"
 	"github.com/nice-scan/nice_scan/internal/transport"
+	"github.com/nice-scan/nice_scan/internal/tui"
 	"github.com/nice-scan/nice_scan/internal/types"
 
+	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
 var (
-	cfg        = types.DefaultConfig()
-	jsonOutput bool
+	cfg         = types.DefaultConfig()
+	jsonOutput  bool
+	interactive bool
 )
 
 func main() {
@@ -46,6 +49,7 @@ func main() {
 	root.PersistentFlags().IntVar(&cfg.RateLimit, "rate-limit", 0, "requests per second (0 = unlimited)")
 	root.PersistentFlags().StringVar(&cfg.Proxy, "proxy", "", "HTTP proxy URL")
 	root.PersistentFlags().BoolVarP(&jsonOutput, "json", "j", false, "output as JSON")
+	root.PersistentFlags().BoolVarP(&interactive, "interactive", "i", false, "interactive live dashboard")
 	root.PersistentFlags().BoolVarP(&cfg.Verbose, "verbose", "v", false, "verbose output")
 	root.PersistentFlags().StringVar(&cfg.Cookie, "cookie", "", "cookie header to include")
 	root.PersistentFlags().StringSliceVar(&headers, "header", nil, "custom headers (key:value)")
@@ -106,9 +110,6 @@ func scanCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := normalizeTarget(args[0])
 
-			renderer := output.NewTerminal()
-			renderer.RenderBanner()
-
 			client := buildClient()
 			defer client.Close()
 
@@ -119,6 +120,18 @@ func scanCmd() *cobra.Command {
 				engine.NewTLSAnalyzer(),
 				engine.NewExposureAnalyzer(),
 			)
+
+			if interactive {
+				model := tui.NewModel(scanner, []string{target})
+				p := tea.NewProgram(model, tea.WithAltScreen())
+				if _, err := p.Run(); err != nil {
+					return err
+				}
+				return nil
+			}
+
+			renderer := output.NewTerminal()
+			renderer.RenderBanner()
 
 			ctx, cancel := signalContext()
 			defer cancel()

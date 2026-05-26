@@ -62,78 +62,29 @@ func (s *Scanner) Scan(ctx context.Context, targets []string) *ScanResult {
 	result := &ScanResult{}
 	var allResults []*types.Result
 
-	reqs := make([]*types.Request, 0, len(targets))
-	for _, target := range targets {
-		reqs = append(reqs, &types.Request{
-			Method:  "GET",
-			URL:     target,
-			Timeout: s.opts.Timeout,
-		})
+	events := make(chan ScanEvent, 100)
+	go s.ScanStream(ctx, targets, events)
 
-		reqs = append(reqs, s.buildProbes(target)...)
-	}
+	var allFindings []types.Finding
 
-	s.mu.Lock()
-	s.stats = ScanStats{
-		StartTime: time.Now(),
-		Total:     len(reqs),
-		Target:    formatTargets(targets),
-		Workers:   s.opts.Workers,
-	}
-	s.mu.Unlock()
-
-	results := make(chan *types.Result, len(reqs))
-
-	go s.client.DoBatch(ctx, reqs, results, s.opts.Workers)
-
-	findingMap := make(map[string]types.Finding)
-
-	for res := range results {
-		s.mu.Lock()
-		if res.Error != nil {
-			s.stats.Failed++
-		} else {
-			s.stats.Completed++
+	for evt := range events {
+		if evt.Result != nil {
+			allResults = append(allResults, evt.Result)
 		}
-		s.mu.Unlock()
-
-		allResults = append(allResults, res)
-
-		if res.Response != nil {
-			findings := s.analyzeResponse(ctx, res.Response)
-			res.Findings = findings
-			for _, f := range findings {
-				key := f.Name
-				if existing, ok := findingMap[key]; ok {
-					if existing.Evidence != f.Evidence {
-						existing.Evidence = existing.Evidence + " | " + f.Evidence
-					}
-					if f.Confidence > existing.Confidence {
-						existing.Confidence = f.Confidence
-					}
-					findingMap[key] = existing
-				} else {
-					findingMap[key] = f
-				}
-			}
+		if evt.Findings != nil {
+			allFindings = append(allFindings, evt.Findings...)
+		}
+		if evt.Done {
+			result.Target = evt.Stats.Target
+			result.Stats = evt.Stats
+			result.Findings = evt.Findings
 		}
 	}
 
-	allFindings := make([]types.Finding, 0, len(findingMap))
-	for _, f := range findingMap {
-		allFindings = append(allFindings, f)
-	}
-
-	s.mu.Lock()
-	s.stats.Duration = time.Since(s.stats.StartTime)
-	s.stats.Findings = len(allFindings)
-	stats := s.stats
-	s.mu.Unlock()
-
-	result.Target = formatTargets(targets)
 	result.Results = allResults
-	result.Findings = allFindings
-	result.Stats = stats
+	if result.Findings == nil {
+		result.Findings = allFindings
+	}
 
 	return result
 }
@@ -192,6 +143,111 @@ func (s *Scanner) analyzeResponse(ctx context.Context, resp *types.Response) []t
 	}
 
 	return findings
+}
+
+type ScanEvent struct {
+	Result   *types.Result
+	Findings []types.Finding
+	Stats    ScanStats
+	Done     bool
+	Error    error
+}
+
+func (s *Scanner) ScanStream(ctx context.Context, targets []string, events chan<- ScanEvent) {
+	defer close(events)
+
+	reqs := s.buildRequests(targets)
+
+	s.mu.Lock()
+	s.stats = ScanStats{
+		StartTime: time.Now(),
+		Total:     len(reqs),
+		Target:    formatTargets(targets),
+		Workers:   s.opts.Workers,
+	}
+	s.mu.Unlock()
+
+	results := make(chan *types.Result, len(reqs))
+	go s.client.DoBatch(ctx, reqs, results, s.opts.Workers)
+
+	findingMap := make(map[string]types.Finding)
+
+	for res := range results {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		s.mu.Lock()
+		if res.Error != nil {
+			s.stats.Failed++
+		} else {
+			s.stats.Completed++
+		}
+		s.mu.Unlock()
+
+		var newFindings []types.Finding
+		if res.Response != nil {
+			findings := s.analyzeResponse(ctx, res.Response)
+			res.Findings = findings
+			for _, f := range findings {
+				key := f.Name
+				if existing, ok := findingMap[key]; ok {
+					if existing.Evidence != f.Evidence {
+						existing.Evidence = existing.Evidence + " | " + f.Evidence
+					}
+					if f.Confidence > existing.Confidence {
+						existing.Confidence = f.Confidence
+					}
+					findingMap[key] = existing
+				} else {
+					findingMap[key] = f
+					newFindings = append(newFindings, f)
+				}
+			}
+		}
+
+		s.mu.Lock()
+		stats := s.stats
+		s.mu.Unlock()
+
+		events <- ScanEvent{
+			Result:   res,
+			Findings: newFindings,
+			Stats:    stats,
+		}
+	}
+
+	allFindings := make([]types.Finding, 0, len(findingMap))
+	for _, f := range findingMap {
+		allFindings = append(allFindings, f)
+	}
+
+	s.mu.Lock()
+	s.stats.Duration = time.Since(s.stats.StartTime)
+	s.stats.Findings = len(allFindings)
+	stats := s.stats
+	s.mu.Unlock()
+
+	events <- ScanEvent{
+		Done:     true,
+		Stats:    stats,
+		Findings: allFindings,
+	}
+}
+
+func (s *Scanner) buildRequests(targets []string) []*types.Request {
+	var reqs []*types.Request
+	for _, target := range targets {
+		reqs = append(reqs, &types.Request{
+			Method:  "GET",
+			URL:     target,
+			Timeout: s.opts.Timeout,
+		})
+		reqs = append(reqs, s.buildProbes(target)...)
+	}
+	return reqs
 }
 
 func (s *Scanner) Close() error {
