@@ -19,9 +19,6 @@ var (
 			Foreground(lipgloss.Color("39")).
 			MarginBottom(1)
 
-	subtitleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("243"))
-
 	boxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("39")).

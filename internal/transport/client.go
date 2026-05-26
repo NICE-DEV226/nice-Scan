@@ -12,7 +12,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
 
@@ -112,7 +111,6 @@ type Client struct {
 	opts    *clientOptions
 	http    *http.Client
 	rl      *RateLimiter
-	rlMu    sync.Mutex
 	stats   RequestStats
 	statsMu sync.Mutex
 }
@@ -459,15 +457,4 @@ func tlsVersionString(version uint16) string {
 	}
 }
 
-func hasContentType(resp *types.Response, types ...string) bool {
-	if resp == nil || resp.ContentType == "" {
-		return false
-	}
-	ct := strings.ToLower(resp.ContentType)
-	for _, t := range types {
-		if strings.Contains(ct, strings.ToLower(t)) {
-			return true
-		}
-	}
-	return false
-}
+
