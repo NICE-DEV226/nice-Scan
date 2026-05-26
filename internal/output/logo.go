@@ -8,12 +8,9 @@ import (
 )
 
 var (
-	loBorder   = lipgloss.Color("#2F3346")
-	loMark     = lipgloss.Color("#7DCFFF")
-	loAccent   = lipgloss.Color("#87C7FF")
-	loName     = lipgloss.Color("#C0CAF5")
-	loMuted    = lipgloss.Color("#565F89")
-	loSurface  = lipgloss.Color("#24283B")
+	loMark  = lipgloss.Color("#7DCFFF")
+	loName  = lipgloss.Color("#C0CAF5")
+	loMuted = lipgloss.Color("#565F89")
 )
 
 func RenderLogoCompact() string {

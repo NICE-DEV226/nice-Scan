@@ -95,10 +95,6 @@ func (m *Model) waitForScan() tea.Cmd {
 
 type scanStartedMsg struct{}
 type scanEventMsg engine.ScanEvent
-type scanDoneMsg struct {
-	stats    engine.ScanStats
-	findings []types.Finding
-}
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {

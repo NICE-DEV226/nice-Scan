@@ -14,24 +14,15 @@ import (
 )
 
 var (
-	// Surfaces
-	surfaceGraphite = lipgloss.Color("#1A1B26")
-	surfaceAlt      = lipgloss.Color("#24283B")
-	surfaceBorder   = lipgloss.Color("#2F3346")
-	surfaceHover    = lipgloss.Color("#363B54")
+	surfaceBorder = lipgloss.Color("#2F3346")
 
-	// Text
 	textPrimary = lipgloss.Color("#C0CAF5")
 	textMuted   = lipgloss.Color("#565F89")
 	textDim     = lipgloss.Color("#3B4261")
 
-	// Accents - restrained, elegant
 	accentCyan  = lipgloss.Color("#7DCFFF")
-	accentBlue  = lipgloss.Color("#87C7FF")
-	accentViolet  = lipgloss.Color("#BB9AF7")
 	accentAmber = lipgloss.Color("#FFB347")
 	accentCoral = lipgloss.Color("#F7768E")
-	accentGreen   = lipgloss.Color("#9ECE6A")
 
 	// Severity - subtle, no neon
 	severityColors = map[types.Severity]lipgloss.Color{

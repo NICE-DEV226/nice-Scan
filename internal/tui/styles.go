@@ -3,9 +3,7 @@ package tui
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	surfaceGraphite = lipgloss.Color("#1A1B26")
-	surfaceAlt      = lipgloss.Color("#24283B")
-	surfaceBorder   = lipgloss.Color("#2F3346")
+	surfaceBorder = lipgloss.Color("#2F3346")
 
 	textPrimary = lipgloss.Color("#C0CAF5")
 	textMuted   = lipgloss.Color("#565F89")
@@ -14,7 +12,6 @@ var (
 	accentCyan  = lipgloss.Color("#7DCFFF")
 	accentAmber = lipgloss.Color("#FFB347")
 	accentCoral = lipgloss.Color("#F7768E")
-	accentGreen = lipgloss.Color("#9ECE6A")
 
 	panelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -40,9 +37,6 @@ var (
 
 	progressFull = lipgloss.NewStyle().
 			Foreground(accentCyan)
-
-	progressEmpty = lipgloss.NewStyle().
-			Foreground(surfaceBorder)
 )
 
 func severityColor(severity string) lipgloss.Color {
