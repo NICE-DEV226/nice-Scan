@@ -11,6 +11,7 @@ package main
 	"github.com/nice-scan/nice_scan/internal/engine"
 	"github.com/nice-scan/nice_scan/internal/fingerprint"
 	"github.com/nice-scan/nice_scan/internal/output"
+	"github.com/nice-scan/nice_scan/internal/shell"
 	"github.com/nice-scan/nice_scan/internal/transport"
 	"github.com/nice-scan/nice_scan/internal/tui"
 	"github.com/nice-scan/nice_scan/internal/types"
@@ -59,6 +60,7 @@ func main() {
 	root.AddCommand(scanCmd())
 	root.AddCommand(techCmd())
 	root.AddCommand(tlsCmd())
+	root.AddCommand(shellCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -213,6 +215,26 @@ func tlsCmd() *cobra.Command {
 				renderer.RenderResult(result)
 			}
 
+			return nil
+		},
+	}
+}
+
+func shellCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "shell",
+		Short: "Start an interactive reconnaissance shell",
+		Long:  "Persistent interactive shell — type commands like scan, tech, tls without restarting",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			model, err := shell.NewModel(cfg)
+			if err != nil {
+				return err
+			}
+			p := tea.NewProgram(model, tea.WithAltScreen())
+			if _, err := p.Run(); err != nil {
+				return err
+			}
 			return nil
 		},
 	}
