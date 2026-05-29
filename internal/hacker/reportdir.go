@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 )
 
 type ReportDir struct {
@@ -41,7 +40,7 @@ func (rd *ReportDir) ensureDirs() {
 		filepath.Join(rd.BasePath, "crawl_auth"),
 	}
 	for _, d := range dirs {
-		os.MkdirAll(d, 0755)
+		_ = os.MkdirAll(d, 0755)
 	}
 }
 
@@ -54,7 +53,7 @@ func (rd *ReportDir) Save(subdir, name string, data []byte) string {
 	safeName = strings.ReplaceAll(safeName, "..", "_")
 
 	fullPath := filepath.Join(rd.BasePath, subdir, safeName)
-	os.WriteFile(fullPath, data, 0644)
+	_ = os.WriteFile(fullPath, data, 0644)
 	return fullPath
 }
 
@@ -67,7 +66,7 @@ func (rd *ReportDir) SaveWithPrefix(subdir, prefix, name string, data []byte) st
 	safeName = strings.ReplaceAll(safeName, "..", "_")
 
 	fullPath := filepath.Join(rd.BasePath, subdir, prefix+"_"+safeName)
-	os.WriteFile(fullPath, data, 0644)
+	_ = os.WriteFile(fullPath, data, 0644)
 	return fullPath
 }
 
@@ -79,7 +78,7 @@ func (rd *ReportDir) GenerateSummary() string {
 	var totalFiles int
 	var totalBytes int64
 
-	filepath.Walk(rd.BasePath, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(rd.BasePath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -109,6 +108,4 @@ func (rd *ReportDir) ListFiles(subdir string) []string {
 	return files
 }
 
-func generateReportFilename() string {
-	return fmt.Sprintf("reports/attack_%s.html", time.Now().Format("20060102_150405"))
-}
+

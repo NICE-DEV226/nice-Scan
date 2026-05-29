@@ -16,7 +16,6 @@ var (
 	clRed    = lipgloss.Color("#F7768E")
 	clGreen  = lipgloss.Color("#9ECE6A")
 	clYellow = lipgloss.Color("#E0AF68")
-	clPurple = lipgloss.Color("#BB9AF7")
 	clOrange = lipgloss.Color("#FF9E64")
 	clDim    = lipgloss.Color("#3B4261")
 
@@ -25,19 +24,9 @@ var (
 	styleRed    = lipgloss.NewStyle().Foreground(clRed).Bold(true)
 	styleGreen  = lipgloss.NewStyle().Foreground(clGreen)
 	styleYellow = lipgloss.NewStyle().Foreground(clYellow)
-	stylePurple = lipgloss.NewStyle().Foreground(clPurple)
-	styleOrange = lipgloss.NewStyle().Foreground(clOrange)
 	styleLabel  = lipgloss.NewStyle().Foreground(clMuted).Width(12).Align(lipgloss.Right)
 	styleValue  = lipgloss.NewStyle().Foreground(clCyan)
 	styleCyan   = lipgloss.NewStyle().Foreground(clCyan)
-
-	severitySymbol = map[Severity]string{
-		SevCritical: "!!",
-		SevHigh:     "▸",
-		SevMedium:   "›",
-		SevLow:      "·",
-		SevInfo:     "•",
-	}
 )
 
 type Brain struct {

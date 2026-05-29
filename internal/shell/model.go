@@ -188,20 +188,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMsg:
-		switch msg.Type {
-		case tea.MouseWheelUp:
-			m.scrollOffset += 2
-			m.clampScroll()
-			return m, nil
-		case tea.MouseWheelDown:
-			m.scrollOffset -= 2
-			m.clampScroll()
-			return m, nil
-		default:
-			var cmd tea.Cmd
-			m.input, cmd = m.input.Update(msg)
-			return m, cmd
+		if msg.Action == tea.MouseActionPress {
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				m.scrollOffset += 2
+				m.clampScroll()
+				return m, nil
+			case tea.MouseButtonWheelDown:
+				m.scrollOffset -= 2
+				m.clampScroll()
+				return m, nil
+			}
 		}
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
 
 	case tea.KeyMsg:
 		switch msg.String() {

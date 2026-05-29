@@ -131,9 +131,8 @@ func (a *LoginBruteAction) Execute(ctx context.Context, target string, kb *Knowl
 }
 
 type PostLoginAction struct {
-	username   string
-	password   string
-	sessionURL string
+	username string
+	password string
 }
 
 func (a *PostLoginAction) Metadata() ActionMetadata {

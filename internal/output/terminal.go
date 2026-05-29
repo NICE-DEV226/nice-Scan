@@ -325,7 +325,7 @@ func (r *TerminalRenderer) renderFinding(f types.Finding, color lipgloss.Color) 
 		version = f.Metadata["version"]
 	}
 
-	name := f.Name
+	var name string
 	if version != "" {
 		name = lipgloss.NewStyle().
 			Foreground(textPrimary).

@@ -15,8 +15,6 @@ var (
 	rxUsernameField = regexp.MustCompile(`(?i)<input[^>]*(?:name|id)["']?\s*=\s*["']?(?:user|email|login|username|log)["'][^>]*>`)
 	rxLoginAction   = regexp.MustCompile(`(?i)<form[^>]*action=["']([^"']+)["']`)
 
-	rxLoginEndpoint = regexp.MustCompile(`(?i)(login|signin|auth|authenticate|logon|account/login)(\.php|\.aspx|\.jsp)?/?$`)
-
 	rxAdminPanel = regexp.MustCompile(`(?i)(admin|dashboard|panel|backend|cpanel|administrator|wp-admin|manager)`)
 
 	rxRegisterForm = regexp.MustCompile(`(?i)<form[^>]*>.*?(?:register|signup|create-account).*?</form>`)
@@ -24,7 +22,6 @@ var (
 	rxForgotPassword = regexp.MustCompile(`(?i)(forgot|reset|recover|lost)\s*(password|pwd)`)
 
 	rxUserEnumError = regexp.MustCompile(`(?i)(user|account|email|username).{0,20}(not found|doesn't exist|invalid|does not exist|incorrect|unknown)`)
-	rxUserEnumPass  = regexp.MustCompile(`(?i)(user|account|email|username).{0,20}(found|exists|valid|correct)`)
 
 	rxRoleIndicator = regexp.MustCompile(`(?i)(role|admin|moderator|editor|manager|superuser|privilege|permission|access_level)`)
 )

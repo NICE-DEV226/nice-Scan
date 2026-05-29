@@ -102,7 +102,7 @@ func (s *OOBServer) Start(ctx context.Context) error {
 	s.running = true
 
 	go func() {
-		http.Serve(s.listener, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = http.Serve(s.listener, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
 			r.Body.Close()
 
@@ -128,7 +128,7 @@ func (s *OOBServer) Start(ctx context.Context) error {
 			s.mu.Unlock()
 
 			w.WriteHeader(200)
-			w.Write([]byte("OK"))
+			_, _ = w.Write([]byte("OK"))
 		}))
 	}()
 

@@ -42,7 +42,7 @@ func (a *CORSAnalyzer) Analyze(ctx context.Context, resp *types.Response) []type
 			Name:        "Wildcard CORS with Credentials",
 			Severity:    types.SeverityCritical,
 			Description: "CORS allows any origin (Access-Control-Allow-Origin: *) with credentials enabled — any website can read this resource on behalf of authenticated users",
-			Evidence:    fmt.Sprintf("ACAO: * | ACAC: true"),
+			Evidence:    "ACAO: * | ACAC: true",
 			Confidence:  0.95,
 			Metadata: map[string]string{
 				"aco":  aco,
