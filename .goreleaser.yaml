@@ -38,7 +38,7 @@ checksum:
   name_template: "{{.ProjectName}}_{{.Version}}_checksums.txt"
   algorithm: sha256
 
-# ── GPG sign the checksums file ──
+# ── Signing (GPG + cosign/Sigstore) ──
 signs:
   - id: checksum_sign
     cmd: gpg
@@ -53,18 +53,15 @@ signs:
     artifacts: checksum
     signature: "${artifact}.sig"
 
-# ── cosign — Sigstore signing for SLSA provenance ──
-# Requires: COSIGN_KEY and COSIGN_PASSWORD env vars
-# https://docs.sigstore.dev/cosign/overview/
-cosigns:
   - id: cosign_blob
-    artifacts: checksum
+    cmd: cosign
+    signature: "${artifact}.sigstore.json"
     args:
       - sign-blob
-      - "--output-certificate={{.Env.COSIGN_CERT_PATH}}/{{.ProjectName}}_{{.Version}}_checksums.pem"
-      - "--output-signature={{.Env.COSIGN_SIG_PATH}}/{{.ProjectName}}_{{.Version}}_checksums.sig"
+      - "--bundle=${signature}"
       - "${artifact}"
-    certificate: "${artifact}.pem"
+      - "--yes"
+    artifacts: checksum
     output: true
 
 # ── SBOM with syft (software bill of materials) ──
@@ -100,10 +97,9 @@ release:
     # 3. Verify GPG signature
     gpg --verify nice_scan_{{.Version}}_checksums.txt.sig
 
-    # 4. Verify Sigstore (cosign)
+    # 4. Verify Sigstore (cosign — keyless OIDC)
     cosign verify-blob \
-      --certificate nice_scan_{{.Version}}_checksums.pem \
-      --signature nice_scan_{{.Version}}_checksums.sig \
+      --bundle nice_scan_{{.Version}}_checksums.sigstore.json \
       nice_scan_{{.Version}}_checksums.txt
     ```
 
@@ -112,8 +108,7 @@ release:
     |------|-------------|
     | `nice_scan_{{.Version}}_checksums.txt` | SHA256 checksums for all binaries |
     | `nice_scan_{{.Version}}_checksums.txt.sig` | GPG signature of checksums |
-    | `nice_scan_{{.Version}}_checksums.pem` | Sigstore certificate |
-    | `nice_scan_{{.Version}}_checksums.sig` | Sigstore signature |
+    | `nice_scan_{{.Version}}_checksums.sigstore.json` | Cosign Sigstore bundle (keyless) |
     | `nice_scan_{{.Version}}_sbom.spdx.json` | SPDX SBOM (dependencies) |
 
     ## 🚀 Quick Start
