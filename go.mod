@@ -1,4 +1,4 @@
-module github.com/nice-scan/nice_scan
+module github.com/NICE-DEV226/nice-Scan
 
 go 1.24.2
 

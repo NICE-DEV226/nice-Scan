@@ -1,8 +1,11 @@
 version: 2
 
+project_name: nice_scan
+
 before:
   hooks:
     - go mod tidy
+    - go generate ./...
 
 builds:
   - id: nice_scan
@@ -18,20 +21,108 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X main.version={{.Version}}
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
 
 archives:
-  - format: tar.gz
+  - id: nice_scan
+    format: tar.gz
     format_overrides:
       - goos: windows
         format: zip
     name_template: "{{.ProjectName}}_{{.Version}}_{{.Os}}_{{.Arch}}"
+    files:
+      - README.md
+      - LICENSE
 
 checksum:
   name_template: "{{.ProjectName}}_{{.Version}}_checksums.txt"
+  algorithm: sha256
 
-snapshot:
-  version_template: "{{.Version}}-next"
+# ── GPG sign the checksums file ──
+signs:
+  - id: checksum_sign
+    cmd: gpg
+    args:
+      - --batch
+      - --local-user
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - --output
+      - "${signature}"
+      - --detach-sign
+      - "${artifact}"
+    artifacts: checksum
+    signature: "${artifact}.sig"
+
+# ── cosign — Sigstore signing for SLSA provenance ──
+# Requires: COSIGN_KEY and COSIGN_PASSWORD env vars
+# https://docs.sigstore.dev/cosign/overview/
+cosigns:
+  - id: cosign_blob
+    artifacts: checksum
+    args:
+      - sign-blob
+      - "--output-certificate={{.Env.COSIGN_CERT_PATH}}/{{.ProjectName}}_{{.Version}}_checksums.pem"
+      - "--output-signature={{.Env.COSIGN_SIG_PATH}}/{{.ProjectName}}_{{.Version}}_checksums.sig"
+      - "${artifact}"
+    certificate: "${artifact}.pem"
+    output: true
+
+# ── SBOM with syft (software bill of materials) ──
+sboms:
+  - id: source_sbom
+    artifacts: source
+    documents:
+      - "{{.ProjectName}}_{{.Version}}_sbom.spdx.json"
+    cmd: syft
+    args:
+      - "$(pwd)"
+      - --output
+      - spdx-json
+      - --file
+      - "${document}"
+
+# ── GitHub release ──
+release:
+  prerelease: auto
+  header: |
+    # NICE_SCAN {{.Version}}
+
+    **Fast. Precise. Intelligent.** — Modern Security Reconnaissance Engine
+
+    ## ✅ Verification
+    ```bash
+    # 1. Download checksums
+    gh release download {{.Tag}} --pattern "checksums*" -R NICE-DEV226/nice-Scan
+
+    # 2. Verify SHA256
+    sha256sum --check nice_scan_{{.Version}}_checksums.txt
+
+    # 3. Verify GPG signature
+    gpg --verify nice_scan_{{.Version}}_checksums.txt.sig
+
+    # 4. Verify Sigstore (cosign)
+    cosign verify-blob \
+      --certificate nice_scan_{{.Version}}_checksums.pem \
+      --signature nice_scan_{{.Version}}_checksums.sig \
+      nice_scan_{{.Version}}_checksums.txt
+    ```
+
+    ## 📦 Assets
+    | File | Description |
+    |------|-------------|
+    | `nice_scan_{{.Version}}_checksums.txt` | SHA256 checksums for all binaries |
+    | `nice_scan_{{.Version}}_checksums.txt.sig` | GPG signature of checksums |
+    | `nice_scan_{{.Version}}_checksums.pem` | Sigstore certificate |
+    | `nice_scan_{{.Version}}_checksums.sig` | Sigstore signature |
+    | `nice_scan_{{.Version}}_sbom.spdx.json` | SPDX SBOM (dependencies) |
+
+    ## 🚀 Quick Start
+    ```bash
+    nice_scan hack example.com -R report.html
+    ```
+
+milestones:
+  - close: true
 
 changelog:
   sort: asc
@@ -40,6 +131,4 @@ changelog:
       - "^docs:"
       - "^ci:"
       - "^test:"
-
-release:
-  prerelease: auto
+      - "^chore"

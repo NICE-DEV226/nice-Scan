@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/nice-scan/nice_scan/internal/types"
+	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
 
 var (

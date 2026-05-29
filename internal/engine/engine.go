@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nice-scan/nice_scan/internal/transport"
-	"github.com/nice-scan/nice_scan/internal/types"
+	"github.com/NICE-DEV226/nice-Scan/internal/transport"
+	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
 
 type Analyzer interface {

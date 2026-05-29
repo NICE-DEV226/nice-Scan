@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/nice-scan/nice_scan/internal/types"
+	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
 
 var rxNumbers = regexp.MustCompile(`[\d]+\.[\d]+[\w.-]*`)

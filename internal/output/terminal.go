@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nice-scan/nice_scan/internal/engine"
-	"github.com/nice-scan/nice_scan/internal/transport"
-	"github.com/nice-scan/nice_scan/internal/types"
+	"github.com/NICE-DEV226/nice-Scan/internal/engine"
+	"github.com/NICE-DEV226/nice-Scan/internal/transport"
+	"github.com/NICE-DEV226/nice-Scan/internal/types"
 
 	"github.com/charmbracelet/lipgloss"
 )

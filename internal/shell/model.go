@@ -7,11 +7,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nice-scan/nice_scan/internal/engine"
-	"github.com/nice-scan/nice_scan/internal/fingerprint"
-	"github.com/nice-scan/nice_scan/internal/output"
-	"github.com/nice-scan/nice_scan/internal/transport"
-	"github.com/nice-scan/nice_scan/internal/types"
+	"github.com/NICE-DEV226/nice-Scan/internal/engine"
+	"github.com/NICE-DEV226/nice-Scan/internal/exploit"
+	"github.com/NICE-DEV226/nice-Scan/internal/fingerprint"
+	"github.com/NICE-DEV226/nice-Scan/internal/output"
+	"github.com/NICE-DEV226/nice-Scan/internal/transport"
+	"github.com/NICE-DEV226/nice-Scan/internal/types"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -63,13 +64,15 @@ var (
 		desc string
 		args string
 	}{
-		{"scan", "Full security scan", "<url>"},
-		{"tech", "Technology detection", "<url>"},
-		{"tls", "TLS configuration analysis", "<url>"},
-		{"clear", "Clear output", ""},
-		{"list", "Show session targets and findings", ""},
-		{"help", "Show available commands", ""},
-		{"exit", "Exit the shell", ""},
+		{"scan",    "Full security scan (passive + active)",        "<url>"},
+		{"audit",   "Deep audit with ALL checks + verbose",        "<url>"},
+		{"exploit", "Active exploitation (all modules)",           "<url>"},
+		{"tech",    "Technology detection (165 signatures)",        "<url>"},
+		{"tls",     "TLS/SSL configuration analysis",              "<url>"},
+		{"clear",   "Clear output",                                 ""},
+		{"list",    "Show session targets and findings",           ""},
+		{"help",    "Show available commands",                     ""},
+		{"exit",    "Exit the shell",                              ""},
 	}
 )
 
@@ -139,11 +142,32 @@ func NewModel(cfg *types.Config) (*Model, error) {
 		transport.WithMaxRedirects(cfg.MaxRedirects),
 	)
 
-	return &Model{
-		input:  ti,
-		cfg:    cfg,
-		client: client,
-	}, nil
+	welcome := []string{
+		"",
+		lipgloss.NewStyle().Foreground(clName).Bold(true).Padding(0, 2).Render("  Welcome to NICE_SCAN Interactive Shell"),
+		"",
+		lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render("  Available commands:"),
+		lipgloss.NewStyle().Foreground(clCyan).Padding(0, 4).Render("  scan <url>   — Full reconnaissance scan (12+ modules)"),
+		lipgloss.NewStyle().Foreground(clCyan).Padding(0, 4).Render("  audit <url>  — Deep audit with verbose output"),
+		lipgloss.NewStyle().Foreground(clCyan).Padding(0, 4).Render("  tech <url>   — Technology detection (165 signatures)"),
+		lipgloss.NewStyle().Foreground(clCyan).Padding(0, 4).Render("  tls <url>    — TLS/SSL configuration analysis"),
+		lipgloss.NewStyle().Foreground(clCyan).Padding(0, 4).Render("  help         — Show detailed help"),
+		lipgloss.NewStyle().Foreground(clCyan).Padding(0, 4).Render("  clear        — Clear the output"),
+		lipgloss.NewStyle().Foreground(clCyan).Padding(0, 4).Render("  list         — Show session summary"),
+		lipgloss.NewStyle().Foreground(clCyan).Padding(0, 4).Render("  exit         — Quit the shell"),
+		"",
+		lipgloss.NewStyle().Foreground(clDim).Padding(0, 2).Render("  Scroll: mouse wheel · PgUp/PgDown · Shift+↑/↓  |  Tab: autocomplete"),
+		"",
+	}
+	m := &Model{
+		input:      ti,
+		cfg:        cfg,
+		client:     client,
+		output:     welcome,
+		scrollOffset: 0,
+	}
+
+	return m, nil
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -166,15 +190,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		switch msg.Type {
 		case tea.MouseWheelUp:
-			m.scrollOffset += 3
+			m.scrollOffset += 2
 			m.clampScroll()
 			return m, nil
 		case tea.MouseWheelDown:
-			m.scrollOffset -= 3
+			m.scrollOffset -= 2
 			m.clampScroll()
 			return m, nil
+		default:
+			var cmd tea.Cmd
+			m.input, cmd = m.input.Update(msg)
+			return m, cmd
 		}
-		return m, nil
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -229,7 +256,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "list", "ls":
 				m.output = append(m.output, m.listSession()...)
 				return m, nil
-			case "scan", "tech", "tls":
+			case "scan", "audit", "exploit", "tech", "tls":
 				if len(args) == 0 {
 					m.output = append(m.output, lipgloss.NewStyle().Foreground(clCoral).Render("  Missing URL. Usage: "+cmd+" <url>"))
 					return m, nil
@@ -356,6 +383,92 @@ func (m *Model) exec(cmd string, target string) tea.Cmd {
 			findings = result.Findings
 			stats = result.Stats
 			lines = m.renderFindings(result.Findings, result.Stats)
+
+		case "audit":
+			m.cfg.Verbose = true
+			scanner := engine.NewScanner(m.cfg, m.client)
+			scanner.RegisterAnalyzers(
+				fingerprint.New(),
+				engine.NewHeaderAnalyzer(),
+				engine.NewTLSAnalyzer(),
+				engine.NewExposureAnalyzer(),
+				engine.NewSQLiAnalyzer(),
+				engine.NewXSSAnalyzer(),
+				engine.NewCORSAnalyzer(),
+				engine.NewHTTPMethodsAnalyzer(),
+				engine.NewTokenExtractor(),
+				engine.NewAuthAnalyzer(),
+				engine.NewPrivilegeEscalationAnalyzer(),
+				engine.NewDataExtractionAnalyzer(),
+			)
+			result := scanner.Scan(ctx, []string{target})
+			findings = result.Findings
+			stats = result.Stats
+			lines = m.renderFindings(result.Findings, result.Stats)
+
+		case "exploit":
+			opts := exploit.Options{
+				Target:  target,
+				Verbose: m.cfg.Verbose,
+			}
+			exp := exploit.New(m.client, opts)
+
+			var expLines []string
+			expLines = append(expLines, "")
+
+			expLines = append(expLines, lipgloss.NewStyle().Foreground(clCyan).Bold(true).Padding(0, 2).Render("  🔑 Login Bruteforce"))
+			loginResults := exp.BruteforceLogin(ctx, target, exploit.CommonCredentials)
+			for _, r := range loginResults[:min(len(loginResults), 5)] {
+				cl := clMuted
+				sym := "✗"
+				if r.Success {
+					cl = clCoral
+					sym = "✓"
+				}
+				expLines = append(expLines, lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
+					fmt.Sprintf("  %s %s:%s → %d", sym, r.Username, r.Password, r.StatusCode),
+				))
+			}
+
+			expLines = append(expLines, "")
+			expLines = append(expLines, lipgloss.NewStyle().Foreground(clCyan).Bold(true).Padding(0, 2).Render("  ⬆️  Role / Privilege Escalation"))
+			roleResults := exp.RoleTampering(ctx, target)
+			found := false
+			for _, r := range roleResults {
+				if !r.Success {
+					continue
+				}
+				found = true
+				expLines = append(expLines, lipgloss.NewStyle().Foreground(clCoral).Padding(0, 4).Render(
+					fmt.Sprintf("  ✓ %s=%s %s → %d", r.Parameter, r.Value, r.Method, r.StatusCode),
+				))
+				if len(expLines) > 20 {
+					break
+				}
+			}
+			if !found {
+				expLines = append(expLines, lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render("  — No privilege escalation found"))
+			}
+
+			expLines = append(expLines, "")
+			expLines = append(expLines, lipgloss.NewStyle().Foreground(clCyan).Bold(true).Padding(0, 2).Render("  🔢 IDOR Enumeration"))
+			idorResults := exp.IDOREnumeration(ctx, target, "", 1, 5)
+			for _, r := range idorResults[:min(len(idorResults), 10)] {
+				cl := clMuted
+				if r.BodySize > 500 {
+					cl = clCoral
+				}
+				expLines = append(expLines, lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
+					fmt.Sprintf("  %s=%d → %d (%d bytes)", r.ParamType, r.ID, r.StatusCode, r.BodySize),
+				))
+			}
+
+			expLines = append(expLines, "")
+			expLines = append(expLines, lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render(
+				fmt.Sprintf("  Exploit completed — %d total requests", len(loginResults)+len(roleResults)+len(idorResults)),
+			))
+
+			lines = expLines
 		}
 
 		m.session.add(target, findings, stats.Completed, stats.Duration)

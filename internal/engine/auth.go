@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/nice-scan/nice_scan/internal/types"
+	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
 
 var (
@@ -143,6 +143,8 @@ func (a *AuthAnalyzer) Analyze(ctx context.Context, resp *types.Response) []type
 		})
 	}
 
+
+	
 	if rxAdminPanel.MatchString(url) || rxAdminPanel.MatchString(body) {
 		findings = append(findings, types.Finding{
 			Type:        types.FindingMisconfig,

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nice-scan/nice_scan/internal/types"
+	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
 
 type Report struct {

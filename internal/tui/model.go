@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nice-scan/nice_scan/internal/engine"
-	"github.com/nice-scan/nice_scan/internal/output"
-	"github.com/nice-scan/nice_scan/internal/types"
+	"github.com/NICE-DEV226/nice-Scan/internal/engine"
+	"github.com/NICE-DEV226/nice-Scan/internal/output"
+	"github.com/NICE-DEV226/nice-Scan/internal/types"
 
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"

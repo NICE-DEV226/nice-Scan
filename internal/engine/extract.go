@@ -6,13 +6,13 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/nice-scan/nice_scan/internal/types"
+	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
 
 var (
 	rxEmail = regexp.MustCompile(`[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`)
 
-	rxPhone = regexp.MustCompile(`(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}`)
+	rxPhone = regexp.MustCompile(`(?:\+\d{1,3}[-.\s])?\(?\d{3}\)?[-.\s]\d{3}[-.\s]?\d{4}`)
 
 	rxIP = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
 
