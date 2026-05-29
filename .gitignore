@@ -48,3 +48,7 @@ profile.out
 .env
 .env.local
 .env.production
+
+# Secrets (signing keys)
+gpg-private.key
+cosign.key
