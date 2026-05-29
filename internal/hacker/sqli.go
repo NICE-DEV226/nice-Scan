@@ -123,7 +123,7 @@ func (a *SQLiAction) Execute(ctx context.Context, target string, kb *Knowledge, 
 
 			if strings.Contains(p.name, "Time sleep") {
 				start := time.Now()
-				client.Do(ctx, &types.Request{Method: "GET", URL: payloadURL})
+				_, _ = client.Do(ctx, &types.Request{Method: "GET", URL: payloadURL})
 				if time.Since(start) >= 4*time.Second {
 					findings = append(findings, Finding{
 						Type:        "sqli_time",

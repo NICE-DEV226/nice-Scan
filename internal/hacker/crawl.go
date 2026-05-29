@@ -300,9 +300,7 @@ func resolveURL(href, baseURL string) string {
 	if strings.Contains(result, "#") {
 		result = result[:strings.IndexByte(result, '#')]
 	}
-	if strings.HasSuffix(result, "?") {
-		result = result[:len(result)-1]
-	}
+	result = strings.TrimSuffix(result, "?")
 	return result
 }
 

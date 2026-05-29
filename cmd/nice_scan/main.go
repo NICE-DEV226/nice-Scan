@@ -423,7 +423,7 @@ func exploitCmd() *cobra.Command {
 
 			if runIdor {
 				var startID, endID int
-				fmt.Sscanf(idorRange, "%d-%d", &startID, &endID)
+				_, _ = fmt.Sscanf(idorRange, "%d-%d", &startID, &endID)
 				if startID <= 0 || endID <= 0 {
 					startID, endID = 1, 10
 				}
@@ -746,13 +746,6 @@ func truncateStr(s string, n int) string {
 		return s
 	}
 	return s[:n-1] + "…"
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func abs(x int) int {

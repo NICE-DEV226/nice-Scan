@@ -119,12 +119,3 @@ func (a *SQLiAnalyzer) Analyze(ctx context.Context, resp *types.Response) []type
 
 	return findings
 }
-
-func hasAnyError(body string) bool {
-	for _, re := range sqliErrorIndicators {
-		if re.MatchString(body) {
-			return true
-		}
-	}
-	return false
-}

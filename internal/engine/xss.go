@@ -10,8 +10,6 @@ import (
 )
 
 var (
-	rxXSSReflected = regexp.MustCompile(`(?i)<script>alert\(1\)<\/script>`)
-
 	xssPatterns = []struct {
 		name    string
 		pattern *regexp.Regexp

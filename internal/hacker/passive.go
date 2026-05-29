@@ -49,11 +49,9 @@ func (a *PassiveReconAction) Execute(ctx context.Context, target string, kb *Kno
 
 	type crtResult struct {
 		subs []string
-		err  error
 	}
 	type wbResult struct {
 		urls []string
-		err  error
 	}
 
 	crtCh := make(chan crtResult, 1)
@@ -209,9 +207,7 @@ func queryCRTSh(ctx context.Context, client *transport.Client, domain string) []
 			if name == "" || name == domain {
 				continue
 			}
-			if strings.HasPrefix(name, "*.") {
-				name = name[2:]
-			}
+			name = strings.TrimPrefix(name, "*.")
 			if !strings.HasSuffix(name, "."+domain) && name != domain {
 				if !strings.HasSuffix(name, "."+tld) {
 					continue

@@ -14,8 +14,6 @@ var (
 
 	rxPhone = regexp.MustCompile(`(?:\+\d{1,3}[-.\s])?\(?\d{3}\)?[-.\s]\d{3}[-.\s]?\d{4}`)
 
-	rxIP = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
-
 	rxSSN = regexp.MustCompile(`\b\d{3}-\d{2}-\d{4}\b`)
 
 	rxCreditCard = regexp.MustCompile(`\b(?:\d{4}[-\s]?){3}\d{4}\b`)

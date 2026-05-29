@@ -18,7 +18,6 @@ var (
 	rxAPIToken    = regexp.MustCompile(`(?i)api[_\-]key|api[_\-]token|app[_\-]token["']?\s*[:=]\s*["']([A-Za-z0-9\-_.@]+)["']`)
 	rxSecret      = regexp.MustCompile(`(?i)secret["']?\s*[:=]\s*["']([A-Za-z0-9\-_.@!]+)["']`)
 	rxPassword    = regexp.MustCompile(`(?i)password["']?\s*[:=]\s*["']([^"']{6,})["']`)
-	rxSession     = regexp.MustCompile(`(?i)session["']?\s*[:=]\s*["']([A-Za-z0-9\-_.%]+)["']`)
 	rxAuth        = regexp.MustCompile(`(?i)authorization["']?\s*[:=]\s*["']([^"']+)["']`)
 
 	sessionCookies = []string{
@@ -183,8 +182,8 @@ func (t *TokenExtractor) analyzeJWT(raw string) types.Finding {
 	var cls jwtClaims
 	hdrStr := decodeBase64URL(parts[0])
 	clsStr := decodeBase64URL(parts[1])
-	json.Unmarshal([]byte(hdrStr), &hdr)
-	json.Unmarshal([]byte(clsStr), &cls)
+	_ = json.Unmarshal([]byte(hdrStr), &hdr)
+	_ = json.Unmarshal([]byte(clsStr), &cls)
 
 	var details []string
 	details = append(details, fmt.Sprintf("Alg: %s", hdr.Alg))

@@ -11,7 +11,6 @@ import (
 
 var (
 	rxIDOR       = regexp.MustCompile(`(?i)(id|user_id|account_id|uid|pid|order_id|profile_id|item_id)=(\d+)`)
-	rxIDORUUID   = regexp.MustCompile(`(?i)(id|user_id|uid|token)=([a-f0-9\-]{32,})`)
 	rxRoleMod    = regexp.MustCompile(`(?i)(role|user_type|account_type|access|level|priv|permission)=(\w+)`)
 	rxStatusMod  = regexp.MustCompile(`(?i)(status|state|active|enabled|verified)=(0|1|true|false|yes|no)`)
 
