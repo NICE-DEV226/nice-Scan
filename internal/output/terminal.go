@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nice-scan/nice_scan/internal/engine"
-	"github.com/nice-scan/nice_scan/internal/transport"
-	"github.com/nice-scan/nice_scan/internal/types"
+	"github.com/NICE-DEV226/nice-Scan/internal/engine"
+	"github.com/NICE-DEV226/nice-Scan/internal/transport"
+	"github.com/NICE-DEV226/nice-Scan/internal/types"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -128,10 +128,48 @@ func (r *TerminalRenderer) RenderResult(res *engine.ScanResult) {
 	r.renderDashboard(res.Stats)
 	fmt.Fprintln(os.Stdout)
 
+	r.renderCheckGrid(res)
+	fmt.Fprintln(os.Stdout)
+
 	r.renderFindingsOverview(res.Findings)
 	fmt.Fprintln(os.Stdout)
 
 	r.renderEmptyState(res.Findings)
+}
+
+func (r *TerminalRenderer) renderCheckGrid(res *engine.ScanResult) {
+	if len(res.AnalyzerNames) == 0 {
+		return
+	}
+
+	colCount := 2
+	perCol := (len(res.AnalyzerNames) + colCount - 1) / colCount
+
+	var rows []string
+	for row := 0; row < perCol; row++ {
+		var cells []string
+		for col := 0; col < colCount; col++ {
+			idx := row + col*perCol
+			if idx >= len(res.AnalyzerNames) {
+				break
+			}
+			name := res.AnalyzerNames[idx]
+			cell := lipgloss.NewStyle().Foreground(textPrimary).Width(20).Render(name) +
+				lipgloss.NewStyle().Foreground(textMuted).Render("●")
+			cells = append(cells, cell)
+		}
+		rows = append(rows, strings.Join(cells, "  "))
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left, rows...)
+	panel := r.styles.panel.Render(
+		lipgloss.JoinVertical(lipgloss.Left,
+			lipgloss.NewStyle().Foreground(textPrimary).Bold(true).Padding(0, 2).Render("Analysis Modules"),
+			"",
+			content,
+		),
+	)
+	fmt.Fprintln(os.Stdout, panel)
 }
 
 func (r *TerminalRenderer) RenderTransportStats(s transport.RequestStats) {
@@ -282,10 +320,32 @@ func (r *TerminalRenderer) renderSeverityGroup(sev types.Severity, findings []ty
 }
 
 func (r *TerminalRenderer) renderFinding(f types.Finding, color lipgloss.Color) {
-	name := lipgloss.NewStyle().
-		Foreground(textPrimary).
-		Padding(0, 0, 0, 4).
-		Render(f.Name)
+	var version string
+	if f.Metadata != nil {
+		version = f.Metadata["version"]
+	}
+
+	name := f.Name
+	if version != "" {
+		name = lipgloss.NewStyle().
+			Foreground(textPrimary).
+			Padding(0, 0, 0, 4).
+			Render(f.Name)
+
+		ver := lipgloss.NewStyle().
+			Foreground(accentCyan).
+			Padding(0, 0, 0, 4).
+			Render(version)
+
+		fmt.Fprintln(os.Stdout, name)
+		fmt.Fprintln(os.Stdout, ver)
+	} else {
+		name = lipgloss.NewStyle().
+			Foreground(textPrimary).
+			Padding(0, 0, 0, 4).
+			Render(f.Name)
+		fmt.Fprintln(os.Stdout, name)
+	}
 
 	var desc string
 	if f.Evidence != "" {
@@ -300,7 +360,6 @@ func (r *TerminalRenderer) renderFinding(f types.Finding, color lipgloss.Color) 
 		Padding(0, 0, 0, 4).
 		Render(fmt.Sprintf("%.0f%% confidence", f.Confidence*100))
 
-	fmt.Fprintln(os.Stdout, name)
 	if desc != "" {
 		fmt.Fprintln(os.Stdout, desc)
 	}

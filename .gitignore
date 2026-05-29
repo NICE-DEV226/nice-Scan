@@ -41,9 +41,14 @@ profile.out
 /output/
 /reports/
 *.html
+*.html
 *.sarif
 
 # Env
 .env
 .env.local
 .env.production
+
+# Secrets (signing keys)
+gpg-private.key
+cosign.key

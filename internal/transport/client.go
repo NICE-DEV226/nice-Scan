@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nice-scan/nice_scan/internal/types"
+	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
 
 const (
@@ -327,6 +327,14 @@ func (c *Client) execute(ctx context.Context, req *types.Request) (*types.Respon
 	resp.BodySize = int64(len(body))
 
 	return resp, nil
+}
+
+func (c *Client) Get(ctx context.Context, url string, headers map[string]string) (*types.Response, error) {
+	return c.Do(ctx, &types.Request{
+		Method:  "GET",
+		URL:     url,
+		Headers: headers,
+	})
 }
 
 func (c *Client) DoBatch(ctx context.Context, reqs []*types.Request, results chan<- *types.Result, workers int) {

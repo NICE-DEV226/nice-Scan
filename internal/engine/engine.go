@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nice-scan/nice_scan/internal/transport"
-	"github.com/nice-scan/nice_scan/internal/types"
+	"github.com/NICE-DEV226/nice-Scan/internal/transport"
+	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
 
 type Analyzer interface {
@@ -36,11 +36,12 @@ type ScanStats struct {
 }
 
 type ScanResult struct {
-	Target   string
-	Results  []*types.Result
-	Findings []types.Finding
-	Stats    ScanStats
-	Error    error
+	Target        string
+	Results       []*types.Result
+	Findings      []types.Finding
+	Stats         ScanStats
+	Error         error
+	AnalyzerNames []string
 }
 
 func NewScanner(cfg *types.Config, client *transport.Client) *Scanner {
@@ -86,6 +87,11 @@ func (s *Scanner) Scan(ctx context.Context, targets []string) *ScanResult {
 		result.Findings = allFindings
 	}
 
+	result.AnalyzerNames = make([]string, len(s.analyzers))
+	for i, a := range s.analyzers {
+		result.AnalyzerNames[i] = a.Name()
+	}
+
 	return result
 }
 
@@ -94,22 +100,78 @@ func (s *Scanner) buildProbes(target string) []*types.Request {
 		return nil
 	}
 
-	probes := []string{
+	pathProbes := []string{
 		"/robots.txt",
 		"/sitemap.xml",
 		"/.env",
 		"/.git/config",
 		"/admin",
+		"/admin/login",
+		"/administrator",
+		"/login",
+		"/wp-admin",
+		"/wp-login.php",
 		"/api",
+		"/api/v1",
+		"/api/v2",
+		"/graphql",
+		"/.well-known/security.txt",
+		"/config.json",
+		"/backup",
+		"/phpinfo.php",
+		"/info.php",
+		"/debug",
+		"/actuator/health",
+		"/actuator/env",
+		"/actuator/info",
+		"/swagger-ui",
+		"/api-docs",
+		"/register",
+		"/signup",
+		"/forgot-password",
+		"/reset-password",
 	}
 
 	var reqs []*types.Request
 	baseURL := target
 
-	for _, path := range probes {
+	for _, path := range pathProbes {
 		reqs = append(reqs, &types.Request{
 			Method:  "GET",
 			URL:     baseURL + path,
+			Timeout: s.opts.Timeout,
+		})
+	}
+
+	// CORS probes
+	reqs = append(reqs, &types.Request{
+		Method:  "GET",
+		URL:     baseURL + "/",
+		Headers: map[string]string{"Origin": "https://evil.com"},
+		Timeout: s.opts.Timeout,
+	})
+
+	// HTTP Methods probe
+	reqs = append(reqs, &types.Request{
+		Method:  "OPTIONS",
+		URL:     baseURL + "/",
+		Timeout: s.opts.Timeout,
+	})
+
+	// SQLi probes — common parameter names
+	sqliParams := []string{"id", "q", "search", "page", "name", "user", "cat", "prod", "order", "pid"}
+	xssPayload := "<script>alert(1)</script>"
+	sqliPayload := "1'"
+
+	for _, p := range sqliParams {
+		reqs = append(reqs, &types.Request{
+			Method:  "GET",
+			URL:     baseURL + "/?" + p + "=" + sqliPayload,
+			Timeout: s.opts.Timeout,
+		})
+		reqs = append(reqs, &types.Request{
+			Method:  "GET",
+			URL:     baseURL + "/?" + p + "=" + xssPayload,
 			Timeout: s.opts.Timeout,
 		})
 	}
