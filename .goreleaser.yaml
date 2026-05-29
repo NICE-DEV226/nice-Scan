@@ -25,14 +25,13 @@ builds:
 
 archives:
   - id: nice_scan
-    format: tar.gz
+    formats: [tar.gz]
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
     name_template: "{{.ProjectName}}_{{.Version}}_{{.Os}}_{{.Arch}}"
     files:
       - README.md
-      - LICENSE
 
 checksum:
   name_template: "{{.ProjectName}}_{{.Version}}_checksums.txt"
