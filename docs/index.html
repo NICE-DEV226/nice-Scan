@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="NICE_SCAN — Fast. Precise. Intelligent. Modern security reconnaissance engine with autonomous decision chaining.">
+  <meta name="theme-color" content="#0f1117">
+  <title>NICE_SCAN — Security Reconnaissance Engine</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>🔍</text></svg>">
+</head>
+<body>
+
+  <nav class="navbar">
+    <div class="nav-inner">
+      <a href="#" class="nav-logo">
+        <span class="logo-bracket">[</span>
+        <span class="logo-name">NICE_SCAN</span>
+        <span class="logo-bracket">]</span>
+      </a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#install">Install</a>
+        <a href="#usage">Usage</a>
+        <a href="#trust">Trust</a>
+        <a href="https://github.com/NICE-DEV226/nice-Scan" class="nav-gh" target="_blank" rel="noopener">
+          <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          GitHub
+        </a>
+      </div>
+      <button class="nav-toggle" aria-label="Menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <div class="hero-bg">
+      <div class="hero-grid"></div>
+      <div class="hero-glow"></div>
+    </div>
+    <div class="hero-content">
+      <div class="hero-badge">v0.1.0 — Public Release</div>
+      <h1 class="hero-title">
+        <span class="hl-cyan">Fast.</span>
+        <span class="hl-purple">Precise.</span>
+        <span class="hl-green">Intelligent.</span>
+      </h1>
+      <p class="hero-sub">Autonomous security reconnaissance engine with <strong>decision chaining</strong> — SQLi → users, LFI → files, CMD → shells, S3 → buckets, Upload → RCE</p>
+      <div class="hero-actions">
+        <a href="#install" class="btn btn-primary">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Install Now
+        </a>
+        <a href="#usage" class="btn btn-secondary">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></polyline></svg>
+          Quick Start
+        </a>
+        <a href="https://github.com/NICE-DEV226/nice-Scan/releases" class="btn btn-ghost" target="_blank" rel="noopener">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+          Downloads
+        </a>
+      </div>
+      <div class="hero-terminal">
+        <div class="term-bar">
+          <span class="term-dot red"></span>
+          <span class="term-dot yellow"></span>
+          <span class="term-dot green"></span>
+          <span class="term-title">terminal — nice_scan hack example.com -R report.html</span>
+        </div>
+        <div class="term-body">
+          <div class="term-line"><span class="t-cyan">[0s]</span> <span class="t-gray">▸</span> Passive Reconnaissance <span class="t-green">OK</span> <span class="t-dim">(3 endpoints)</span></div>
+          <div class="term-line"><span class="t-cyan">[2s]</span> <span class="t-gray">▸</span> Crawl Endpoints <span class="t-green">OK</span> <span class="t-dim">(47 paths)</span></div>
+          <div class="term-line"><span class="t-cyan">[4s]</span> <span class="t-yellow">◈</span> <span class="t-purple">SQL Injection</span> <span class="t-red">!!</span> <span class="t-orange">CRITICAL</span> <span class="t-dim">— login.php</span></div>
+          <div class="term-line term-spawn"><span class="t-cyan">[5s]</span> <span class="t-dim">└</span> <span class="t-green">SQLi Data Extract</span> <span class="t-green">OK</span> <span class="t-dim">(142 users dumped)</span></div>
+          <div class="term-line"><span class="t-cyan">[7s]</span> <span class="t-yellow">◈</span> <span class="t-purple">LFI</span> <span class="t-red">!!</span> <span class="t-orange">CRITICAL</span> <span class="t-dim">— /etc/passwd</span></div>
+          <div class="term-line term-spawn"><span class="t-cyan">[8s]</span> <span class="t-dim">└</span> <span class="t-green">LFI File Read</span> <span class="t-green">OK</span> <span class="t-dim">(12 files extracted)</span></div>
+          <div class="term-line"><span class="t-cyan">[10s]</span> <span class="t-gray">▸</span> Risk Score <span class="t-bold">10.0 / 10</span> <span class="t-dim">— report.html saved</span></div>
+          <div class="term-cursor"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features" class="section">
+    <div class="section-header">
+      <span class="section-tag">Features</span>
+      <h2>Why NICE_SCAN?</h2>
+      <p>Not just another scanner — an autonomous security agent that chains attacks, extracts real data, and generates professional reports.</p>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="fc-icon fc-brain">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1.27A7.03 7.03 0 0 1 17 22h-4a2 2 0 0 1-2-2c0-.74.4-1.39 1-1.73V17h-1a7 7 0 0 1-7-7H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h1.27A7.03 7.03 0 0 1 7 2h5z"/></svg>
+        </div>
+        <h3>Decision Engine</h3>
+        <p>Forward-chaining AI scans for vulnerabilities and automatically spawns exploit modules — SQLi dumps user tables, LFI reads server files, CMD injection opens shells.</p>
+      </div>
+      <div class="feature-card">
+        <div class="fc-icon fc-chain">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        </div>
+        <h3>Attack Chaining</h3>
+        <p>10 chain patterns — CORS+XSS, JWT→Admin, Secrets→Cloud, Upload→RCE. Each finding automatically triggers deeper exploitation across interconnected vectors.</p>
+      </div>
+      <div class="feature-card">
+        <div class="fc-icon fc-data">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+        </div>
+        <h3>Real Data Extraction</h3>
+        <p>Goes beyond detection — extracts SQL databases, LFI files, S3 bucket contents, deploys web shells, and dumps everything to <code>reports/</code> organized by target.</p>
+      </div>
+      <div class="feature-card">
+        <div class="fc-icon fc-report">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        </div>
+        <h3>HTML Attack Reports</h3>
+        <p>Professional dark-theme reports with risk scoring, findings timeline, capabilities graph, extracted data summary, and credential inventory. Shareable with <code>-R report.html</code>.</p>
+      </div>
+      <div class="feature-card">
+        <div class="fc-icon fc-shield">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <h3>Trust Verification</h3>
+        <p>All releases signed with GPG + Sigstore/cosign. SHA256 checksums verified. Supply-chain security with SLSA provenance and SPDX SBOM included every release.</p>
+      </div>
+      <div class="feature-card">
+        <div class="fc-icon fc-cmd">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></polyline></svg>
+        </div>
+        <h3>14 Attack Modules</h3>
+        <p>Passive recon, crawl, fuzz, JWT forge, login brute, XSS, SQLi, GraphQL, S3 enum, LFI, CMD injection, upload, OOB server, port scan — all with auto-spawning chains.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section-stats">
+    <div class="stats-grid">
+      <div class="stat-item">
+        <span class="stat-num" data-target="6">0</span>
+        <span class="stat-label">Exploit Modules</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-num" data-target="10">0</span>
+        <span class="stat-label">Chain Patterns</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-num" data-target="14">0</span>
+        <span class="stat-label">Attack Actions</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-num" data-target="6">0</span>
+        <span class="stat-label">Platforms</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="install" class="section section-alt">
+    <div class="section-header">
+      <span class="section-tag">Installation</span>
+      <h2>Get NICE_SCAN</h2>
+      <p>Four ways to install, all with cryptographic verification.</p>
+    </div>
+    <div class="install-grid">
+      <div class="install-card active" data-method="scoop">
+        <div class="ic-icon">🍺</div>
+        <h3>Scoop</h3>
+        <p class="ic-desc">Windows package manager</p>
+      </div>
+      <div class="install-card" data-method="winget">
+        <div class="ic-icon">📦</div>
+        <h3>Winget</h3>
+        <p class="ic-desc">Windows native package manager</p>
+      </div>
+      <div class="install-card" data-method="go">
+        <div class="ic-icon">⚡</div>
+        <h3>Go Install</h3>
+        <p class="ic-desc">Cross-platform source build</p>
+      </div>
+      <div class="install-card" data-method="manual">
+        <div class="ic-icon">📥</div>
+        <h3>Manual</h3>
+        <p class="ic-desc">Download from GitHub Releases</p>
+      </div>
+    </div>
+    <div class="install-code">
+      <div class="code-tab-bar">
+        <button class="code-tab active" data-tab="scoop">scoop</button>
+        <button class="code-tab" data-tab="winget">winget</button>
+        <button class="code-tab" data-tab="go">go install</button>
+        <button class="code-tab" data-tab="manual">manual</button>
+      </div>
+      <div class="code-block" id="code-scoop">
+        <div class="code-header">
+          <span>powershell</span>
+          <button class="copy-btn" data-cmd="scoop bucket add nice-scan https://github.com/NICE-DEV226/nice-Scan && scoop install nice-scan/nice_scan">Copy</button>
+        </div>
+        <pre><code>scoop bucket add nice-scan https://github.com/NICE-DEV226/nice-Scan
+scoop install nice-scan/nice_scan</code></pre>
+      </div>
+      <div class="code-block hidden" id="code-winget">
+        <div class="code-header">
+          <span>powershell</span>
+          <button class="copy-btn" data-cmd='winget install --id NICE-DEV226.nice-Scan'>Copy</button>
+        </div>
+        <pre><code>winget install --id NICE-DEV226.nice-Scan</code></pre>
+      </div>
+      <div class="code-block hidden" id="code-go">
+        <div class="code-header">
+          <span>bash</span>
+          <button class="copy-btn" data-cmd="go install github.com/NICE-DEV226/nice-Scan/cmd/nice_scan@latest">Copy</button>
+        </div>
+        <pre><code>go install github.com/NICE-DEV226/nice-Scan/cmd/nice_scan@latest</code></pre>
+      </div>
+      <div class="code-block hidden" id="code-manual">
+        <div class="code-header">
+          <span>bash</span>
+          <button class="copy-btn" data-cmd='curl -sSfL https://github.com/NICE-DEV226/nice-Scan/releases/latest/download/install.sh | sh'>Copy</button>
+        </div>
+        <pre><code><span class="c-comment"># Linux / macOS</span>
+curl -sSfL https://github.com/NICE-DEV226/nice-Scan/releases/latest/download/install.sh | sh
+
+<span class="c-comment"># Windows PowerShell</span>
+irm https://github.com/NICE-DEV226/nice-Scan/releases/latest/download/install.ps1 | iex</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <section id="usage" class="section">
+    <div class="section-header">
+      <span class="section-tag">Usage</span>
+      <h2>From Zero to Exploit</h2>
+      <p>One command. Autonomous attack chaining. Real data extraction.</p>
+    </div>
+    <div class="usage-steps">
+      <div class="usage-step">
+        <div class="us-num">01</div>
+        <div class="us-content">
+          <h3>Quick Scan</h3>
+          <p>Full autonomous attack against any target — detects vulnerabilities and automatically exploits them.</p>
+          <div class="us-code">
+            <pre><code>nice_scan hack example.com -R report.html</code></pre>
+            <button class="copy-btn" data-cmd="nice_scan hack example.com -R report.html">Copy</button>
+          </div>
+        </div>
+      </div>
+      <div class="usage-step">
+        <div class="us-num">02</div>
+        <div class="us-content">
+          <h3>Interactive Shell</h3>
+          <p>Persistent REPL reconnaissance shell with command history, session context, and live results.</p>
+          <div class="us-code">
+            <pre><code>nice_scan shell</code></pre>
+            <button class="copy-btn" data-cmd="nice_scan shell">Copy</button>
+          </div>
+        </div>
+      </div>
+      <div class="usage-step">
+        <div class="us-num">03</div>
+        <div class="us-content">
+          <h3>Live Dashboard</h3>
+          <p>Real-time TUI dashboard with progress bars, findings stream, and live severity updates.</p>
+          <div class="us-code">
+            <pre><code>nice_scan scan example.com -i</code></pre>
+            <button class="copy-btn" data-cmd="nice_scan scan example.com -i">Copy</button>
+          </div>
+        </div>
+      </div>
+      <div class="usage-step">
+        <div class="us-num">04</div>
+        <div class="us-content">
+          <h3>Time-Boxed Attack</h3>
+          <p>Set a timeout to control engagement duration — ideal for bug bounties and CTFs.</p>
+          <div class="us-code">
+            <pre><code>nice_scan hack target.com --timeout 30s -R report.html</code></pre>
+            <button class="copy-btn" data-cmd="nice_scan hack target.com --timeout 30s -R report.html">Copy</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section-report-preview">
+    <div class="section-header">
+      <span class="section-tag">Reports</span>
+      <h2>Professional HTML Reports</h2>
+      <p>Dark-theme, risk-scored, evidence-backed — ready for client delivery or team collaboration.</p>
+    </div>
+    <div class="report-preview">
+      <div class="rp-card rp-header">
+        <div class="rp-title-bar">
+          <span class="rp-icon">◈</span>
+          <span>Attack Report — example.com</span>
+          <span class="rp-badge">10.0 / 10</span>
+        </div>
+        <div class="rp-meta">
+          <span>v0.1.0</span>
+          <span>•</span>
+          <span>14 actions</span>
+          <span>•</span>
+          <span>8 chained steps</span>
+          <span>•</span>
+          <span>25s elapsed</span>
+        </div>
+      </div>
+      <div class="rp-body">
+        <div class="rp-col">
+          <div class="rp-section-title">Findings</div>
+          <div class="rp-finding critical">
+            <span class="rp-sev">!!</span>
+            <div>
+              <div class="rp-fname">SQL Injection</div>
+              <div class="rp-fdesc">login.php — 142 users extracted</div>
+            </div>
+          </div>
+          <div class="rp-finding critical">
+            <span class="rp-sev">!!</span>
+            <div>
+              <div class="rp-fname">Local File Inclusion</div>
+              <div class="rp-fdesc">/etc/passwd, /etc/shadow, .env, config.php (12 files)</div>
+            </div>
+          </div>
+          <div class="rp-finding high">
+            <span class="rp-sev">▸</span>
+            <div>
+              <div class="rp-fname">CORS Misconfiguration</div>
+              <div class="rp-fdesc">api.example.com — allows all origins</div>
+            </div>
+          </div>
+          <div class="rp-finding medium">
+            <span class="rp-sev">◈</span>
+            <div>
+              <div class="rp-fname">JWT Weak Secret</div>
+              <div class="rp-fdesc">alg=none accepted, secret brute-forced</div>
+            </div>
+          </div>
+        </div>
+        <div class="rp-col">
+          <div class="rp-section-title">Extracted Data</div>
+          <div class="rp-datum">
+            <span class="rp-dlabel">Users</span>
+            <span class="rp-dval">142 records</span>
+          </div>
+          <div class="rp-datum">
+            <span class="rp-dlabel">Files</span>
+            <span class="rp-dval">12 LFI + 3 config</span>
+          </div>
+          <div class="rp-datum">
+            <span class="rp-dlabel">Credentials</span>
+            <span class="rp-dval">8 found</span>
+          </div>
+          <div class="rp-datum">
+            <span class="rp-dlabel">Endpoints</span>
+            <span class="rp-dval">47 discovered</span>
+          </div>
+          <div class="rp-datum">
+            <span class="rp-dlabel">Shells</span>
+            <span class="rp-dval">1 deployed</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="trust" class="section section-alt">
+    <div class="section-header">
+      <span class="section-tag">Trust</span>
+      <h2>Supply Chain Security</h2>
+      <p>Every release is cryptographically signed. Every install script verifies before extraction.</p>
+    </div>
+    <div class="trust-grid">
+      <div class="trust-card">
+        <div class="tc-icon tc-gpg">🔑</div>
+        <h3>GPG Signatures</h3>
+        <p>Checksum files signed with NICE-DEV226's GPG key. Verify with:</p>
+        <pre><code>gpg --verify checksums.txt.sig checksums.txt</code></pre>
+      </div>
+      <div class="trust-card">
+        <div class="tc-icon tc-cosign">🛡️</div>
+        <h3>Sigstore / cosign</h3>
+        <p>Keyless signing via GitHub OIDC. SLSA provenance with cosign bundles.</p>
+        <pre><code>cosign verify-blob --bundle checksums.sigstore.json checksums.txt</code></pre>
+      </div>
+      <div class="trust-card">
+        <div class="tc-icon tc-sbom">📋</div>
+        <h3>SPDX SBOM</h3>
+        <p>Software Bill of Materials for every release — full dependency transparency.</p>
+        <pre><code>syft scan nice_scan --from-release NICE-DEV226/nice-Scan:v0.1.0</code></pre>
+      </div>
+      <div class="trust-card">
+        <div class="tc-icon tc-slsa">✅</div>
+        <h3>SLSA Level 2</h3>
+        <p>Build integrity verified through Sigstore. Non-falsifiable provenance attestations.</p>
+        <pre><code>gh attestation verify nice_scan_0.1.0_linux_amd64.tar.gz \
+  --repo NICE-DEV226/nice-Scan</code></pre>
+      </div>
+    </div>
+    <div class="trust-cta">
+      <p>Download the latest release and verify for yourself.</p>
+      <a href="https://github.com/NICE-DEV226/nice-Scan/releases/latest" class="btn btn-primary" target="_blank" rel="noopener">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        Latest Release
+      </a>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <div class="footer-logo">
+          <span class="logo-bracket">[</span>
+          <span class="logo-name">NICE_SCAN</span>
+          <span class="logo-bracket">]</span>
+        </div>
+        <p class="footer-desc">Fast. Precise. Intelligent. — Modern Security Reconnaissance Engine</p>
+      </div>
+      <div class="footer-links">
+        <div class="footer-col">
+          <h4>Resources</h4>
+          <a href="https://github.com/NICE-DEV226/nice-Scan" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/NICE-DEV226/nice-Scan/releases" target="_blank" rel="noopener">Releases</a>
+          <a href="https://github.com/NICE-DEV226/nice-Scan/blob/main/README.md" target="_blank" rel="noopener">Documentation</a>
+        </div>
+        <div class="footer-col">
+          <h4>Community</h4>
+          <a href="https://github.com/NICE-DEV226/nice-Scan/issues" target="_blank" rel="noopener">Report Issue</a>
+          <a href="https://github.com/NICE-DEV226/nice-Scan/security/policy" target="_blank" rel="noopener">Security Policy</a>
+          <a href="https://github.com/NICE-DEV226/nice-Scan/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a>
+        </div>
+        <div class="footer-col">
+          <h4>Stack</h4>
+          <span>Go 1.25</span>
+          <span>Cobra</span>
+          <span>BubbleTea</span>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>&copy; 2026 NICE-DEV226. Released under MIT License.</span>
+      <span>Built with Go — ship fast, break nothing.</span>
+    </div>
+  </footer>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="js/main.js"></script>
+</body>
+</html>

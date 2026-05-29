@@ -40,9 +40,11 @@ profile.out
 # Output
 /output/
 /reports/
-*.html
-*.html
 *.sarif
+
+# HTML reports (but not docs/)
+/reports/*.html
+/*.html
 
 # Env
 .env
