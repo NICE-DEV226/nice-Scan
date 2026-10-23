@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/NICE-DEV226/nice-Scan/internal/transport"
+	"github.com/NICE-DEV226/nice-Scan/internal/types"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -289,17 +290,18 @@ func (b *Brain) renderFinding(f Finding) {
 	if label == "" {
 		label = "INFO"
 	}
+	// Sanity at the render sink: finding text carries remote content.
 	fmt.Printf("  %s %s %s\n",
 		sevStyle.Render(sym),
 		lipgloss.NewStyle().Foreground(severityColor(f.Severity)).Width(8).Render(label),
-		lipgloss.NewStyle().Foreground(severityColor(f.Severity)).Render(f.Name),
+		lipgloss.NewStyle().Foreground(severityColor(f.Severity)).Render(types.Sanitize(f.Name)),
 	)
 	if f.Evidence != "" {
 		ev := f.Evidence
 		if len(ev) > 120 {
 			ev = ev[:117] + "..."
 		}
-		fmt.Println(styleMuted.Render(fmt.Sprintf("         %s", ev)))
+		fmt.Println(styleMuted.Render(fmt.Sprintf("         %s", types.Sanitize(ev))))
 	}
 }
 
@@ -322,7 +324,7 @@ func (b *Brain) RenderReport(report *Report) {
 	fmt.Println()
 
 	fmt.Println(styleHeader.Render("  Impact Summary"))
-	fmt.Println(styleMuted.Render(fmt.Sprintf("  %s", report.Impact)))
+	fmt.Println(styleMuted.Render(fmt.Sprintf("  %s", types.Sanitize(report.Impact))))
 	fmt.Println()
 
 	if len(report.AttackChains) > 0 {
@@ -331,10 +333,10 @@ func (b *Brain) RenderReport(report *Report) {
 		for _, chain := range report.AttackChains {
 			fmt.Printf("  %s %s\n",
 				styleRed.Render("⚡"),
-				styleRed.Bold(true).Render(chain.Name),
+				styleRed.Bold(true).Render(types.Sanitize(chain.Name)),
 			)
 			fmt.Printf("  %s Risk: %.0f/10\n", styleMuted.Render("  "), chain.RiskScore)
-			fmt.Printf("  %s %s\n", styleMuted.Render("  →"), chain.Impact)
+			fmt.Printf("  %s %s\n", styleMuted.Render("  →"), types.Sanitize(chain.Impact))
 			fmt.Println()
 		}
 	}
@@ -353,7 +355,13 @@ func (b *Brain) RenderReport(report *Report) {
 		fmt.Println(styleHeader.Render("  Capabilities Acquired"))
 		fmt.Println()
 		for _, c := range report.Capabilities {
-			fmt.Printf("  %s %s\n", styleGreen.Render("✓"), styleCyan.Render(c.Name))
+			label := c.Name
+			style := styleGreen
+			if c.Origin == OriginHint {
+				label = "?" + c.Name
+				style = styleYellow
+			}
+			fmt.Printf("  %s %s\n", style.Render("✓"), styleCyan.Render(types.Sanitize(label)))
 		}
 		fmt.Println()
 	}
@@ -363,9 +371,9 @@ func (b *Brain) RenderReport(report *Report) {
 		fmt.Println()
 		for _, c := range report.Credentials {
 			if c.Valid {
-				fmt.Printf("  %s %s:%s %s\n", styleRed.Render("◈"), c.Username, c.Password, styleGreen.Render("✓ valid"))
+				fmt.Printf("  %s %s:%s %s\n", styleRed.Render("◈"), types.Sanitize(c.Username), types.Sanitize(c.Password), styleGreen.Render("✓ valid"))
 			} else {
-				fmt.Printf("  %s %s:%s %s\n", styleMuted.Render("·"), c.Username, c.Password, styleMuted.Render("tested"))
+				fmt.Printf("  %s %s:%s %s\n", styleMuted.Render("·"), types.Sanitize(c.Username), types.Sanitize(c.Password), styleMuted.Render("tested"))
 			}
 		}
 		fmt.Println()
@@ -380,7 +388,7 @@ func (b *Brain) RenderReport(report *Report) {
 			if e.Status > 0 {
 				statusStr = fmt.Sprintf(" [%d]", e.Status)
 			}
-			fmt.Printf("  %s %s%s\n", method, styleCyan.Render(e.Path), styleMuted.Render(statusStr))
+			fmt.Printf("  %s %s%s\n", method, styleCyan.Render(types.Sanitize(e.Path)), styleMuted.Render(statusStr))
 		}
 		fmt.Println()
 	}

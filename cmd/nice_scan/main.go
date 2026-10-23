@@ -260,7 +260,9 @@ func scanCmd() *cobra.Command {
 			if reportFile != "" {
 				report := engine.GenerateReport(result)
 				html := report.RenderHTML()
-				if err := os.WriteFile(reportFile, []byte(html), 0644); err != nil {
+				// Reports embed scan evidence (URLs, tokens, responses):
+				// operator-private, 0600 regardless of umask.
+				if err := os.WriteFile(reportFile, []byte(html), 0600); err != nil {
 					return fmt.Errorf("failed to write report: %w", err)
 				}
 				fmt.Println()
@@ -319,7 +321,9 @@ func auditCmd() *cobra.Command {
 			if reportFile != "" {
 				report := engine.GenerateReport(result)
 				html := report.RenderHTML()
-				if err := os.WriteFile(reportFile, []byte(html), 0644); err != nil {
+				// Reports embed scan evidence (URLs, tokens, responses):
+				// operator-private, 0600 regardless of umask.
+				if err := os.WriteFile(reportFile, []byte(html), 0600); err != nil {
 					return fmt.Errorf("failed to write report: %w", err)
 				}
 				fmt.Println()
@@ -411,7 +415,7 @@ func exploitCmd() *cobra.Command {
 						status = "✓"
 					}
 					fmt.Println(lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
-						fmt.Sprintf("  %s %s:%s → %d (%s)", status, r.Username, r.Password, r.StatusCode, truncateStr(r.Evidence, 50)),
+						fmt.Sprintf("  %s %s:%s → %d (%s)", status, types.Sanitize(r.Username), types.Sanitize(r.Password), r.StatusCode, truncateStr(r.Evidence, 50)),
 					))
 					displayCount++
 				}
@@ -441,7 +445,7 @@ func exploitCmd() *cobra.Command {
 						found = true
 					}
 					fmt.Println(lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
-						fmt.Sprintf("  %s %s=%s %s → %d (%s)", status, r.Parameter, r.Value, r.Method, r.StatusCode, truncateStr(r.Evidence, 50)),
+						fmt.Sprintf("  %s %s=%s %s → %d (%s)", status, types.Sanitize(r.Parameter), types.Sanitize(r.Value), r.Method, r.StatusCode, truncateStr(r.Evidence, 50)),
 					))
 					displayCount++
 				}
@@ -465,7 +469,7 @@ func exploitCmd() *cobra.Command {
 						cl = lipgloss.Color("#F7768E")
 					}
 					fmt.Println(lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
-						fmt.Sprintf("  %s %s → %d (%s)", r.Token, r.Endpoint, r.StatusCode, truncateStr(r.Evidence, 50)),
+						fmt.Sprintf("  %s %s → %d (%s)", types.Sanitize(r.Token), types.Sanitize(r.Endpoint), r.StatusCode, truncateStr(r.Evidence, 50)),
 					))
 					displayCount++
 				}
@@ -521,7 +525,7 @@ func exploitCmd() *cobra.Command {
 						status = "✓"
 					}
 					fmt.Println(lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
-						fmt.Sprintf("  %s %s → %d (%s)", status, r.Payload, r.StatusCode, truncateStr(r.Evidence, 50)),
+						fmt.Sprintf("  %s %s → %d (%s)", status, types.Sanitize(r.Payload), r.StatusCode, truncateStr(r.Evidence, 50)),
 					))
 				}
 				if len(results) == 0 {
@@ -541,7 +545,7 @@ func exploitCmd() *cobra.Command {
 						status = "⚠"
 					}
 					fmt.Println(lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
-						fmt.Sprintf("  %s %s → %d (%s)", status, r.Identifier, r.StatusCode, truncateStr(r.Evidence, 50)),
+						fmt.Sprintf("  %s %s → %d (%s)", status, types.Sanitize(r.Identifier), r.StatusCode, truncateStr(r.Evidence, 50)),
 					))
 				}
 				if len(results) == 0 {
@@ -561,7 +565,7 @@ func exploitCmd() *cobra.Command {
 						status = "⚠"
 					}
 					fmt.Println(lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
-						fmt.Sprintf("  %s %s → %d (%s)", status, r.Endpoint, r.StatusCode, truncateStr(r.Evidence, 50)),
+						fmt.Sprintf("  %s %s → %d (%s)", status, types.Sanitize(r.Endpoint), r.StatusCode, truncateStr(r.Evidence, 50)),
 					))
 				}
 				if len(results) == 0 {
@@ -663,7 +667,9 @@ func hackCmd() *cobra.Command {
 
 			if reportFile != "" {
 				html := hacker.RenderHTMLReport(report)
-				if err := os.WriteFile(reportFile, []byte(html), 0644); err != nil {
+				// Reports embed scan evidence (URLs, tokens, responses):
+				// operator-private, 0600 regardless of umask.
+				if err := os.WriteFile(reportFile, []byte(html), 0600); err != nil {
 					return fmt.Errorf("failed to write HTML report: %w", err)
 				}
 				fmt.Println()
@@ -796,6 +802,9 @@ func signalContext() (context.Context, context.CancelFunc) {
 }
 
 func truncateStr(s string, n int) string {
+	// Print sink: remote-derived result fields (evidence, payloads) may
+	// carry terminal control sequences. Sanitize before truncation.
+	s = types.Sanitize(s)
 	if len(s) <= n {
 		return s
 	}

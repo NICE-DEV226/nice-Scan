@@ -2,7 +2,9 @@ package hacker
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -40,35 +42,79 @@ func (rd *ReportDir) ensureDirs() {
 		filepath.Join(rd.BasePath, "crawl_auth"),
 	}
 	for _, d := range dirs {
-		_ = os.MkdirAll(d, 0755)
+		if err := os.MkdirAll(d, 0700); err != nil {
+			slog.Warn("reportdir: mkdir failed", "dir", d, "error", err)
+		}
 	}
 }
 
+// sanitizeFilename strips path separators, traversal sequences, control
+// characters and caps the length. Content-derived names (S3 keys, file
+// params) previously flowed in raw.
+func sanitizeFilename(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case r == '/' || r == '\\':
+			b.WriteRune('_')
+		case r == '.':
+			b.WriteRune(r) // '..' collapses handled below via traversal check
+		case r < 0x20 || r == 0x7F:
+			b.WriteRune('_') // control chars (incl. CR/LF naming tricks)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	out := strings.ReplaceAll(b.String(), "..", "_")
+	if len(out) > 200 {
+		out = out[:200]
+	}
+	if out == "" || out == "." {
+		out = "unnamed"
+	}
+	return out
+}
+
 func (rd *ReportDir) Save(subdir, name string, data []byte) string {
-	rd.mu.Lock()
-	defer rd.mu.Unlock()
-
-	safeName := strings.ReplaceAll(name, "/", "_")
-	safeName = strings.ReplaceAll(safeName, "\\", "_")
-	safeName = strings.ReplaceAll(safeName, "..", "_")
-
-	fullPath := filepath.Join(rd.BasePath, subdir, safeName)
-	_ = os.WriteFile(fullPath, data, 0644)
-	return fullPath
+	return rd.save(subdir, sanitizeFilename(name), data)
 }
 
 func (rd *ReportDir) SaveWithPrefix(subdir, prefix, name string, data []byte) string {
+	return rd.save(subdir, sanitizeFilename(prefix+"_"+sanitizeFilename(name)), data)
+}
+
+// save writes extracted content with least-permissive modes: files 0600,
+// directories 0700. Dump artifacts (password hashes, exfiltrated files,
+// credential blobs) sitting world-readable in ./reports leaked sensitive
+// evidence to every local user with a permissive umask (audit finding
+// reports-dir-writes). Errors are logged, not silently dropped.
+func (rd *ReportDir) save(subdir, name string, data []byte) string {
 	rd.mu.Lock()
 	defer rd.mu.Unlock()
 
-	safeName := strings.ReplaceAll(name, "/", "_")
-	safeName = strings.ReplaceAll(safeName, "\\", "_")
-	safeName = strings.ReplaceAll(safeName, "..", "_")
+	// Defense in depth: the sanitized name must never escape the subdir.
+	if path.IsAbs(name) || strings.Contains(name, "..") {
+		slog.Warn("reportdir: refusing suspicious filename", "name", name)
+		return ""
+	}
 
-	fullPath := filepath.Join(rd.BasePath, subdir, prefix+"_"+safeName)
-	_ = os.WriteFile(fullPath, data, 0644)
+	fullPath := filepath.Join(rd.BasePath, subdir, name)
+	if err := rd.ensureDirsFor(subdir); err != nil {
+		slog.Warn("reportdir: cannot create directory", "dir", filepath.Join(rd.BasePath, subdir), "error", err)
+		return ""
+	}
+	if err := os.WriteFile(fullPath, data, 0600); err != nil {
+		slog.Warn("reportdir: write failed", "path", fullPath, "error", err)
+		return ""
+	}
 	return fullPath
 }
+
+func (rd *ReportDir) ensureDirsFor(subdir string) error {
+	return os.MkdirAll(filepath.Join(rd.BasePath, subdir), 0700)
+}
+
+// ensureDirs creates the standard extraction layout on construction.
 
 func (rd *ReportDir) Base() string {
 	return rd.BasePath
