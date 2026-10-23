@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/NICE-DEV226/nice-Scan/internal/transport"
+	"github.com/charmbracelet/lipgloss"
 )
 
 var (
@@ -128,14 +128,30 @@ func (b *Brain) renderKBSummary() {
 	if len(caps) > 0 {
 		var capStrs []string
 		for _, c := range caps {
+			if c.Origin == OriginHint {
+				// Remote-text hints render as suspected, never as facts.
+				capStrs = append(capStrs, lipgloss.NewStyle().Foreground(clYellow).Render("?"+c.Name))
+				continue
+			}
 			capStrs = append(capStrs, lipgloss.NewStyle().Foreground(clGreen).Render(c.Name))
 		}
-		fmt.Printf("  %s %s\n",
+		fmt.Printf("  %s %s  %s\n",
 			lipgloss.NewStyle().Foreground(clDim).Render("└"),
 			strings.Join(capStrs, " "),
+			lipgloss.NewStyle().Foreground(clDim).Render(fmt.Sprintf("(? = suspected from remote text, %d verified)", countVerified(caps))),
 		)
 	}
 	fmt.Println()
+}
+
+func countVerified(caps []Capability) int {
+	n := 0
+	for _, c := range caps {
+		if c.Origin == OriginVerified {
+			n++
+		}
+	}
+	return n
 }
 
 func (b *Brain) buildReport(steps int) *Report {
@@ -159,11 +175,24 @@ func (b *Brain) buildReport(steps int) *Report {
 	}
 
 	creds := b.kb.GetCredentials()
-	if len(creds) > 0 && riskScore < 9.0 {
+	// Only accepted credentials count as compromise evidence. Records kept
+	// because a login attempt *failed* (Valid=false) say nothing about the
+	// account other than that the password was wrong.
+	credsValid := false
+	for _, c := range creds {
+		if c.Valid {
+			credsValid = true
+			break
+		}
+	}
+	if credsValid && riskScore < 9.0 {
 		riskScore = 9.0
 		impact = "Valid credentials obtained — account compromise confirmed"
 	}
 
+	// kb.GetSecrets() only holds content actually captured by executed
+	// actions (AddSecret); scanner bookkeeping lives in AddScannerState and
+	// can no longer trigger this tier.
 	secrets := b.kb.GetSecrets()
 	if len(secrets) > 0 && riskScore < 10.0 {
 		riskScore = 10.0
@@ -176,11 +205,15 @@ func (b *Brain) buildReport(steps int) *Report {
 		impact = "Exposed endpoints discovered"
 	}
 
+	// An alg=none forgery only counts when the forged token was validated by
+	// the scanner (Valid=true). JWTForgeNoneAction currently stores forged
+	// payloads with Valid=false: claiming "full account takeover" over a
+	// token that was computed but never accepted fabricated critical risk.
 	jwts := b.kb.GetJWTs()
 	for _, j := range jwts {
-		if j.Algorithm == "none" {
+		if j.Algorithm == "none" && j.Valid {
 			riskScore = 10.0
-			impact = "JWT forged with alg=none — full account takeover possible"
+			impact = "JWT with alg=none accepted — full account takeover confirmed"
 		}
 	}
 

@@ -93,9 +93,9 @@ func (a *PortScanAction) Execute(ctx context.Context, target string, kb *Knowled
 				}
 
 				kb.AddEndpoint(Endpoint{
-					Path:   addr,
-					Method: "TCP",
-					Status: 0,
+					Path:        addr,
+					Method:      "TCP",
+					Status:      0,
 					ContentType: service,
 				})
 			}

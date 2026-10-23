@@ -84,8 +84,12 @@ func NewChainer() *Chainer {
 func (c *Chainer) DetectAndExecute(ctx context.Context, target string, kb *Knowledge, client *transport.Client) []Action {
 	caps := kb.GetCapabilities()
 	capMap := make(map[string]bool)
+	verifiedCapMap := make(map[string]bool)
 	for _, cp := range caps {
 		capMap[cp.Name] = true
+		if cp.Origin == OriginVerified {
+			verifiedCapMap[cp.Name] = true
+		}
 	}
 
 	var spawned []Action
@@ -95,9 +99,12 @@ func (c *Chainer) DetectAndExecute(ctx context.Context, target string, kb *Knowl
 			continue
 		}
 
+		// Chains describe compound compromise; they may only execute (and
+		// only then be reported / scored) when every required capability is
+		// backed by executed evidence, not by remote-controlled text.
 		allMet := true
 		for _, req := range p.Requires {
-			if !capMap[req] {
+			if !verifiedCapMap[req] {
 				allMet = false
 				break
 			}
@@ -127,7 +134,9 @@ func (c *Chainer) DetectChains(kb *Knowledge) []AttackChain {
 	caps := kb.GetCapabilities()
 	capMap := make(map[string]bool)
 	for _, cp := range caps {
-		capMap[cp.Name] = true
+		if cp.Origin == OriginVerified {
+			capMap[cp.Name] = true
+		}
 	}
 
 	var chains []AttackChain
@@ -226,7 +235,10 @@ func (a *CORSXSSChainAction) Execute(ctx context.Context, target string, kb *Kno
 </body>
 </html>`
 
-	kb.AddSecret("CORS+XSS PoC generated — manual deployment required")
+	// The PoC HTML is scanner output (a generated artifact), not a secret
+	// captured on the target. Recording it as a "secret" used to flip
+	// has_secret and fabricate a critical-risk "data breach" report.
+	kb.AddScannerState("CORS+XSS PoC generated — manual deployment required")
 
 	findings := []Finding{
 		{
@@ -269,9 +281,16 @@ func (a *JWTAdminChainAction) Execute(ctx context.Context, target string, kb *Kn
 
 	if jwtToken != "" {
 		kb.Session.SetActiveJWT(jwtToken)
+		// No admin endpoint was actually contacted: recording an "admin
+		// session" capability as verified here fabricated a takeover the
+		// scanner never executed. Keep it as a suspected capability.
 		kb.AddCapability(Capability{
 			Name:   "has_admin_session",
+			Origin: OriginHint, // chain hypothesis, not executed access
 			Target: target,
+			Details: map[string]string{
+				"derivedBy": "forged JWT available, admin endpoint untested",
+			},
 		})
 	}
 

@@ -107,5 +107,3 @@ func (rd *ReportDir) ListFiles(subdir string) []string {
 	}
 	return files
 }
-
-

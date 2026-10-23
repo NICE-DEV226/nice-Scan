@@ -17,15 +17,15 @@ type OOBAction struct {
 }
 
 type OOBServer struct {
-	mu       sync.Mutex
+	mu        sync.Mutex
 	callbacks []OOBRequest
-	listener net.Listener
-	port     int
-	running  bool
+	listener  net.Listener
+	port      int
+	running   bool
 }
 
 type OOBRequest struct {
-	ID        string
+	ID         string
 	RemoteAddr string
 	Path       string
 	Query      string
@@ -53,7 +53,7 @@ func (a *OOBAction) Metadata() ActionMetadata {
 }
 
 func (a *OOBAction) Execute(ctx context.Context, target string, kb *Knowledge, client *transport.Client) ActionResult {
-	if a.server.running {
+	if a.server.IsRunning() {
 		return ActionResult{}
 	}
 
@@ -71,14 +71,16 @@ func (a *OOBAction) Execute(ctx context.Context, target string, kb *Knowledge, c
 		}
 	}
 
-	oobURL := fmt.Sprintf("http://localhost:%d/callback", a.server.port)
+	oobURL := fmt.Sprintf("http://127.0.0.1:%d/callback", a.server.port)
 
 	go func() {
 		<-ctx.Done()
 		a.server.Stop()
 	}()
 
-	kb.AddSecret(fmt.Sprintf("OOB callback URL: %s?token={target_id}", oobURL))
+	// The callback URL is scanner infrastructure, not a secret captured on
+	// the target: it must not flip has_secret or drive risk scoring.
+	kb.AddScannerState(fmt.Sprintf("OOB callback URL: %s?token={target_id}", oobURL))
 
 	return ActionResult{
 		Findings: []Finding{
@@ -93,17 +95,29 @@ func (a *OOBAction) Execute(ctx context.Context, target string, kb *Knowledge, c
 	}
 }
 
+const (
+	// oobMaxBodySize caps the memory a single callback body can consume.
+	oobMaxBodySize = 4 << 20 // 4 MiB
+	// oobMaxCallbacks bounds stored callbacks; the FIFO evicts oldest so the
+	// server cannot grow unbounded across a long session.
+	oobMaxCallbacks = 1000
+)
+
 func (s *OOBServer) Start(ctx context.Context) error {
+	// Bind loopback only: the callback host is scanner-local. A wildcard
+	// bind would expose an open HTTP sink to the network (anyone able to
+	// reach the workstation could relay bodies through it).
 	var err error
-	s.listener, err = net.Listen("tcp", fmt.Sprintf(":%d", s.port))
+	s.listener, err = net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", s.port))
 	if err != nil {
 		return err
 	}
-	s.running = true
+	s.setRunning(true)
 
 	go func() {
 		_ = http.Serve(s.listener, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			body, _ := io.ReadAll(r.Body)
+			// Enforce a hard cap on body size regardless of client behaviour.
+			body, _ := io.ReadAll(io.LimitReader(r.Body, oobMaxBodySize))
 			r.Body.Close()
 
 			req := OOBRequest{
@@ -125,6 +139,10 @@ func (s *OOBServer) Start(ctx context.Context) error {
 
 			s.mu.Lock()
 			s.callbacks = append(s.callbacks, req)
+			// FIFO eviction: keep memory bounded, oldest callbacks drop.
+			if len(s.callbacks) > oobMaxCallbacks {
+				s.callbacks = s.callbacks[1:]
+			}
 			s.mu.Unlock()
 
 			w.WriteHeader(200)
@@ -136,11 +154,28 @@ func (s *OOBServer) Start(ctx context.Context) error {
 	return nil
 }
 
+func (s *OOBServer) setRunning(v bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.running = v
+}
+
+func (s *OOBServer) IsRunning() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.running
+}
+
 func (s *OOBServer) Stop() {
 	if s.listener != nil {
 		s.listener.Close()
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.running = false
+	// Clear stored callbacks along with the listener so a restart starts
+	// without stale records.
+	s.callbacks = nil
 }
 
 func (s *OOBServer) GetCallbacks() []OOBRequest {

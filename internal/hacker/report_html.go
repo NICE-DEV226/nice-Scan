@@ -92,25 +92,25 @@ func RenderHTMLReport(r *Report) string {
 <div class="container">
   <div class="header">
     <h1>NICE HACKER — Attack Report</h1>
-    <div class="subtitle">Autonomous penetration test generated `+fmt.Sprintf("on %s", time.Now().Format("January 2, 2006 at 15:04"))+`</div>
+    <div class="subtitle">Autonomous penetration test generated ` + fmt.Sprintf("on %s", time.Now().Format("January 2, 2006 at 15:04")) + `</div>
   </div>
   
   <div class="meta-grid">
     <div class="meta-card">
       <div class="label">Target</div>
-      <div class="value" style="font-size:14px">`+html.EscapeString(r.Target)+`</div>
+      <div class="value" style="font-size:14px">` + html.EscapeString(r.Target) + `</div>
     </div>
     <div class="meta-card">
       <div class="label">Duration</div>
-      <div class="value">`+fmt.Sprintf("%.0f", r.Duration.Seconds())+`s</div>
+      <div class="value">` + fmt.Sprintf("%.0f", r.Duration.Seconds()) + `s</div>
     </div>
     <div class="meta-card">
       <div class="label">Steps</div>
-      <div class="value">`+fmt.Sprintf("%d", r.Steps)+`</div>
+      <div class="value">` + fmt.Sprintf("%d", r.Steps) + `</div>
     </div>
     <div class="meta-card">
       <div class="label">Risk Score</div>
-      <div class="value `+riskClass(r.RiskScore)+`">`+fmt.Sprintf("%.1f", r.RiskScore)+` / 10</div>
+      <div class="value ` + riskClass(r.RiskScore) + `">` + fmt.Sprintf("%.1f", r.RiskScore) + ` / 10</div>
     </div>
   </div>
 `)

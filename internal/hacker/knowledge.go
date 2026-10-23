@@ -13,6 +13,7 @@ type Knowledge struct {
 	pages        []Page
 	jsFiles      []string
 	secrets      []string
+	scannerState []string
 	jwts         []JWTToken
 	chainSteps   []ChainStep
 	parentURLs   map[string]string
@@ -38,6 +39,14 @@ func (kb *Knowledge) AddFinding(f Finding) {
 	kb.deriveCapabilities(f)
 }
 
+// deriveCapabilities flips has_* capabilities by keyword matching over the
+// finding text. Finding Name/Type/Description/Evidence routinely carry
+// remote-controlled content (introspection bodies, crawled URLs, page text,
+// third-party lists), so everything derived here is by construction a "hint":
+// it records that remote text mentioned a keyword, never that the scanner
+// verified the corresponding weakness. Hint capabilities can guide passive or
+// same-target probing, but never credentialed or state-changing actions, and
+// never contribute to risk chains or scores.
 func (kb *Knowledge) deriveCapabilities(f Finding) {
 	capMap := map[string]string{
 		"graphql":   "has_graphql",
@@ -58,25 +67,37 @@ func (kb *Knowledge) deriveCapabilities(f Finding) {
 		"subdomain": "has_subdomain",
 	}
 	for key, capName := range capMap {
-		if containsFold(f.Name, key) || containsFold(f.Type, key) {
+		if containsFold(f.Name, key) || containsFold(f.Type, key) ||
+			containsFold(f.Description, key) || containsFold(f.Evidence, key) {
 			if !kb.hasCapability(capName) {
 				kb.capabilities = append(kb.capabilities, Capability{
-					Name:    capName,
-					Target:  kb.target,
-					Details: map[string]string{"evidence": f.Evidence},
-				})
-			}
-		}
-		if containsFold(f.Description, key) || containsFold(f.Evidence, key) {
-			if !kb.hasCapability(capName) {
-				kb.capabilities = append(kb.capabilities, Capability{
-					Name:    capName,
-					Target:  kb.target,
-					Details: map[string]string{"source": f.Evidence},
+					Name:   capName,
+					Origin: OriginHint,
+					Target: kb.target,
+					Details: map[string]string{
+						"evidence":  truncateEvidence(f.Evidence),
+						"derivedBy": "text-match (remote-controlled input; unverified)",
+					},
 				})
 			}
 		}
 	}
+}
+
+func truncateEvidence(s string) string {
+	if len(s) > 200 {
+		return s[:197] + "..."
+	}
+	return s
+}
+
+func (kb *Knowledge) capability(name string) *Capability {
+	for i := range kb.capabilities {
+		if kb.capabilities[i].Name == name {
+			return &kb.capabilities[i]
+		}
+	}
+	return nil
 }
 
 func (kb *Knowledge) hasCapability(name string) bool {
@@ -126,11 +147,16 @@ func (kb *Knowledge) AddSession(s SessionToken) {
 	if !kb.hasCapability("has_token") {
 		kb.capabilities = append(kb.capabilities, Capability{
 			Name:   "has_token",
+			Origin: OriginVerified,
 			Target: kb.target,
 		})
 	}
 }
 
+// AddCapability records a capability observed by a scanner action. Callers
+// that only relay remote-controlled text (passive recon lists, crawled page
+// bodies) must set Origin explicitly to OriginHint; executed evidence keeps
+// Origin empty and is recorded as verified.
 func (kb *Knowledge) AddCapability(c Capability) {
 	kb.mu.Lock()
 	defer kb.mu.Unlock()
@@ -139,7 +165,29 @@ func (kb *Knowledge) AddCapability(c Capability) {
 			return
 		}
 	}
+	if c.Origin == "" {
+		c.Origin = OriginVerified
+	}
 	kb.capabilities = append(kb.capabilities, c)
+}
+
+// HasVerifiedCapability reports whether a capability claimed by an action's
+// Requires list is backed by executed evidence. Remote-text hints do not
+// count: sensitive actions must never unlock from content an attacker could
+// plant on the target.
+func (kb *Knowledge) HasVerifiedCapability(name string) bool {
+	kb.mu.RLock()
+	defer kb.mu.RUnlock()
+	return kb.hasVerifiedCapability(name)
+}
+
+func (kb *Knowledge) hasVerifiedCapability(name string) bool {
+	for _, c := range kb.capabilities {
+		if c.Name == name && c.Origin == OriginVerified {
+			return true
+		}
+	}
+	return false
 }
 
 func (kb *Knowledge) AddJWT(j JWTToken) {
@@ -149,6 +197,7 @@ func (kb *Knowledge) AddJWT(j JWTToken) {
 	if !kb.hasCapability("has_jwt") {
 		kb.capabilities = append(kb.capabilities, Capability{
 			Name:   "has_jwt",
+			Origin: OriginVerified,
 			Target: kb.target,
 		})
 	}
@@ -171,6 +220,9 @@ func (kb *Knowledge) AddChainStep(s ChainStep) {
 	kb.chainSteps = append(kb.chainSteps, s)
 }
 
+// AddSecret records a secret the scanner actually captured (leaked key,
+// dumped password file content, extracted credential blob). This is executed
+// evidence: it flips has_secret and drives the highest risk tier in reports.
 func (kb *Knowledge) AddSecret(s string) {
 	kb.mu.Lock()
 	defer kb.mu.Unlock()
@@ -179,10 +231,32 @@ func (kb *Knowledge) AddSecret(s string) {
 		if !kb.hasCapability("has_secret") {
 			kb.capabilities = append(kb.capabilities, Capability{
 				Name:   "has_secret",
+				Origin: OriginVerified,
 				Target: kb.target,
 			})
 		}
 	}
+}
+
+// AddScannerState records scanner bookkeeping strings (OOB callback URLs,
+// generated PoC markers, tool session identifiers). These are not secrets
+// observed on the target: they must never flip has_secret or feed risk
+// scoring. It exists to keep the previous misuse of AddSecret for such
+// strings from fabricating "critical data breach" results.
+func (kb *Knowledge) AddScannerState(s string) {
+	kb.mu.Lock()
+	defer kb.mu.Unlock()
+	if !containsStr(kb.scannerState, s) {
+		kb.scannerState = append(kb.scannerState, s)
+	}
+}
+
+func (kb *Knowledge) GetScannerState() []string {
+	kb.mu.RLock()
+	defer kb.mu.RUnlock()
+	out := make([]string, len(kb.scannerState))
+	copy(out, kb.scannerState)
+	return out
 }
 
 func (kb *Knowledge) MarkChecked(path string) {

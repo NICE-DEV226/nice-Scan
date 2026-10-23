@@ -113,26 +113,6 @@ func (a *SQLiAction) Execute(ctx context.Context, target string, kb *Knowledge, 
 						Evidence:    fmt.Sprintf("URL: %s", payloadURL),
 					})
 
-				spawned = append(spawned, &SQLiDataExtractAction{
-					vulnURL: payloadURL,
-					param:   param,
-					payload: p.payload,
-				})
-				break
-			}
-
-			if strings.Contains(p.name, "Time sleep") {
-				start := time.Now()
-				_, _ = client.Do(ctx, &types.Request{Method: "GET", URL: payloadURL})
-				if time.Since(start) >= 4*time.Second {
-					findings = append(findings, Finding{
-						Type:        "sqli_time",
-						Name:        fmt.Sprintf("SQLi Time-Based: %s via %s", p.name, param),
-						Severity:    SevCritical,
-						Description: fmt.Sprintf("Response delayed by %v", time.Since(start)),
-						Evidence:    payloadURL,
-					})
-
 					spawned = append(spawned, &SQLiDataExtractAction{
 						vulnURL: payloadURL,
 						param:   param,
@@ -140,9 +120,29 @@ func (a *SQLiAction) Execute(ctx context.Context, target string, kb *Knowledge, 
 					})
 					break
 				}
+
+				if strings.Contains(p.name, "Time sleep") {
+					start := time.Now()
+					_, _ = client.Do(ctx, &types.Request{Method: "GET", URL: payloadURL})
+					if time.Since(start) >= 4*time.Second {
+						findings = append(findings, Finding{
+							Type:        "sqli_time",
+							Name:        fmt.Sprintf("SQLi Time-Based: %s via %s", p.name, param),
+							Severity:    SevCritical,
+							Description: fmt.Sprintf("Response delayed by %v", time.Since(start)),
+							Evidence:    payloadURL,
+						})
+
+						spawned = append(spawned, &SQLiDataExtractAction{
+							vulnURL: payloadURL,
+							param:   param,
+							payload: p.payload,
+						})
+						break
+					}
+				}
 			}
 		}
-	}
 	}
 
 	return ActionResult{Findings: findings, Actions: spawned}

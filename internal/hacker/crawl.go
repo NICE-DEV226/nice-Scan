@@ -76,6 +76,19 @@ func (a *CrawlAction) Execute(ctx context.Context, target string, kb *Knowledge,
 		if forms > 0 {
 			formTypes := detectFormTypes(body)
 			for _, ft := range formTypes {
+				// A form classified on a page the crawler itself fetched
+				// from the target host is an executed observation: mark the
+				// capability verified before the finding text routes through
+				// deriveCapabilities (which can only ever yield hints).
+				kb.AddCapability(Capability{
+					Name:   ft,
+					Origin: OriginVerified,
+					Target: kb.target,
+					Details: map[string]string{
+						"evidence":  u + " (form segment observed on fetched page)",
+						"derivedBy": "crawler form detection (executed fetch, same host)",
+					},
+				})
 				kb.AddFinding(Finding{
 					Type:        ft,
 					Name:        ft + " form detected",
@@ -127,7 +140,7 @@ func (a *CrawlAction) Execute(ctx context.Context, target string, kb *Knowledge,
 }
 
 type CrawlResult struct {
-	Pages int
+	Pages    int
 	Findings []Finding
 }
 
@@ -244,9 +257,14 @@ func extractTitle(body string) string {
 	return title
 }
 
+// detectFormTypes classifies forms by scanning only the markup between real
+// <form> and </form> tags of an already fetched page. Matching keywords
+// anywhere in the page body (inside commented-out code, JSON payloads or
+// plain prose) used to fabricate "X form detected" findings; restricting the
+// scan to actual form segments keeps the classification to what the crawler
+// really observed.
 func detectFormTypes(body string) []string {
 	var types []string
-	lowBody := strings.ToLower(body)
 
 	formChecks := []struct {
 		keyword string
@@ -267,11 +285,27 @@ func detectFormTypes(body string) []string {
 		{"dashboard", "has_admin"},
 	}
 
+	lowBody := strings.ToLower(body)
 	seen := make(map[string]bool)
-	for _, check := range formChecks {
-		if strings.Contains(lowBody, check.keyword) && !seen[check.ftype] {
-			types = append(types, check.ftype)
-			seen[check.ftype] = true
+	rest := lowBody
+	for {
+		start := strings.Index(rest, "<form")
+		if start < 0 {
+			break
+		}
+		end := strings.Index(rest[start:], "</form>")
+		segment := rest[start:]
+		if end >= 0 {
+			segment = rest[start : start+end]
+			rest = rest[start+end+len("</form>"):]
+		} else {
+			rest = ""
+		}
+		for _, check := range formChecks {
+			if strings.Contains(segment, check.keyword) && !seen[check.ftype] {
+				types = append(types, check.ftype)
+				seen[check.ftype] = true
+			}
 		}
 	}
 	return types

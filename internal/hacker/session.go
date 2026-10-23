@@ -6,10 +6,10 @@ import (
 )
 
 type SessionManager struct {
-	mu       sync.RWMutex
-	cookies  []*http.Cookie
-	headers  map[string]string
-	tokens   []string
+	mu        sync.RWMutex
+	cookies   []*http.Cookie
+	headers   map[string]string
+	tokens    []string
 	activeJWT string
 }
 

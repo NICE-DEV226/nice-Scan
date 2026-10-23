@@ -40,7 +40,7 @@ func (a *S3Action) Execute(ctx context.Context, target string, kb *Knowledge, cl
 	}
 
 	type bucketResult struct {
-		finding Finding
+		finding   Finding
 		bucketURL string
 	}
 
@@ -116,10 +116,10 @@ func (a *S3Action) Execute(ctx context.Context, target string, kb *Knowledge, cl
 	var spawned []Action
 	for r := range results {
 		findings = append(findings, r.finding)
-			spawned = append(spawned, &S3DumpAction{
-					bucketURL: r.bucketURL,
-					bucket:    extractBucketName(r.bucketURL),
-				})
+		spawned = append(spawned, &S3DumpAction{
+			bucketURL: r.bucketURL,
+			bucket:    extractBucketName(r.bucketURL),
+		})
 	}
 
 	sort.Slice(findings, func(i, j int) bool {

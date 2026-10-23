@@ -17,8 +17,20 @@ const (
 	SevCritical Severity = "critical"
 )
 
+// Capability origin values. A capability is "verified" only when it is backed
+// by executed evidence (credential login succeeded, secret content actually
+// captured, token actually obtained). Capabilities derived by substring
+// matching over remote-controlled text are always "hint" origin.
+const (
+	OriginVerified = "verified"
+	OriginHint     = "hint"
+)
+
 type Capability struct {
-	Name    string
+	Name string
+	// Origin records how this capability was established. The planner, chainer
+	// and risk scoring treat "hint" capabilities as unproven.
+	Origin  string
 	Target  string
 	Details map[string]string
 }
@@ -87,6 +99,11 @@ type ActionMetadata struct {
 	Priority    int
 	Requires    []string
 	Provides    []string
+	// Sensitive marks actions that attack with credentials or modify target
+	// state (credential brute force, file upload, session takeover). A
+	// sensitive action only runs when every Requires capability is verified
+	// (Origin == OriginVerified), never from remote-text hints.
+	Sensitive bool
 }
 
 type ActionResult struct {

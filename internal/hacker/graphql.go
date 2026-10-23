@@ -48,10 +48,10 @@ func (a *GraphQLAction) Execute(ctx context.Context, target string, kb *Knowledg
 		for _, c := range candidates {
 			testURL := strings.TrimRight(target, "/") + c
 			resp, err := client.Do(ctx, &types.Request{
-				Method: "POST",
-				URL:    testURL,
+				Method:  "POST",
+				URL:     testURL,
 				Headers: map[string]string{"Content-Type": "application/json"},
-				Body:   []byte(`{"query":"{__typename}"}`),
+				Body:    []byte(`{"query":"{__typename}"}`),
 			})
 			if err == nil && resp.StatusCode == 200 {
 				graphqlEPs = append(graphqlEPs, testURL)

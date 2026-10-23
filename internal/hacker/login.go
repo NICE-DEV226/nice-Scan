@@ -18,6 +18,9 @@ func (a *LoginBruteAction) Metadata() ActionMetadata {
 		Priority:    40,
 		Requires:    []string{"has_login"},
 		Provides:    []string{"has_credentials"},
+		// Credentialed spraying: only when a login form was actually
+		// observed on a fetched page (verified), never from text hints.
+		Sensitive: true,
 	}
 }
 

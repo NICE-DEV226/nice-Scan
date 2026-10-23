@@ -92,10 +92,12 @@ func (a *PassiveReconAction) Execute(ctx context.Context, target string, kb *Kno
 
 		kb.AddCapability(Capability{
 			Name:   "has_subdomain",
+			Origin: OriginHint, // third-party CT data: unverified until the scanner resolves/checks them
 			Target: target,
 			Details: map[string]string{
-				"count": fmt.Sprintf("%d", len(subdomains)),
-				"list":  strings.Join(subdomains, ", "),
+				"count":  fmt.Sprintf("%d", len(subdomains)),
+				"list":   strings.Join(subdomains, ", "),
+				"source": "crt.sh certificate transparency logs",
 			},
 		})
 
@@ -118,6 +120,7 @@ func (a *PassiveReconAction) Execute(ctx context.Context, target string, kb *Kno
 
 		kb.AddCapability(Capability{
 			Name:   "has_recon",
+			Origin: OriginHint, // third-party CT data
 			Target: target,
 			Details: map[string]string{
 				"subdomains": fmt.Sprintf("%d", len(subdomains)),

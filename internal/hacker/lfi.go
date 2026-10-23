@@ -253,6 +253,10 @@ func (a *UploadAction) Metadata() ActionMetadata {
 		Priority:    75,
 		Requires:    []string{"has_upload"},
 		Provides:    []string{"has_upload_exploit"},
+		// State-changing (uploads arbitrary files). Only when an upload
+		// endpoint was actually observed (e.g. a form with a file input
+		// field was fetched), never from page-text hints.
+		Sensitive: true,
 	}
 }
 
