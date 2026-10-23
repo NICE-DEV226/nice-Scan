@@ -12,7 +12,12 @@ import (
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
 
-type PassiveReconAction struct{}
+type PassiveReconAction struct {
+	// Proxy carries the operator's proxy config into the dedicated
+	// recon client below (third-party services must still honor the
+	// configured exit route).
+	Proxy string
+}
 
 func (a *PassiveReconAction) Metadata() ActionMetadata {
 	return ActionMetadata{
@@ -47,6 +52,20 @@ func (a *PassiveReconAction) Execute(ctx context.Context, target string, kb *Kno
 	reconCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
+	// Dedicated recon client for third-party services: deliberately bare
+	// (no operator cookie, no configured auth headers). Attaching the
+	// operator's credentials to crt.sh / web.archive.org burned them to
+	// third parties on every scan. Proxy is honored when configured.
+	reconOpts := []transport.ClientOption{
+		transport.WithTimeout(15 * time.Second),
+		transport.WithRetries(1),
+	}
+	if a.Proxy != "" {
+		reconOpts = append(reconOpts, transport.WithProxy(a.Proxy))
+	}
+	reconClient := transport.NewClient(reconOpts...)
+	defer reconClient.Close()
+
 	type crtResult struct {
 		subs []string
 	}
@@ -58,11 +77,11 @@ func (a *PassiveReconAction) Execute(ctx context.Context, target string, kb *Kno
 	wbCh := make(chan wbResult, 1)
 
 	go func() {
-		subs := queryCRTSh(reconCtx, client, domain)
+		subs := queryCRTSh(reconCtx, reconClient, domain)
 		crtCh <- crtResult{subs: subs}
 	}()
 	go func() {
-		urls := queryWayback(reconCtx, client, domain)
+		urls := queryWayback(reconCtx, reconClient, domain)
 		wbCh <- wbResult{urls: urls}
 	}()
 
@@ -194,14 +213,13 @@ func queryCRTSh(ctx context.Context, client *transport.Client, domain string) []
 	if err := json.Unmarshal(resp.Body, &entries); err != nil {
 		return nil
 	}
+	return filterCrtShNames(entries, domain)
+}
 
+// filterCrtShNames reduces crt.sh certificate-transparency results to hosts
+// strictly scoped to the scanned domain. Extracted pure for tests.
+func filterCrtShNames(entries []crtShEntry, domain string) []string {
 	seen := make(map[string]bool)
-	domainParts := strings.Split(domain, ".")
-	if len(domainParts) < 2 {
-		return nil
-	}
-	tld := domainParts[len(domainParts)-2] + "." + domainParts[len(domainParts)-1]
-
 	var subdomains []string
 	for _, entry := range entries {
 		names := strings.Split(entry.NameValue, "\n")
@@ -211,10 +229,13 @@ func queryCRTSh(ctx context.Context, client *transport.Client, domain string) []
 				continue
 			}
 			name = strings.TrimPrefix(name, "*.")
-			if !strings.HasSuffix(name, "."+domain) && name != domain {
-				if !strings.HasSuffix(name, "."+tld) {
-					continue
-				}
+			// Strict suffix match on the scoped domain only. The old
+			// fallback accepted any name sharing the last two labels
+			// ("sibling TLD"), so `target.com` results could include
+			// attacker-owned `victim-target.co` lookalikes and steer the
+			// scanner at third-party hosts.
+			if !strings.HasSuffix(name, "."+domain) {
+				continue
 			}
 			if seen[name] {
 				continue
@@ -223,11 +244,25 @@ func queryCRTSh(ctx context.Context, client *transport.Client, domain string) []
 			subdomains = append(subdomains, name)
 		}
 	}
-
 	if len(subdomains) > 100 {
 		subdomains = subdomains[:100]
 	}
 	return subdomains
+}
+
+// isDomainScopedURL reports whether a raw URL belongs to the scanned domain
+// itself (host == domain or a subdomain of it). Wayback intake uses this to
+// re-bind historical URLs to the target: entries recorded with foreign
+// hosts (CDX rows for other origins) previously flowed into the KB endpoint
+// list, where credentialed probe modules executed payloads against those
+// third-party hosts.
+func isDomainScopedURL(raw, domain string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return host == domain || strings.HasSuffix(host, "."+domain)
 }
 
 func queryWayback(ctx context.Context, client *transport.Client, domain string) []string {
@@ -253,6 +288,11 @@ func queryWayback(ctx context.Context, client *transport.Client, domain string) 
 	for _, r := range raw {
 		var urlStr string
 		if err := json.Unmarshal(r, &urlStr); err != nil {
+			continue
+		}
+		// Drop rows whose original URL is recorded on a foreign host before
+		// they can enter the endpoint KB.
+		if !isDomainScopedURL(urlStr, domain) {
 			continue
 		}
 		parsed, err := url.Parse(urlStr)

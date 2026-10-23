@@ -12,7 +12,10 @@ import (
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
 
-type S3Action struct{}
+type S3Action struct {
+	// Proxy carries the operator's exit route into the fast clients below.
+	Proxy string
+}
 
 func (a *S3Action) Metadata() ActionMetadata {
 	return ActionMetadata{
@@ -55,6 +58,11 @@ func (a *S3Action) Execute(ctx context.Context, target string, kb *Knowledge, cl
 			fastClient := transport.NewClient(
 				transport.WithTimeout(3*time.Second),
 				transport.WithRetries(0),
+				// S3 bucket checks go to Amazon infrastructure, not the
+				// target: the operator's cookie/headers never attach, but
+				// the configured proxy must still be honored so the scan
+				// traffic doesn't bypass the configured exit route.
+				transport.WithProxy(a.Proxy),
 			)
 			defer fastClient.Close()
 
@@ -119,6 +127,7 @@ func (a *S3Action) Execute(ctx context.Context, target string, kb *Knowledge, cl
 		spawned = append(spawned, &S3DumpAction{
 			bucketURL: r.bucketURL,
 			bucket:    extractBucketName(r.bucketURL),
+			proxy:     a.Proxy,
 		})
 	}
 

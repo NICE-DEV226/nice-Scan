@@ -346,3 +346,16 @@ func isSameDomain(u1, u2 string) bool {
 	}
 	return p1.Host == p2.Host
 }
+
+// sameHostStrict is the security-relevant variant used wherever a URL from
+// remote data gates a network action: parse errors fail closed (unlike
+// isSameDomain, whose fail-open is fine for crawl bookkeeping but not for
+// credential routing).
+func sameHostStrict(u1, u2 string) bool {
+	p1, err1 := url.Parse(u1)
+	p2, err2 := url.Parse(u2)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return strings.EqualFold(p1.Host, p2.Host)
+}

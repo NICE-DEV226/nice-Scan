@@ -64,15 +64,15 @@ var (
 		desc string
 		args string
 	}{
-		{"scan",    "Full security scan (passive + active)",        "<url>"},
-		{"audit",   "Deep audit with ALL checks + verbose",        "<url>"},
-		{"exploit", "Active exploitation (all modules)",           "<url>"},
-		{"tech",    "Technology detection (165 signatures)",        "<url>"},
-		{"tls",     "TLS/SSL configuration analysis",              "<url>"},
-		{"clear",   "Clear output",                                 ""},
-		{"list",    "Show session targets and findings",           ""},
-		{"help",    "Show available commands",                     ""},
-		{"exit",    "Exit the shell",                              ""},
+		{"scan", "Full security scan (passive + active)", "<url>"},
+		{"audit", "Deep audit with ALL checks + verbose", "<url>"},
+		{"exploit", "Active exploitation (all modules)", "<url>"},
+		{"tech", "Technology detection (165 signatures)", "<url>"},
+		{"tls", "TLS/SSL configuration analysis", "<url>"},
+		{"clear", "Clear output", ""},
+		{"list", "Show session targets and findings", ""},
+		{"help", "Show available commands", ""},
+		{"exit", "Exit the shell", ""},
 	}
 )
 
@@ -135,12 +135,28 @@ func NewModel(cfg *types.Config) (*Model, error) {
 	ti.Width = 60
 	ti.Focus()
 
-	client := transport.NewClient(
+	shellClientOpts := []transport.ClientOption{
 		transport.WithTimeout(cfg.Timeout),
 		transport.WithRetries(cfg.Retries),
 		transport.WithFollowRedirects(cfg.FollowRedirects),
 		transport.WithMaxRedirects(cfg.MaxRedirects),
-	)
+		// Parity with the CLI paths: the shell previously dropped the
+		// operator's proxy, cookie and header credentials, so scans run
+		// from the interactive session on an authenticated app looked
+		// like an unauthenticated client (missed findings / different
+		// server behavior).
+		transport.WithProxy(cfg.Proxy),
+	}
+	if cfg.Cookie != "" {
+		shellClientOpts = append(shellClientOpts, transport.WithCookie(cfg.Cookie))
+	}
+	if len(cfg.Headers) > 0 {
+		shellClientOpts = append(shellClientOpts, transport.WithHeaders(cfg.Headers))
+	}
+	if cfg.RateLimit > 0 {
+		shellClientOpts = append(shellClientOpts, transport.WithRateLimit(cfg.RateLimit))
+	}
+	client := transport.NewClient(shellClientOpts...)
 
 	welcome := []string{
 		"",
@@ -160,10 +176,10 @@ func NewModel(cfg *types.Config) (*Model, error) {
 		"",
 	}
 	m := &Model{
-		input:      ti,
-		cfg:        cfg,
-		client:     client,
-		output:     welcome,
+		input:        ti,
+		cfg:          cfg,
+		client:       client,
+		output:       welcome,
 		scrollOffset: 0,
 	}
 
@@ -339,6 +355,13 @@ func (m *Model) exec(cmd string, target string) tea.Cmd {
 			target = "https://" + target
 		}
 		target = strings.TrimRight(target, "/")
+
+		// Interactive targets are user-typed. Bind operator credentials to
+		// that host for this command: the shared shell client must not send
+		// them to other origins the scan may touch (redirects, crawl).
+		if scope := transport.HostDomain(target); scope != "" {
+			m.client.SetCredScope(scope)
+		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()

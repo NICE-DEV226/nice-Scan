@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -47,11 +49,25 @@ func main() {
   │      Fast. Precise. Intelligent.            │
   │      Modern Security Reconnaissance Engine   │
   ╰──────────────────────────────────────────────╯`),
-		SilenceUsage: true,
+		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			if jsonOutput {
 				cfg.OutputFormat = "json"
+			}
+			// Single source of truth for --header values: populate cfg.Headers
+			// so the CLI client and the interactive shell client both honor
+			// them (the shell previously dropped cookie/proxy/headers).
+			headerMap := parseHeaderFlags(headers)
+			if len(headerMap) > 0 {
+				cfg.Headers = headerMap
+			}
+			// Fail fast on an unusable proxy: silently ignoring a configured
+			// proxy broke the operator's OPSEC assumption (traffic would
+			// leave without the configured tunnel).
+			if err := validateProxy(cfg.Proxy); err != nil {
+				slog.Error("invalid --proxy", "error", err)
+				os.Exit(2)
 			}
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -136,19 +152,57 @@ func buildClient() *transport.Client {
 	if cfg.Cookie != "" {
 		opts = append(opts, transport.WithCookie(cfg.Cookie))
 	}
-
-	headerMap := make(map[string]string)
-	for _, h := range headers {
-		parts := strings.SplitN(h, ":", 2)
-		if len(parts) == 2 {
-			headerMap[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
-		}
-	}
-	if len(headerMap) > 0 {
-		opts = append(opts, transport.WithHeaders(headerMap))
+	if len(cfg.Headers) > 0 {
+		opts = append(opts, transport.WithHeaders(cfg.Headers))
 	}
 
 	return transport.NewClient(opts...)
+}
+
+// parseHeaderFlags converts "Key: value" flag repeats into a header map,
+// placing everything before the first colon as the key.
+func parseHeaderFlags(headerLines []string) map[string]string {
+	out := make(map[string]string, len(headerLines))
+	for _, h := range headerLines {
+		parts := strings.SplitN(h, ":", 2)
+		if len(parts) == 2 {
+			out[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		}
+	}
+	return out
+}
+
+// buildClientForTarget builds the shared client bound to the command's
+// target: operator credentials (cookie/headers) only attach to the target's
+// host and its subdomains, never to third-party hosts the scan might touch.
+func buildClientForTarget(target string) *transport.Client {
+	client := buildClient()
+	if scope := transport.HostDomain(target); scope != "" {
+		client.SetCredScope(scope)
+	}
+	return client
+}
+
+// validateProxy rejects malformed --proxy values up front. The transport
+// used to log-and-ignore them, silently sending direct traffic while the
+// operator believed a tunnel was active.
+func validateProxy(proxy string) error {
+	if proxy == "" {
+		return nil
+	}
+	parsed, err := url.Parse(proxy)
+	if err != nil {
+		return fmt.Errorf("could not parse proxy URL: %w", err)
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https", "socks5":
+	default:
+		return fmt.Errorf("unsupported proxy scheme %q (want http, https or socks5)", parsed.Scheme)
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("proxy URL is missing a host")
+	}
+	return nil
 }
 
 func scanCmd() *cobra.Command {
@@ -160,7 +214,7 @@ func scanCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := normalizeTarget(args[0])
 
-			client := buildClient()
+			client := buildClientForTarget(target)
 			defer client.Close()
 
 			scanner := engine.NewScanner(cfg, client)
@@ -181,7 +235,7 @@ func scanCmd() *cobra.Command {
 
 			if interactive {
 				model := tui.NewModel(scanner, []string{target})
-			p := tea.NewProgram(model, tea.WithAltScreen())
+				p := tea.NewProgram(model, tea.WithAltScreen())
 				if _, err := p.Run(); err != nil {
 					return err
 				}
@@ -232,7 +286,7 @@ func auditCmd() *cobra.Command {
 				reportFile = "audit_report.html"
 			}
 
-			client := buildClient()
+			client := buildClientForTarget(target)
 			defer client.Close()
 
 			scanner := engine.NewScanner(cfg, client)
@@ -279,14 +333,14 @@ func auditCmd() *cobra.Command {
 
 func exploitCmd() *cobra.Command {
 	var (
-		loginBrute   bool
-		idorRange    string
-		roleTamper   bool
-		tokenReuse   bool
-		registerAcc  bool
-		resetPass    bool
-		sessionFix   bool
-		allModules   bool
+		loginBrute  bool
+		idorRange   string
+		roleTamper  bool
+		tokenReuse  bool
+		registerAcc bool
+		resetPass   bool
+		sessionFix  bool
+		allModules  bool
 	)
 
 	cmd := &cobra.Command{
@@ -315,7 +369,7 @@ func exploitCmd() *cobra.Command {
 				return cmd.Help()
 			}
 
-			client := buildClient()
+			client := buildClientForTarget(target)
 			defer client.Close()
 
 			opts := exploit.Options{
@@ -578,14 +632,14 @@ func hackCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := normalizeTarget(args[0])
 
-			client := buildClient()
+			client := buildClientForTarget(target)
 			defer client.Close()
 
 			renderer := output.NewTerminal()
 			renderer.RenderBanner()
 
 			brain := hacker.NewBrain(target, client,
-				&hacker.PassiveReconAction{},
+				&hacker.PassiveReconAction{Proxy: cfg.Proxy},
 				&hacker.CrawlAction{},
 				&hacker.FuzzAction{},
 				&hacker.PortScanAction{},
@@ -597,7 +651,7 @@ func hackCmd() *cobra.Command {
 				&hacker.CMDInjectAction{},
 				&hacker.UploadAction{},
 				&hacker.GraphQLAction{},
-				&hacker.S3Action{},
+				&hacker.S3Action{Proxy: cfg.Proxy},
 				hacker.NewOOBAction(),
 			)
 
@@ -645,7 +699,7 @@ func techCmd() *cobra.Command {
 			renderer := output.NewTerminal()
 			renderer.RenderBanner()
 
-			client := buildClient()
+			client := buildClientForTarget(target)
 			defer client.Close()
 
 			scanner := engine.NewScanner(cfg, client)
@@ -679,7 +733,7 @@ func tlsCmd() *cobra.Command {
 			renderer := output.NewTerminal()
 			renderer.RenderBanner()
 
-			client := buildClient()
+			client := buildClientForTarget(target)
 			defer client.Close()
 
 			scanner := engine.NewScanner(cfg, client)

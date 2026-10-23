@@ -69,6 +69,12 @@ func (a *LoginBruteAction) Execute(ctx context.Context, target string, kb *Knowl
 		}
 
 		actionURL := resolveURL(formAction, page.URL)
+		// A cross-host form action would POST generated credential
+		// material to another origin (open redirect / injected form).
+		// Only same-host actions participate in the brute force.
+		if actionURL == "" || !sameHostStrict(actionURL, target) {
+			continue
+		}
 
 		for _, cred := range commonCreds {
 			select {
