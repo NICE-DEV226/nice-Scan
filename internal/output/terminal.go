@@ -445,10 +445,17 @@ func (r *TerminalRenderer) progressBar(current, total int) string {
 }
 
 func (r *TerminalRenderer) truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	// Render sink: rune-aligned truncation (byte slicing of multibyte
+	// evidence renders a corrupted glyph) and a guard for degenerate
+	// widths (byte slicing to a negative index would panic).
+	if maxLen <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	return s[:maxLen-1] + "…"
+	return string(runes[:maxLen-1]) + "…"
 }
 
 func (r *TerminalRenderer) RenderJSON(res *engine.ScanResult) {

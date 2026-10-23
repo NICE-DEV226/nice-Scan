@@ -147,7 +147,7 @@ func (s *Scanner) buildProbes(target string) []*types.Request {
 	reqs = append(reqs, &types.Request{
 		Method:  "GET",
 		URL:     baseURL + "/",
-		Headers: map[string]string{"Origin": "https://evil.com"},
+		Headers: map[string]string{"Origin": corsProbeOrigin},
 		Timeout: s.opts.Timeout,
 	})
 

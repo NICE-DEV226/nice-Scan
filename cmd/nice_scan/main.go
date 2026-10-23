@@ -199,7 +199,7 @@ func validateProxy(proxy string) error {
 	default:
 		return fmt.Errorf("unsupported proxy scheme %q (want http, https or socks5)", parsed.Scheme)
 	}
-	if parsed.Host == "" {
+	if parsed.Hostname() == "" {
 		return fmt.Errorf("proxy URL is missing a host")
 	}
 	return nil
@@ -783,7 +783,8 @@ func shellCmd() *cobra.Command {
 }
 
 func normalizeTarget(target string) string {
-	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+	lower := strings.ToLower(target)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
 		target = "https://" + target
 	}
 	target = strings.TrimRight(target, "/")
@@ -805,10 +806,16 @@ func truncateStr(s string, n int) string {
 	// Print sink: remote-derived result fields (evidence, payloads) may
 	// carry terminal control sequences. Sanitize before truncation.
 	s = types.Sanitize(s)
-	if len(s) <= n {
+	if n <= 0 {
+		return ""
+	}
+	// Truncate on rune boundaries: byte slicing of remote unicode
+	// evidence would emit a corrupted partial rune into the terminal.
+	runes := []rune(s)
+	if len(runes) <= n {
 		return s
 	}
-	return s[:n-1] + "…"
+	return string(runes[:n-1]) + "…"
 }
 
 func abs(x int) int {

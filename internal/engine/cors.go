@@ -8,6 +8,12 @@ import (
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
 
+// corsProbeOrigin is the Origin value the engine's CORS probe sends
+// (see Scanner.buildProbes). The analyzer asserts origin reflection by
+// checking that the response echoes exactly this value: keeping the two
+// sides in one shared constant is what makes the assertion true.
+const corsProbeOrigin = "https://evil.com"
+
 type CORSAnalyzer struct{}
 
 func NewCORSAnalyzer() *CORSAnalyzer {
@@ -30,8 +36,10 @@ func (a *CORSAnalyzer) Analyze(ctx context.Context, resp *types.Response) []type
 	acm := resp.Headers.Get("Access-Control-Allow-Methods")
 	ach := resp.Headers.Get("Access-Control-Allow-Headers")
 
-	origin := resp.Headers.Get("Origin")
-
+	// Reflection can only be asserted against the origin the scanner itself
+	// probed with (engine.go sends this header) and honoured by browsers
+	// only on an exact ACAO match: substring containment would call
+	// "https://evil.com.attacker.tld" a reflection of "https://evil.com".
 	if aco == "" {
 		return nil
 	}
@@ -79,15 +87,33 @@ func (a *CORSAnalyzer) Analyze(ctx context.Context, resp *types.Response) []type
 		})
 	}
 
-	if strings.Contains(aco, origin) && origin != "" && acac == "true" {
-		findings = append(findings, types.Finding{
-			Type:        types.FindingMisconfig,
-			Name:        "CORS Origin Reflection with Credentials",
-			Severity:    types.SeverityHigh,
-			Description: "CORS header reflects the Origin value with credentials enabled",
-			Evidence:    fmt.Sprintf("ACAO: %s | ACAC: true | Origin echoed", aco),
-			Confidence:  0.8,
-		})
+	if strings.EqualFold(strings.TrimSpace(aco), corsProbeOrigin) {
+		if acac == "true" {
+			findings = append(findings, types.Finding{
+				Type:        types.FindingMisconfig,
+				Name:        "CORS Origin Reflection with Credentials",
+				Severity:    types.SeverityHigh,
+				Description: "CORS header reflects the probed attacker origin verbatim with credentials enabled",
+				Evidence:    fmt.Sprintf("ACAO: %s | ACAC: true | Origin echoed", aco),
+				Confidence:  0.8,
+				Metadata: map[string]string{
+					"aco":  aco,
+					"acac": acac,
+				},
+			})
+		} else {
+			findings = append(findings, types.Finding{
+				Type:        types.FindingMisconfig,
+				Name:        "CORS Arbitrary Origin Reflection",
+				Severity:    types.SeverityMedium,
+				Description: "CORS reflects the probed attacker origin even without credentials — any site can read unauthenticated responses",
+				Evidence:    fmt.Sprintf("ACAO: %s | Origin echoed", aco),
+				Confidence:  0.75,
+				Metadata: map[string]string{
+					"aco": aco,
+				},
+			})
+		}
 	}
 
 	if aco == "null" {

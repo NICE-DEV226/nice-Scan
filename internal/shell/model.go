@@ -3,6 +3,7 @@ package shell
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -349,17 +350,35 @@ func (m *Model) View() string {
 	return lipgloss.NewStyle().Padding(0, 2).Render(b.String())
 }
 
+// shellTargetScope normalizes a user-typed interactive target and derives
+// the credential scope to bind for the shell's shared client for that one
+// command. Normalized target is always returned; scope is empty when the
+// input is degenerate (scheme-detection is case-insensitive, pseudo-hosts
+// like "https" or colon artifacts must never become a credential scope).
+func shellTargetScope(target string) (normalized, scope string) {
+	lower := strings.ToLower(target)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		target = "https://" + target
+	}
+	normalized = strings.TrimRight(target, "/")
+	scope = transport.HostDomain(normalized)
+	// Degenerate inputs must fail closed: an empty or colon-artifact host
+	// (":", "::", ...) would otherwise become the credential scope — and a
+	// single-label name like "https" is resolvable inside corporate search
+	// domains, so operator cookies must never bind to it.
+	if parsed, err := url.Parse(normalized); err != nil || parsed.Host == "" || strings.HasPrefix(parsed.Host, ":") {
+		return normalized, ""
+	}
+	return normalized, scope
+}
+
 func (m *Model) exec(cmd string, target string) tea.Cmd {
 	return func() tea.Msg {
-		if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
-			target = "https://" + target
-		}
-		target = strings.TrimRight(target, "/")
-
 		// Interactive targets are user-typed. Bind operator credentials to
 		// that host for this command: the shared shell client must not send
 		// them to other origins the scan may touch (redirects, crawl).
-		if scope := transport.HostDomain(target); scope != "" {
+		target, scope := shellTargetScope(target)
+		if scope != "" {
 			m.client.SetCredScope(scope)
 		}
 

@@ -44,3 +44,13 @@ jobs:
 
       - name: Test with Race Detection
         run: go test -race -count=1 ./...
+
+      # Vulnerability scan of the dependency graph AND of Go itself.
+      # Run through a checksum-verified module install because govulncheck
+      # executes on the build machine: `go run <module>@<version>` fetches
+      # through the module proxy with sum.golang.org verification, pinning
+      # the exact tool version.
+      - name: Vulnerability Scan
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          "$(go env GOPATH)/bin/govulncheck" ./...
