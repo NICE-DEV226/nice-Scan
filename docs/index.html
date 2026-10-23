@@ -125,7 +125,7 @@
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
         </div>
         <h3>Trust Verification</h3>
-        <p>All releases signed with GPG + Sigstore/cosign. SHA256 checksums verified. Supply-chain security with SLSA provenance and SPDX SBOM included every release.</p>
+        <p>SHA256 checksums published per release; GPG-signed checksums when signing is configured. Installers are fail-closed — a failed or missing verification aborts the install. Provenance/SLSA and SBOM publishing are on the roadmap, not shipped today.</p>
       </div>
       <div class="feature-card">
         <div class="fc-icon fc-cmd">
@@ -162,23 +162,23 @@
     <div class="section-header">
       <span class="section-tag">Installation</span>
       <h2>Get NICE_SCAN</h2>
-      <p>Four ways to install, all with cryptographic verification.</p>
+      <p>Install via the fail-closed installer (checksum + signature verification) or build the pinned tag from source.</p>
     </div>
     <div class="install-grid">
-      <div class="install-card active" data-method="scoop">
-        <div class="ic-icon">🍺</div>
-        <h3>Scoop</h3>
-        <p class="ic-desc">Windows package manager</p>
+      <div class="install-card active" data-method="installer">
+        <div class="ic-icon">📜</div>
+        <h3>Fail-closed installer</h3>
+        <p class="ic-desc">Checksum + signature verified or abort</p>
       </div>
-      <div class="install-card" data-method="winget">
-        <div class="ic-icon">📦</div>
-        <h3>Winget</h3>
-        <p class="ic-desc">Windows native package manager</p>
+      <div class="install-card" data-method="instwindows">
+        <div class="ic-icon">🪟</div>
+        <h3>Windows installer</h3>
+        <p class="ic-desc">PowerShell 7+, user-local install</p>
       </div>
       <div class="install-card" data-method="go">
         <div class="ic-icon">⚡</div>
         <h3>Go Install</h3>
-        <p class="ic-desc">Cross-platform source build</p>
+        <p class="ic-desc">Pinned-tag source build</p>
       </div>
       <div class="install-card" data-method="manual">
         <div class="ic-icon">📥</div>
@@ -188,43 +188,47 @@
     </div>
     <div class="install-code">
       <div class="code-tab-bar">
-        <button class="code-tab active" data-tab="scoop">scoop</button>
-        <button class="code-tab" data-tab="winget">winget</button>
+        <button class="code-tab active" data-tab="installer">linux/macOS</button>
+        <button class="code-tab" data-tab="instwindows">powershell</button>
         <button class="code-tab" data-tab="go">go install</button>
         <button class="code-tab" data-tab="manual">manual</button>
       </div>
-      <div class="code-block" id="code-scoop">
+      <div class="code-block" id="code-installer">
         <div class="code-header">
-          <span>powershell</span>
-          <button class="copy-btn" data-cmd="scoop bucket add nice-scan https://github.com/NICE-DEV226/nice-Scan && scoop install nice-scan/nice_scan">Copy</button>
+          <span>bash</span>
+          <button class="copy-btn" data-cmd="curl -sSfL https://raw.githubusercontent.com/NICE-DEV226/nice-Scan/main/scripts/install.sh | sh">Copy</button>
         </div>
-        <pre><code>scoop bucket add nice-scan https://github.com/NICE-DEV226/nice-Scan
-scoop install nice-scan/nice_scan</code></pre>
+        <pre><code><span class="c-comment"># Linux / macOS — fail-closed installer</span>
+curl -sfL https://raw.githubusercontent.com/NICE-DEV226/nice-Scan/main/scripts/install.sh | sh</code></pre>
       </div>
-      <div class="code-block hidden" id="code-winget">
+      <div class="code-block hidden" id="code-instwindows">
         <div class="code-header">
           <span>powershell</span>
-          <button class="copy-btn" data-cmd='winget install --id NICE-DEV226.nice-Scan'>Copy</button>
+          <button class="copy-btn" data-cmd='irm https://raw.githubusercontent.com/NICE-DEV226/nice-Scan/main/scripts/install.ps1 -OutFile install.ps1; powershell -ExecutionPolicy RemoteSigned -File install.ps1'>Copy</button>
         </div>
-        <pre><code>winget install --id NICE-DEV226.nice-Scan</code></pre>
+        <pre><code><span class="c-comment"># Windows PowerShell 7+</span>
+irm https://raw.githubusercontent.com/NICE-DEV226/nice-Scan/main/scripts/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy RemoteSigned -File install.ps1</code></pre>
       </div>
       <div class="code-block hidden" id="code-go">
         <div class="code-header">
           <span>bash</span>
-          <button class="copy-btn" data-cmd="go install github.com/NICE-DEV226/nice-Scan/cmd/nice_scan@latest">Copy</button>
+          <button class="copy-btn" data-cmd="go install github.com/NICE-DEV226/nice-Scan/cmd/nice_scan@vX.Y.Z">Copy</button>
         </div>
-        <pre><code>go install github.com/NICE-DEV226/nice-Scan/cmd/nice_scan@latest</code></pre>
+        <pre><code><span class="c-comment"># Pinned to the release tag — no @latest, no main HEAD</span>
+go install github.com/NICE-DEV226/nice-Scan/cmd/nice_scan@vX.Y.Z</code></pre>
       </div>
       <div class="code-block hidden" id="code-manual">
         <div class="code-header">
           <span>bash</span>
-          <button class="copy-btn" data-cmd='curl -sSfL https://github.com/NICE-DEV226/nice-Scan/releases/latest/download/install.sh | sh'>Copy</button>
+          <button class="copy-btn" data-cmd='curl -sSfL https://raw.githubusercontent.com/NICE-DEV226/nice-Scan/main/scripts/install.sh | sh'>Copy</button>
         </div>
         <pre><code><span class="c-comment"># Linux / macOS</span>
-curl -sSfL https://github.com/NICE-DEV226/nice-Scan/releases/latest/download/install.sh | sh
+curl -sfL https://raw.githubusercontent.com/NICE-DEV226/nice-Scan/main/scripts/install.sh | sh
 
-<span class="c-comment"># Windows PowerShell</span>
-irm https://github.com/NICE-DEV226/nice-Scan/releases/latest/download/install.ps1 | iex</code></pre>
+<span class="c-comment"># Windows PowerShell 7+</span>
+irm https://raw.githubusercontent.com/NICE-DEV226/nice-Scan/main/scripts/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy RemoteSigned -File install.ps1</code></pre>
       </div>
     </div>
   </section>
@@ -369,33 +373,32 @@ irm https://github.com/NICE-DEV226/nice-Scan/releases/latest/download/install.ps
     <div class="section-header">
       <span class="section-tag">Trust</span>
       <h2>Supply Chain Security</h2>
-      <p>Every release is cryptographically signed. Every install script verifies before extraction.</p>
+      <p>Verify before you run. Installers fail closed on a missing checksum or a failed signature. Items not shipped today are marked as such.</p>
     </div>
     <div class="trust-grid">
       <div class="trust-card">
         <div class="tc-icon tc-gpg">🔑</div>
-        <h3>GPG Signatures</h3>
-        <p>Checksum files signed with NICE-DEV226's GPG key. Verify with:</p>
-        <pre><code>gpg --verify checksums.txt.sig checksums.txt</code></pre>
+        <h3>SHA256 + GPG</h3>
+        <p>checksums.txt published per release; GPG-signed when signing keys are configured. Verify with:</p>
+        <pre><code>gpg --verify checksums.txt.sig checksums.txt
+sha256sum --check checksums.txt --ignore-missing</code></pre>
       </div>
       <div class="trust-card">
         <div class="tc-icon tc-cosign">🛡️</div>
         <h3>Sigstore / cosign</h3>
-        <p>Keyless signing via GitHub OIDC. SLSA provenance with cosign bundles.</p>
-        <pre><code>cosign verify-blob --bundle checksums.sigstore.json checksums.txt</code></pre>
+        <p><strong>Not yet published.</strong> CI plumbing exists (cosign installer), but no sigstore bundles are shipped with releases today — do not attempt verify-blob.</p>
       </div>
       <div class="trust-card">
         <div class="tc-icon tc-sbom">📋</div>
         <h3>SPDX SBOM</h3>
-        <p>Software Bill of Materials for every release — full dependency transparency.</p>
-        <pre><code>syft scan nice_scan --from-release NICE-DEV226/nice-Scan:v0.1.0</code></pre>
+        <p>Syft SBOM intended per release — check the release assets for the actual file before relying on it.</p>
       </div>
       <div class="trust-card">
         <div class="tc-icon tc-slsa">✅</div>
-        <h3>SLSA Level 2</h3>
-        <p>Build integrity verified through Sigstore. Non-falsifiable provenance attestations.</p>
-        <pre><code>gh attestation verify nice_scan_0.1.0_linux_amd64.tar.gz \
-  --repo NICE-DEV226/nice-Scan</code></pre>
+        <h3>Fail-closed install</h3>
+        <p>missing checksums, uncovered archive or failed signature ⇒ install aborts, nothing is executed. <code>go install</code> anchors strictly to the release tag.</p>
+        <pre><code># Build the pinned tag yourself:
+git clone --branch vX.Y.Z https://github.com/NICE-DEV226/nice-Scan.git</code></pre>
       </div>
     </div>
     <div class="trust-cta">

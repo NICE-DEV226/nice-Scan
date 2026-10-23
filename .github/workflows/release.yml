@@ -6,44 +6,57 @@ on:
       - "v*.*.*"
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 jobs:
   goreleaser:
     name: GoReleaser
     runs-on: ubuntu-latest
+    # Escalation is job-scoped: signing and publish rights live only where
+    # they are used, never across the workflow's future jobs.
+    permissions:
+      contents: write
+      id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      # Actions pinned to release-tag commit SHAs (resolved from the GitHub
+      # API). Mutable refs like @v6 or @latest cannot be moved by a
+      # maintainer or an attacker with tag push rights.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.25"
           cache: true
 
       - name: Import GPG key
         id: gpg_import
-        uses: crazy-max/ghaction-import-gpg@v6
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
           fingerprint: ${{ secrets.GPG_FINGERPRINT }}
 
       - name: Setup syft
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
-          syft-version: latest
+          syft-version: v1.55.0
 
       - name: Setup cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.4
 
-      - uses: goreleaser/goreleaser-action@v6
+      - name: Release
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
-          version: latest
+          version: v2.19.0
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

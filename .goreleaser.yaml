@@ -90,25 +90,25 @@ release:
     # 1. Download checksums
     gh release download {{.Tag}} --pattern "checksums*" -R NICE-DEV226/nice-Scan
 
-    # 2. Verify SHA256
-    sha256sum --check nice_scan_{{.Version}}_checksums.txt
+    # 2. Verify SHA256 over the archive you downloaded
+    sha256sum --check nice_scan_{{.Version}}_checksums.txt --ignore-missing
 
-    # 3. Verify GPG signature
-    gpg --verify nice_scan_{{.Version}}_checksums.txt.sig
-
-    # 4. Verify Sigstore (cosign — keyless OIDC)
-    cosign verify-blob \
-      --bundle nice_scan_{{.Version}}_checksums.sigstore.json \
-      nice_scan_{{.Version}}_checksums.txt
+    # 3. Verify GPG signature (published when signing is configured)
+    gpg --verify nice_scan_{{.Version}}_checksums.txt.sig nice_scan_{{.Version}}_checksums.txt
     ```
+
+    The installers (`scripts/install.sh`, `scripts/install.ps1`) are fail-closed:
+    missing checksums or a failed verification aborts the install. See SECURITY.md
+    for the actual-state supply chain inventory (cosign/SLSA publishing is planned,
+    not shipped until it lands in release assets).
 
     ## 📦 Assets
     | File | Description |
     |------|-------------|
     | `nice_scan_{{.Version}}_checksums.txt` | SHA256 checksums for all binaries |
-    | `nice_scan_{{.Version}}_checksums.txt.sig` | GPG signature of checksums |
-    | `nice_scan_{{.Version}}_checksums.sigstore.json` | Cosign Sigstore bundle (keyless) |
-    | `nice_scan_{{.Version}}_sbom.spdx.json` | SPDX SBOM (dependencies) |
+    | `nice_scan_{{.Version}}_checksums.txt.sig` | GPG signature of checksums (when release signing is configured) |
+    | `nice_scan_{{.Version}}_checksums.sigstore.json` | Cosign Sigstore bundle (published when signing is configured) |
+    | `nice_scan_{{.Version}}_sbom.spdx.json` | SPDX SBOM (published when SBOM generation succeeds) |
 
     ## 🚀 Quick Start
     ```bash

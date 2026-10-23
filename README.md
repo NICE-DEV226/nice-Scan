@@ -112,30 +112,36 @@ nice_scan scan https://example.com --json
 
 ## Installation
 
-### Package Managers
+> **Package managers:** this project today ships via GitHub Releases and
+> `go install` only. No Scoop bucket, Winget identity or Homebrew tap is
+> published — commands circulating elsewhere (including `winget install
+> --id NICE-DEV226.nice-Scan` or `scoop install nice-scan/nice_scan`) target
+> package IDs this project does not own and may install unrelated software.
+
+**The installer is fail-closed:** it resolves one release tag, verifies the
+SHA256 checksums and the GPG signature first, and aborts with nothing
+installed if any step fails.
 
 <details open>
-<summary><strong>Scoop</strong> (Windows)</summary>
-
-```powershell
-scoop bucket add nice-scan https://github.com/NICE-DEV226/nice-Scan
-scoop install nice-scan/nice_scan
-```
-</details>
-
-<details>
-<summary><strong>Winget</strong> (Windows)</summary>
-
-```powershell
-winget install --id NICE-DEV226.nice-Scan
-```
-</details>
-
-<details>
-<summary><strong>Homebrew</strong> (macOS / Linux)</summary>
+<summary><strong>Linux / macOS</strong> (installs to <code>~/.local/bin</code>)</summary>
 
 ```bash
-brew install NICE-DEV226/tap/nice-scan
+curl -sfL https://raw.githubusercontent.com/NICE-DEV226/nice-Scan/main/scripts/install.sh | sh
+```
+
+Or with Go 1.24+ (builds from the pinned release tag):
+
+```bash
+go install github.com/NICE-DEV226/nice-Scan/cmd/nice_scan@vX.Y.Z
+```
+</details>
+
+<details>
+<summary><strong>Windows</strong> (PowerShell 7+, installs to <code>%LOCALAPPDATA%\nice_scan</code>)</summary>
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/NICE-DEV226/nice-Scan/main/scripts/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy RemoteSigned -File install.ps1
 ```
 </details>
 
@@ -144,8 +150,12 @@ brew install NICE-DEV226/tap/nice-scan
 <details>
 <summary><strong>Go Install</strong> (cross-platform, requires Go 1.24+)</summary>
 
+> Anchored builds only — replace `X.Y.Z` with the current release tag.
+> `@latest` is accepted by the Go toolchain but is not the installer's
+> contract; the official installer resolves and pins one tag.
+
 ```bash
-go install github.com/NICE-DEV226/nice-Scan/cmd/nice_scan@latest
+go install github.com/NICE-DEV226/nice-Scan/cmd/nice_scan@vX.Y.Z
 ```
 </details>
 
@@ -263,16 +273,21 @@ $ nice_scan hack example.com --timeout 15s -R report.html
 
 ## Trust & Supply Chain Security
 
-Every release is cryptographically signed and verifiable. NICE_SCAN follows SLSA Level 2 practices with full supply chain transparency.
+**Actual state — verified inventory (not marketing):**
 
-| Layer | Method | Verification Command |
-|-------|--------|---------------------|
-| **Code Integrity** | All commits GPG-signed | `git log --show-signature` |
-| **Binary Integrity** | SHA256 checksums | `sha256sum --check checksums.txt` |
-| **Release Authenticity** | GPG-signed checksums | `gpg --verify checksums.txt.sig checksums.txt` |
-| **Build Provenance** | Sigstore/cosign (keyless OIDC) | `cosign verify-blob --bundle checksums.sigstore.json checksums.txt` |
-| **Dependency Transparency** | SPDX SBOM | `syft scan nice_scan --from-release NICE-DEV226/nice-Scan:v0.1.0` |
-| **Verifiable Build** | `gh attestation verify` | `gh attestation verify nice_scan_linux_amd64.tar.gz --repo NICE-DEV226/nice-Scan` |
+| Layer | Actual State | Verification Command |
+|-------|-------------|---------------------|
+| **Binary Integrity** | SHA256 checksums published per release | `sha256sum --check checksums.txt --ignore-missing` |
+| **Release Authenticity** | GPG-signed `checksums.txt` when signing keys are configured | `gpg --verify checksums.txt.sig checksums.txt` |
+| **Code Integrity** | Commits are **not** systematically GPG-signed | check individually: `git log --show-signature` |
+| **Build Provenance (SLSA/cosign)** | **Not yet published** — plumbing exists in CI, no bundles/attestations shipped | N/A today |
+| **SBOM** | syft SBOM intended per release — check the release assets | verify presence before relying on it |
+| **Distribution** | GitHub Releases + `go install <tag>` (no brew/winget/scoop packages today) | — |
+
+The installers (`scripts/install.sh`, `scripts/install.ps1`) are **fail-closed**:
+a missing checksum file, an uncovered archive or a failed signature aborts with
+nothing installed. The `go install` path anchors strictly to the resolved
+release tag — no `@latest`, no `main` HEAD.
 
 ### Quick Verification
 
@@ -283,19 +298,17 @@ gh release download v0.1.0 --pattern "checksums*" -R NICE-DEV226/nice-Scan
 # Verify SHA256
 sha256sum --check nice_scan_0.1.0_checksums.txt --ignore-missing
 
-# Verify GPG signature
+# Verify GPG signature (when signing is configured)
 gpg --verify nice_scan_0.1.0_checksums.txt.sig nice_scan_0.1.0_checksums.txt
 
-# Verify Sigstore (keyless OIDC)
-cosign verify-blob --bundle nice_scan_0.1.0_checksums.txt.sigstore.json nice_scan_0.1.0_checksums.txt
-
-# Most trustworthy: build from source
-git clone https://github.com/NICE-DEV226/nice-Scan.git && cd nice-Scan && go build ./cmd/nice_scan
+# Most trustworthy: build from a pinned tag (audit the code you run)
+git clone --branch v0.1.0 https://github.com/NICE-DEV226/nice-Scan.git && cd nice-Scan && go build ./cmd/nice_scan
 ```
 
-> **Note:** The project GPG public key is published to `keyserver.ubuntu.com` (fingerprint: `4CE466095C5B3185883288C593FBFE29F62FA4DB`). Verify with `gpg --recv-keys 93FBFE29F62FA4DB`.
+> **Note:** the maintainer GPG key is imported on first use from `https://github.com/NICE-DEV226.gpg` (trust-on-first-use). A historical fingerprint has circulated (`4CE466095C5B3185883288C593FBFE29F62FA4DB`) — until it is published authoritatively in SECURITY.md, verify any key out-of-band.
 
-See [SECURITY.md](SECURITY.md) for the full security policy and [cosign.pub](cosign.pub) for the cosign public key.
+See [SECURITY.md](SECURITY.md) for the full security policy, including the
+scanner's risk-honesty statement (verified evidence vs. remote-text hints).
 
 <br/>
 

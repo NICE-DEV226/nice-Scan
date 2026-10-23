@@ -22,8 +22,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const installCards = document.querySelectorAll('.install-card');
   const codeTabs = document.querySelectorAll('.code-tab');
   const codeBlocks = {
-    scoop: document.getElementById('code-scoop'),
-    winget: document.getElementById('code-winget'),
+    installer: document.getElementById('code-installer'),
+    instwindows: document.getElementById('code-instwindows'),
     go: document.getElementById('code-go'),
     manual: document.getElementById('code-manual'),
   };

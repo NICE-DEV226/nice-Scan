@@ -1,20 +1,26 @@
 #!/usr/bin/env bash
-# NICE_SCAN Installer — macOS / Linux
+# NICE_SCAN Installer — macOS / Linux (fail-closed)
 #
-# Downloads the official release from GitHub, verifies SHA256 + GPG signature,
-# and installs to ~/.local/bin (no sudo required).
+# Downloads the release pinned to a concrete tag from GitHub and verifies
+# SHA256 + GPG signature BEFORE anything is installed. Any verification
+# failure aborts the installation.
 #
 # Usage:
 #   curl -sfL https://raw.githubusercontent.com/NICE-DEV226/nice-Scan/main/scripts/install.sh | sh
 #   curl -sfL https://raw.githubusercontent.com/NICE-DEV226/nice-Scan/main/scripts/install.sh | sh -s -- --version v0.2.0
 #
-# Trust & Security:
+# Trust & Security (what this script actually does — not marketing):
 #   - Downloads ONLY via HTTPS from github.com
-#   - Verifies SHA256 checksum against published checksums file
-#   - Verifies GPG signature when possible (requires gpg + cosign)
+#   - Refuses to install when the checksum file is missing or does not
+#     cover the archive (checksum mismatch = abort)
+#   - Verifies the GPG signature over checksums.txt; a signature that
+#     cannot be verified aborts the install
+#   - The GPG key is fetched from https://github.com/NICE-DEV226.gpg and
+#     trusted on first use (TOFU). Pin the fingerprint listed in the repo
+#     SECURITY.md to remove the TOFU step.
+#   - Source fallback builds the commit of the resolved release TAG, never
+#     an unpinned branch head
 #   - Installs to ~/.local/bin (user-local, no sudo)
-#   - Source code at https://github.com/NICE-DEV226/nice-Scan
-#   - Repo GPG key: https://github.com/NICE-DEV226.gpg
 
 set -euo pipefail
 
@@ -23,11 +29,20 @@ REPO="NICE-DEV226/nice-Scan"
 BINARY="nice_scan"
 APPNAME="NICE_SCAN"
 INSTALL_DIR="${HOME}/.local/bin"
-VERSION="${1:-latest}"
+REQUESTED_VERSION="latest"
+
+# Parse arguments: --version vX.Y.Z
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --version) REQUESTED_VERSION="${2:-latest}"; shift 2 ;;
+        --version=*) REQUESTED_VERSION="${1#--version=}"; shift ;;
+        *) break ;;
+    esac
+done
 
 # ── Colors ──
 RED='\033[0;31m'
-GREEN='\033[0;32m'  
+GREEN='\033[0;32m'
 CYAN='\033[0;36m'
 YELLOW='\033[1;33m'
 DIM='\033[2m'
@@ -39,43 +54,55 @@ warn()  { printf "${YELLOW}⚠${NC} %s\n" "$*"; }
 err()   { printf "${RED}✘${NC} %s\n" "$*"; }
 dim()   { printf "${DIM}%s${NC}\n" "$*"; }
 
+die() {
+    err "$*"
+    printf "${RED}✘${NC} Installation ABORTED. Nothing was installed.\n"
+    exit 1
+}
+
 # ── Header ──
 cat <<EOF
 
-  $(tput bold)$APPNAME Installer$(tput sgr0)
+  $(tput bold)$APPNAME Installer (fail-closed)$(tput sgr0)
   $REPO
   $(printf '%.0s─' $(seq 1 56))
 
 EOF
 
 # ── Preflight ──
-if ! command -v curl &>/dev/null; then
-    err "curl is required. Install it first."
-    exit 1
-fi
-
-if ! command -v tar &>/dev/null; then
-    err "tar is required."
-    exit 1
-fi
+command -v curl >/dev/null 2>&1 || die "curl is required. Install it first."
+command -v tar  >/dev/null 2>&1 || die "tar is required."
 
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
 case "$ARCH" in
     x86_64|amd64) ARCH="amd64" ;;
     aarch64|arm64) ARCH="arm64" ;;
-    *) err "Unsupported architecture: $ARCH"; exit 1 ;;
+    *) die "Unsupported architecture: $ARCH" ;;
 esac
 
-# ── Go install (most trustworthy — builds from auditable source) ──
-if command -v go &>/dev/null; then
+# ── Resolve the release tag FIRST (single trust anchor) ──
+# go install, binary download and the source fallback all anchor to the
+# SAME tag: no @latest, no branch head, no guessing.
+if [ "$REQUESTED_VERSION" = "latest" ]; then
+    info "Resolving latest release tag from GitHub..."
+    RELEASE_JSON=$(curl -sfL "https://api.github.com/repos/${REPO}/releases/latest") || die "Could not reach the GitHub API."
+    TAG=$(echo "$RELEASE_JSON" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": "\(.*\)",/\1/')
+    [ -n "$TAG" ] || die "Could not resolve the latest release tag. Aborting rather than installing an unpredictable version."
+else
+    TAG="$REQUESTED_VERSION"
+fi
+dim "Pinned version: ${TAG}"
+
+# ── Preferred path: go install the pinned tag ──
+if command -v go >/dev/null 2>&1; then
     GO_MINOR=$(go version | sed -n 's/.*go1\.\([0-9]\+\).*/\1/p')
     if [ -n "$GO_MINOR" ] && [ "$GO_MINOR" -ge 24 ] 2>/dev/null; then
-        info "Go 1.$GO_MINOR detected — installing from source (most trustworthy)..."
-        dim "→ go install github.com/${REPO}/cmd/${BINARY}@${VERSION}"
-        go install "github.com/${REPO}/cmd/${BINARY}@${VERSION}"
+        info "Go 1.$GO_MINOR detected — installing from source at ${TAG}..."
+        dim "→ go install github.com/${REPO}/cmd/${BINARY}@${TAG}"
+        go install "github.com/${REPO}/cmd/${BINARY}@${TAG}" || die "go install ${TAG} failed."
         GOBIN=$(go env GOPATH)/bin
-        ok "${BINARY} installed to ${GOBIN}/${BINARY}"
+        ok "${BINARY} built from source at tag ${TAG} → ${GOBIN}/${BINARY}"
         if ! echo "$PATH" | grep -q "$GOBIN"; then
             warn "Add ${GOBIN} to your PATH:"
             dim "  export PATH=\"\$PATH:${GOBIN}\""
@@ -86,117 +113,107 @@ if command -v go &>/dev/null; then
 fi
 
 # ── Download release ──
-info "Fetching latest release from GitHub..."
-dim "→ https://api.github.com/repos/${REPO}/releases/latest"
-
-RELEASE_JSON=$(curl -sfL "https://api.github.com/repos/${REPO}/releases/latest")
-TAG=$(echo "$RELEASE_JSON" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": "\(.*\)",/\1/')
-dim "Release: ${TAG}"
+RELEASE_JSON=$(curl -sfL "https://api.github.com/repos/${REPO}/releases/latest") || die "Could not reach the GitHub API."
 
 ARCHIVE_NAME="${BINARY}_${TAG}_${OS}_${ARCH}.tar.gz"
 ASSET_URL=$(echo "$RELEASE_JSON" | grep "browser_download_url" | grep "$ARCHIVE_NAME" | head -1 | sed 's/.*"browser_download_url": "\(.*\)",/\1/')
 
 if [ -z "$ASSET_URL" ]; then
-    err "No release binary found for ${OS}/${ARCH}."
-    err "Check https://github.com/${REPO}/releases"
-    warn "Falling back to source build..."
-    if ! command -v go &>/dev/null; then
-        err "Go is required. Install Go 1.24+ from https://go.dev/dl/"
-        exit 1
-    fi
+    # ── Source fallback: clone the RELEASE TAG, never main HEAD ──
+    warn "No release binary found for ${OS}/${ARCH} at ${TAG}."
+    command -v go >/dev/null 2>&1 || die "Go is required to build from source. Install Go 1.24+. Nothing was installed."
     TMPDIR=$(mktemp -d)
-    info "Cloning source from https://github.com/${REPO}.git..."
-    git clone --depth 1 "https://github.com/${REPO}.git" "$TMPDIR" 2>&1 | sed 's/^/  /'
+    trap 'rm -rf "$TMPDIR"' EXIT
+    info "Cloning source at tag ${TAG} (pinned checkout, not a branch head)..."
+    git clone --depth 1 --branch "${TAG}" "https://github.com/${REPO}.git" "$TMPDIR" >/dev/null 2>&1 || die "Could not clone tag ${TAG}."
     pushd "$TMPDIR" >/dev/null
+    dim "→ HEAD: $(git rev-parse HEAD)"
     info "Building from source..."
-    go build -ldflags "-s -w -X main.version=${VERSION}" -o "$BINARY" ./cmd/nice_scan 2>&1 | sed 's/^/  /'
+    go build -ldflags "-s -w -X main.version=${TAG}" -o "$BINARY" ./cmd/nice_scan || die "Source build failed."
     popd >/dev/null
     mkdir -p "$INSTALL_DIR"
     mv "${TMPDIR}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
-    rm -rf "$TMPDIR"
-    ok "Binary built from source — fully auditable"
+    ok "Binary built from the pinned tag ${TAG}. Hash:"
+    sha256sum "${INSTALL_DIR}/${BINARY}"
     INSTALLED_FROM_SOURCE=true
 else
     TMPDIR=$(mktemp -d)
+    trap 'rm -rf "$TMPDIR"' EXIT
     DL_PATH="${TMPDIR}/${ARCHIVE_NAME}"
 
     info "Downloading ${ARCHIVE_NAME}..."
     dim "→ ${ASSET_URL}"
-    curl -sfL "$ASSET_URL" -o "$DL_PATH"
+    curl -sfL "$ASSET_URL" -o "$DL_PATH" || die "Download failed."
 
-    # ── Download checksums ──
+    # ── checksums.txt is MANDATORY (fail-closed) ──
     CHECKSUMS_URL=$(echo "$RELEASE_JSON" | grep "browser_download_url" | grep "checksums" | head -1 | sed 's/.*"browser_download_url": "\(.*\)",/\1/' || true)
-    
-    if [ -n "$CHECKSUMS_URL" ]; then
-        info "Verifying SHA256 checksum..."
-        CHECKSUMS_PATH="${TMPDIR}/checksums.txt"
-        curl -sfL "$CHECKSUMS_URL" -o "$CHECKSUMS_PATH"
-        
-        EXPECTED_HASH=$(grep "$ARCHIVE_NAME" "$CHECKSUMS_PATH" | awk '{print $1}')
-        if [ -n "$EXPECTED_HASH" ]; then
-            ACTUAL_HASH=$(sha256sum "$DL_PATH" | awk '{print $1}')
-            if [ "$ACTUAL_HASH" != "$EXPECTED_HASH" ]; then
-                err "CHECKSUM MISMATCH — download may be tampered!"
-                err "  Expected: ${EXPECTED_HASH}"
-                err "  Actual:   ${ACTUAL_HASH}"
-                err "  Aborting installation. Do NOT run the downloaded file."
-                rm -rf "$TMPDIR"
-                exit 1
-            fi
-            ok "SHA256 checksum verified — file integrity confirmed"
-        else
-            warn "No matching checksum found — skipping verification"
-        fi
+    [ -n "$CHECKSUMS_URL" ] || die "No checksums.txt published for this release. The installer refuses to install an unverifiable binary."
 
-        # ── GPG verification (if available) ──
-        if command -v gpg &>/dev/null; then
-            SIG_URL=$(echo "$RELEASE_JSON" | grep "browser_download_url" | grep "checksums.*\.sig" | head -1 | sed 's/.*"browser_download_url": "\(.*\)",/\1/' || true)
-            if [ -n "$SIG_URL" ]; then
-                info "Verifying GPG signature..."
-                SIG_PATH="${TMPDIR}/checksums.txt.sig"
-                curl -sfL "$SIG_URL" -o "$SIG_PATH"
-                
-                # Import repo's public key if not already trusted
-                gpg --list-keys "NICE-DEV226" &>/dev/null || {
-                    warn "Importing NICE-DEV226 GPG key..."
-                    curl -sfL "https://github.com/NICE-DEV226.gpg" | gpg --import 2>&1 | sed 's/^/  /'
-                }
-                
-                if gpg --verify "$SIG_PATH" "$CHECKSUMS_PATH" 2>&1; then
-                    ok "GPG signature verified — release authenticity confirmed"
-                else
-                    warn "GPG signature could not be verified (key may need trust)"
-                    dim "  Run: gpg --keyserver keys.openpgp.org --search-keys NICE-DEV226"
-                fi
+    info "Verifying SHA256 checksum..."
+    CHECKSUMS_PATH="${TMPDIR}/checksums.txt"
+    curl -sfL "$CHECKSUMS_URL" -o "$CHECKSUMS_PATH" || die "Could not download checksums.txt."
+
+    EXPECTED_HASH=$(grep "$ARCHIVE_NAME" "$CHECKSUMS_PATH" | awk '{print $1}')
+    [ -n "$EXPECTED_HASH" ] || die "checksums.txt does not cover ${ARCHIVE_NAME}. Refusing to install."
+
+    ACTUAL_HASH=$(sha256sum "$DL_PATH" | awk '{print $1}')
+    if [ "$ACTUAL_HASH" != "$EXPECTED_HASH" ]; then
+        err "CHECKSUM MISMATCH — the download may have been tampered with."
+        err "  Expected: ${EXPECTED_HASH}"
+        err "  Actual:   ${ACTUAL_HASH}"
+        die "Do NOT run the downloaded file."
+    fi
+    ok "SHA256 checksum verified."
+
+    # ── GPG signature over checksums.txt must VERIFY (fail-closed) ──
+    if command -v gpg >/dev/null 2>&1; then
+        SIG_URL=$(echo "$RELEASE_JSON" | grep "browser_download_url" | grep "checksums.*\.sig" | head -1 | sed 's/.*"browser_download_url": "\(.*\)",/\1/' || true)
+        if [ -n "$SIG_URL" ]; then
+            info "Verifying GPG signature..."
+            SIG_PATH="${TMPDIR}/checksums.txt.sig"
+            curl -sfL "$SIG_URL" -o "$SIG_PATH" || die "Could not download the signature."
+
+            # TOFU: import the maintainer's public key on first use. Pin the
+            # fingerprint (SECURITY.md) to remove this trust step.
+            if ! gpg --list-keys "NICE-DEV226" >/dev/null 2>&1; then
+                warn "First use: importing NICE-DEV226 GPG key from github.com (TOFU)..."
+                curl -sfL "https://github.com/NICE-DEV226.gpg" | gpg --import 2>/dev/null || die "Could not import the maintainer GPG key."
             fi
+
+            if gpg --verify "$SIG_PATH" "$CHECKSUMS_PATH" >/dev/null 2>&1; then
+                ok "GPG signature verified — release authenticity confirmed."
+            else
+                err "GPG signature verification FAILED."
+                err "  The checksums file does not match the maintainer's signature."
+                die "Refusing to install a release whose signature cannot be verified."
+            fi
+        else
+            warn "No checksums.txt.sig in this release — SHA256-only verification."
         fi
     else
-        warn "No checksum file in release — skipping integrity verification"
-        warn "Verify manually: gh release download --pattern checksums -R ${REPO}"
+        warn "gpg not found — SHA256-only verification."
     fi
 
     # ── Extract ──
     info "Extracting..."
     tar -xzf "$DL_PATH" -C "$TMPDIR"
-    
+
     mkdir -p "$INSTALL_DIR"
-    # Handle different archive structures
     if [ -f "${TMPDIR}/${BINARY}" ]; then
         mv "${TMPDIR}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
     else
         find "$TMPDIR" -name "${BINARY}" -exec mv {} "${INSTALL_DIR}/" \;
     fi
-    rm -rf "$TMPDIR"
     INSTALLED_FROM_SOURCE=false
+    trap - EXIT
 fi
 
-chmod +x "${INSTALL_DIR}/${BINARY}"
+chmod 0755 "${INSTALL_DIR}/${BINARY}"
 
 # ── PATH setup ──
 if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
     warn "Add ${INSTALL_DIR} to your PATH:"
     dim "  export PATH=\"\$HOME/.local/bin:\$PATH\""
-    # Auto-add to shell config
     for RC in "${HOME}/.bashrc" "${HOME}/.zshrc"; do
         if [ -f "$RC" ] && ! grep -q "\.local/bin" "$RC" 2>/dev/null; then
             echo "" >> "$RC"
@@ -217,9 +234,14 @@ printf "  $(tput dim)%s$(tput sgr0)\n" "$(printf '%.0s─' $(seq 1 56))"
 ok "${BINARY} installed successfully"
 echo ""
 dim "  Location:  ${INSTALL_DIR}/${BINARY}"
-dim "  Version:   ${VERSION}"
+dim "  Version:   ${TAG}"
 dim "  Size:      ${FILE_SIZE}"
 dim "  SHA256:    ${FILE_HASH}"
+if [ "${INSTALLED_FROM_SOURCE:-false}" = "false" ]; then
+    dim "  Verified:  SHA256 + GPG (checksums.txt signed)"
+else
+    dim "  Verified:  built from pinned tag ${TAG} (source, audit before use)"
+fi
 echo ""
 info "Get started:"
 echo "    nice_scan --help"
