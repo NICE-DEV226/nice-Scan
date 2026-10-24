@@ -16,8 +16,9 @@
 #   - Verifies the GPG signature over checksums.txt; a signature that
 #     cannot be verified aborts the install
 #   - The GPG key is fetched from https://github.com/NICE-DEV226.gpg and
-#     trusted on first use (TOFU). Pin the fingerprint listed in the repo
-#     SECURITY.md to remove the TOFU step.
+#     must match the PINNED fingerprint below (verified on
+#     keyserver.ubuntu.com, published in SECURITY.md). A key channel
+#     serving a different key makes the installer abort
 #   - Source fallback builds the commit of the resolved release TAG, never
 #     an unpinned branch head
 #   - Installs to ~/.local/bin (user-local, no sudo)
@@ -173,11 +174,21 @@ else
             SIG_PATH="${TMPDIR}/checksums.txt.sig"
             curl -sfL "$SIG_URL" -o "$SIG_PATH" || die "Could not download the signature."
 
-            # TOFU: import the maintainer's public key on first use. Pin the
-            # fingerprint (SECURITY.md) to remove this trust step.
-            if ! gpg --list-keys "NICE-DEV226" >/dev/null 2>&1; then
-                warn "First use: importing NICE-DEV226 GPG key from github.com (TOFU)..."
+            # Pinned trust root: the release fingerprint is verified
+            # out-of-band on keyserver.ubuntu.com (see SECURITY.md). The key
+            # is imported on demand, then the keyring is required to contain
+            # exactly the pinned fingerprint — a .gpg channel serving a
+            # different key for this uid fails here instead of silently
+            # validating an attacker's signature.
+            GPG_FP="4CE466095C5B3185883288C593FBFE29F62FA4DB"
+            if ! gpg --list-keys "$GPG_FP" >/dev/null 2>&1; then
+                warn "Importing NICE-DEV226 GPG key from github.com..."
                 curl -sfL "https://github.com/NICE-DEV226.gpg" | gpg --import 2>/dev/null || die "Could not import the maintainer GPG key."
+            fi
+            if ! gpg --list-keys "$GPG_FP" >/dev/null 2>&1; then
+                err "Imported key does not match the pinned fingerprint:"
+                err "  expected: $GPG_FP   (see SECURITY.md / keyserver.ubuntu.com)"
+                die "The .gpg channel is not serving the pinned release key. Refusing to verify."
             fi
 
             if gpg --verify "$SIG_PATH" "$CHECKSUMS_PATH" >/dev/null 2>&1; then

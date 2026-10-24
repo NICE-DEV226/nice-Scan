@@ -125,7 +125,7 @@
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
         </div>
         <h3>Trust Verification</h3>
-        <p>SHA256 checksums published per release; GPG-signed checksums when signing is configured. Installers are fail-closed — a failed or missing verification aborts the install. Provenance/SLSA and SBOM publishing are on the roadmap, not shipped today.</p>
+        <p>SHA256 checksums published per release, GPG-signed against a pinned fingerprint (keyserver-verified). Installers are fail-closed — a failed or missing verification aborts the install. Build-provenance attestations (SLSA) and SBOM are emitted at release time by the workflow.</p>
       </div>
       <div class="feature-card">
         <div class="fc-icon fc-cmd">
@@ -386,7 +386,8 @@ sha256sum --check checksums.txt --ignore-missing</code></pre>
       <div class="trust-card">
         <div class="tc-icon tc-cosign">🛡️</div>
         <h3>Sigstore / cosign</h3>
-        <p><strong>Not yet published.</strong> CI plumbing exists (cosign installer), but no sigstore bundles are shipped with releases today — do not attempt verify-blob.</p>
+        <h3>Sigstore / cosign</h3>
+        <p><strong>Emitted at release time.</strong> The release workflow produces cosign keyless bundles on the checksums manifest and GitHub build-provenance attestations (releases cut after 2026-10-24) — verify with <code>gh attestation verify</code>.</p>
       </div>
       <div class="trust-card">
         <div class="tc-icon tc-sbom">📋</div>

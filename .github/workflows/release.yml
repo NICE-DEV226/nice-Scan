@@ -61,3 +61,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GPG_FINGERPRINT: ${{ secrets.GPG_FINGERPRINT }}
+
+      # GitHub artifact attestations (SLSA build provenance, signed by
+      # GitHub's Sigstore instance): emitted for the archives and the
+      # checksums manifest of every release produced after this step
+      # landed. Verify with:
+      #   gh attestation verify <file> -R NICE-DEV226/nice-Scan
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/**/nice_scan_*.tar.gz
+            dist/**/nice_scan_*.zip
+            dist/nice_scan_*checksums.txt

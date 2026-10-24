@@ -54,7 +54,8 @@ scripts/
 ### Key Design Decisions
 
 - **Single binary** — all features (scan, hack, shell, TUI) compile into one static binary
-- **Deterministic builds** — `go build` with `CGO_ENABLED=0` for reproducible artifacts
+- **Static builds** — `go build` with `CGO_ENABLED=0`; release archives embed
+  a build timestamp (`main.date`), so they are not bit-reproducible today
 - **Action interface** — hacker actions return `ActionResult{Findings, Actions}` enabling forward-chaining
 - **LipGloss styling** — graphite/slate palette, no green-on-black, consistent severity colors
 
@@ -111,9 +112,10 @@ goreleaser release --clean
 
 Every release produces:
 - Pre-built binaries for Windows/macOS/Linux × amd64/arm64
-- SHA256 checksums (signed with GPG)
-- Sigstore/SLSA provenance attestation
-- SPDX SBOM
+- SHA256 checksums (signed with GPG, pinned key fingerprint)
+- GitHub build-provenance attestations + cosign keyless bundle
+  (releases cut after 2026-10-24; see SECURITY.md)
+- SPDX SBOM (source)
 
 ## ❓ Questions
 

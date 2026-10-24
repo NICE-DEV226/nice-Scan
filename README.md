@@ -280,7 +280,7 @@ $ nice_scan hack example.com --timeout 15s -R report.html
 | **Binary Integrity** | SHA256 checksums published per release | `sha256sum --check checksums.txt --ignore-missing` |
 | **Release Authenticity** | GPG-signed `checksums.txt` when signing keys are configured | `gpg --verify checksums.txt.sig checksums.txt` |
 | **Code Integrity** | Commits are **not** systematically GPG-signed | check individually: `git log --show-signature` |
-| **Build Provenance (SLSA/cosign)** | **Not yet published** — plumbing exists in CI, no bundles/attestations shipped | N/A today |
+| **Build Provenance (SLSA/cosign)** | GitHub build-provenance attestations + cosign keyless bundles emitted at release time (releases cut after 2026-10-24; nothing retroactive) | `gh attestation verify <file> -R NICE-DEV226/nice-Scan` |
 | **SBOM** | syft SBOM intended per release — check the release assets | verify presence before relying on it |
 | **Distribution** | GitHub Releases + `go install <tag>` (no brew/winget/scoop packages today) | — |
 
@@ -305,7 +305,7 @@ gpg --verify nice_scan_0.1.0_checksums.txt.sig nice_scan_0.1.0_checksums.txt
 git clone --branch v0.1.0 https://github.com/NICE-DEV226/nice-Scan.git && cd nice-Scan && go build ./cmd/nice_scan
 ```
 
-> **Note:** the maintainer GPG key is imported on first use from `https://github.com/NICE-DEV226.gpg` (trust-on-first-use). A historical fingerprint has circulated (`4CE466095C5B3185883288C593FBFE29F62FA4DB`) — until it is published authoritatively in SECURITY.md, verify any key out-of-band.
+> **Note:** the maintainer GPG key is imported on first use from `https://github.com/NICE-DEV226.gpg` (trust-on-first-use) and must match the **pinned fingerprint** `4CE466095C5B3185883288C593FBFE29F62FA4DB` (verified on keyserver.ubuntu.com; published in SECURITY.md) — a mismatched key makes `install.sh` abort. For a hardcoded chain of trust, clone and build from source.
 
 See [SECURITY.md](SECURITY.md) for the full security policy, including the
 scanner's risk-honesty statement (verified evidence vs. remote-text hints).

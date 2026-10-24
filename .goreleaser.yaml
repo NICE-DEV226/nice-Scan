@@ -98,9 +98,10 @@ release:
     ```
 
     The installers (`scripts/install.sh`, `scripts/install.ps1`) are fail-closed:
-    missing checksums or a failed verification aborts the install. See SECURITY.md
-    for the actual-state supply chain inventory (cosign/SLSA publishing is planned,
-    not shipped until it lands in release assets).
+    missing checksums or a failed verification aborts the install; the GPG key
+    must match the pinned, keyserver-verified fingerprint (SECURITY.md). Release
+    assets also carry cosign keyless bundles and GitHub build-provenance
+    attestations (see SECURITY.md for what is emitted and how to verify).
 
     ## 📦 Assets
     | File | Description |

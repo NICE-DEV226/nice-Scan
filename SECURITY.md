@@ -11,7 +11,7 @@ NICE_SCAN is a security tool — you should be able to trust that the binary you
 | **Source** | Commits **are not** GPG-signed as a rule | `git log --show-signature` tells you which are; do not assume |
 | **Checksums** | `checksums.txt` published per release | SHA256 over every archive |
 | **Release signing** | GPG-signed `checksums.txt` when keys are configured | Importers fail closed: a missing checksum/file or failed verification aborts the install (both installers) |
-| **Provenance (SLSA/cosign)** | Not yet published | The release workflow includes cosign/syft plumbing, but no `checksums.sigstore.json` bundles nor `gh attestation` artifacts are shipped today. Do not attempt `cosign verify-blob` — there is nothing published to verify against |
+| **Provenance (SLSA/cosign)** | Emitted at release time by the workflow (GitHub build-provenance attestations + cosign keyless bundle on the checksum manifest). Nothing exists retroactively: only releases cut after 2026-10-24 carry them | `gh attestation verify <file> -R NICE-DEV226/nice-Scan` |
 | **SBOM** | Intended per release via syft | Verify presence in a given release's assets before relying on it |
 | **Distribution** | GitHub Releases + `go install <tag>` | There is **no** Homebrew formula, and **no** winget or scoop package today. The installer installs from GitHub Releases only |
 
@@ -36,11 +36,19 @@ GPG verification aborts with nothing installed.
 
 ### Project GPG Key
 
-The project GPG key ID/fingerprint will be published here once the release
-signing key is finalized. Until then, treat any fingerprint seen in docs,
-issues or chat as unverified and confirm it out-of-band.
+**Fingerprint published and verified on keyservers** (RSA key, uid
+`NICE-DEV226 (Release Signing) <nicedev226@gmail.com>`):
 
-> Note: `README.md` may reference a historical fingerprint (`4CE4…A4DB`); at this time no key with that fingerprint is bound in this file as authoritative.
+    4CE466095C5B3185883288C593FBFE29F62FA4DB
+
+Independent lookup:
+[keyserver.ubuntu.com — 4CE466095C5B3185883288C593FBFE29F62FA4DB](https://keyserver.ubuntu.com/pks/lookup?op=index&search=0x4CE466095C5B3185883288C593FBFE29F62FA4DB)
+
+`scripts/install.sh` pins this fingerprint as a **constant**: the key served
+by the `https://github.com/NICE-DEV226.gpg` channel is only trusted if the
+installed key matches it, otherwise the installer aborts. Verify the
+keyserver entry against GitHub's served key out-of-band before relying on a
+downloaded archive.
 
 ### Build from Source (audit path)
 
@@ -91,8 +99,9 @@ The following are **out of scope**:
 
 Dependencies are tracked via:
 - `go.sum` (checksum database)
-- Dependabot alerts (automated)
+- Dependabot: automated vulnerability alerts (enabled on the repo) + version updates (`.github/dependabot.yml`)
 - SBOM when published with a release (`nice_scan_*_sbom.spdx.json`)
+- `govulncheck` v1.7.0 in CI (pinned module version)
 - `golangci-lint` in CI (pinned version)
 
 ## 📜 Honesty Statement
