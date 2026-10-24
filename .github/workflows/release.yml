@@ -31,7 +31,9 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.25"
+          # Keep in sync with ci.yml: go1.26 carries the stdlib fixes that
+          # govulncheck in CI gates on (GO-2026-6612/6613/6617/6809...).
+          go-version: "1.26"
           cache: true
 
       - name: Import GPG key

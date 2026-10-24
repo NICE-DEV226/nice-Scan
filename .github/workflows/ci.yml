@@ -7,7 +7,10 @@ on:
     branches: [main, develop]
 
 env:
-  GO_VERSION: "1.25"
+  # go1.26 releases carry the net/http + crypto/x509 fixes for GO-2026-6613,
+  # GO-2026-6617 and GO-2026-6809 — the stdlib versions that govulncheck
+  # (see below) gates the pipeline on. Keep in sync with release.yml.
+  GO_VERSION: "1.26"
 
 permissions:
   contents: read
