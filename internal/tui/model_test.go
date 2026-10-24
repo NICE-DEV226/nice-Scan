@@ -1,0 +1,112 @@
+package tui
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/NICE-DEV226/nice-Scan/internal/engine"
+	"github.com/NICE-DEV226/nice-Scan/internal/types"
+)
+
+// The TUI renders remote-controlled strings (finding names/descriptions,
+// replayed request targets) on the operator's terminal. Like the other
+// render sinks (output/terminal, hacker/brain, main.go), it must never emit
+// raw escape sequences — these tests pin the sanitization at the sink.
+func containsStr(s, sub string) bool { return strings.Contains(s, sub) }
+
+func assertSanitized(t *testing.T, out string) {
+	t.Helper()
+	for _, bad := range []string{
+		"\x1b",             // ESC (CSI/OSC intros)
+		"\x9b",             // C1 CSI
+		"\x8e",             // C1 SS2
+		"\u202e",           // bidi RLO
+		"\u0000", "\u0007", // C0
+	} {
+		if containsStr(out, bad) {
+			t.Fatalf("render sink leaked control sequence %q;\noutput:\n%q", bad, out)
+		}
+	}
+}
+
+func maliciousFinding() types.Finding {
+	return types.Finding{
+		Type:        "xss",
+		Name:        "\x1b]0;EVIL\x07XSS\u202e" + "name" + "\x9b31m",
+		Severity:    "high",
+		Description: "\x1b[2;1Hdesc\u9b40x" + "\u202e" + "desc",
+		Metadata:    map[string]string{"k": "\x1b[5Dmeta"},
+	}
+}
+
+func TestRenderFindingsSummaryStripsInjection(t *testing.T) {
+	m := NewModel(nil, []string{"example.com"})
+	m.state = stateDone
+	m.Update(scanEventMsg(engine.ScanEvent{
+		Findings: []types.Finding{maliciousFinding()},
+		Stats:    engine.ScanStats{Completed: 1, Total: 1},
+	}))
+
+	out := m.renderFindingsSummary()
+	if !containsStr(out, "name") || !containsStr(out, "desc") {
+		t.Fatalf("sanitized content missing from findings summary:\n%q", out)
+	}
+	assertSanitized(t, out)
+}
+
+func TestSummaryRendersNothingForEmptyFindings(t *testing.T) {
+	m := NewModel(nil, []string{"example.com"})
+	m.state = stateDone
+	if out := m.renderFindingsSummary(); !containsStr(out, "No findings") {
+		t.Fatalf("empty findings should render the muted placeholder, got %q", out)
+	}
+}
+
+func TestRequestLogEntriesAreSanitized(t *testing.T) {
+	m := NewModel(nil, []string{"example.com"})
+	m.Update(scanEventMsg(engine.ScanEvent{
+		Result: &types.Result{
+			Target:   "\x1b[30;1Htarget" + "\u202e" + "/redirect",
+			Response: &types.Response{StatusCode: 302},
+			Duration: 5 * 1e6, // 5ms
+		},
+		Stats: engine.ScanStats{Completed: 1, Total: 1},
+	}))
+
+	out := m.renderEventLog()
+	if !containsStr(out, "302") {
+		t.Fatalf("status code missing from event log:\n%q", out)
+	}
+	m.state = stateRunning
+	assertSanitized(t, out)
+	assertSanitized(t, m.View()) // running-state full render (header+stats+log+progress)
+}
+
+func TestRequestLogCapsAtFifty(t *testing.T) {
+	m := NewModel(nil, []string{"example.com"})
+	for i := 0; i < 55; i++ {
+		m.Update(scanEventMsg(engine.ScanEvent{
+			Result: &types.Result{
+				Target:   "example.com",
+				Response: &types.Response{StatusCode: 200},
+			},
+			Stats: engine.ScanStats{Completed: i + 1, Total: 60},
+		}))
+	}
+	if len(m.requestLog) != 50 {
+		t.Fatalf("request log cap = %d, want 50", len(m.requestLog))
+	}
+	// Newest entries survive the rotation.
+	if last := m.requestLog[len(m.requestLog)-1]; !containsStr(last, "example.com (200)") {
+		t.Fatalf("newest entry lost after rotation: %q", last)
+	}
+}
+
+func TestProgressClampsAboveOneHundred(t *testing.T) {
+	m := NewModel(nil, []string{"example.com"})
+	m.Update(scanEventMsg(engine.ScanEvent{
+		Stats: engine.ScanStats{Completed: 42, Total: 40}, // over-completed stats must not panic the bar
+	}))
+	out := m.renderProgress()
+	assertSanitized(t, out)
+}

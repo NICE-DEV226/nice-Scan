@@ -19,7 +19,7 @@ import (
 type sessionState int
 
 const (
-	stateIdle    sessionState = iota
+	stateIdle sessionState = iota
 	stateRunning
 	stateDone
 )
@@ -32,15 +32,15 @@ type Model struct {
 	targets []string
 	events  chan engine.ScanEvent
 
-	state      sessionState
-	spinner    spinner.Model
-	progress   progress.Model
-	err        error
+	state    sessionState
+	spinner  spinner.Model
+	progress progress.Model
+	err      error
 
-	stats     engine.ScanStats
-	findings  []types.Finding
+	stats       engine.ScanStats
+	findings    []types.Finding
 	allFindings []types.Finding
-	requestLog []string
+	requestLog  []string
 
 	width  int
 	height int
@@ -124,9 +124,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.stats = evt.Stats
 
 		if evt.Result != nil {
+			// Result.Target can carry redirect-derived content; sanitize at
+			// ingestion so every future render of this entry is safe.
 			entry := fmt.Sprintf("%s %s (%d)",
 				evt.Result.Duration.Round(time.Millisecond),
-				evt.Result.Target,
+				types.Sanitize(evt.Result.Target),
 				evt.Result.Response.StatusCode,
 			)
 			m.requestLog = append(m.requestLog, entry)
@@ -329,14 +331,14 @@ func (m *Model) renderFindingsSummary() string {
 		return mutedStyle.Render("No findings detected.")
 	}
 
-	types := []string{"critical", "high", "medium", "low", "info"}
+	severities := []string{"critical", "high", "medium", "low", "info"}
 	counts := map[string]int{}
 	for _, f := range m.findings {
 		counts[string(f.Severity)]++
 	}
 
 	var parts []string
-	for _, t := range types {
+	for _, t := range severities {
 		if counts[t] > 0 {
 			c := severityColor(t)
 			style := lipgloss.NewStyle().Foreground(c).Bold(true)
@@ -352,9 +354,9 @@ func (m *Model) renderFindingsSummary() string {
 
 	for _, f := range m.findings {
 		color := severityColor(string(f.Severity))
-		name := lipgloss.NewStyle().Foreground(textPrimary).Padding(0, 2).Render(f.Name)
+		name := lipgloss.NewStyle().Foreground(textPrimary).Padding(0, 2).Render(types.Sanitize(f.Name))
 		sev := lipgloss.NewStyle().Foreground(color).Render(strings.ToUpper(string(f.Severity[0])))
-		desc := mutedStyle.Padding(0, 4).Render(f.Description)
+		desc := mutedStyle.Padding(0, 4).Render(types.Sanitize(f.Description))
 
 		fmt.Fprintf(&b, "  %s  %s\n", sev, name)
 		fmt.Fprintf(&b, "%s\n", desc)

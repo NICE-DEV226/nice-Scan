@@ -1,4 +1,4 @@
-.PHONY: build run test clean install release
+.PHONY: build run test clean install release govulncheck
 
 BINARY = nice_scan
 VERSION ?= $(shell git describe --tags 2>/dev/null || echo "dev")
@@ -29,6 +29,10 @@ vet:
 
 lint:
 	golangci-lint run ./...
+
+govulncheck:
+	go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+	"$(go env GOPATH)/bin/govulncheck" ./...
 
 tidy:
 	go mod tidy
