@@ -3,44 +3,22 @@ package engine
 import (
 	"context"
 	"fmt"
-	"regexp"
+	"net/url"
+	"strings"
 
+	"github.com/NICE-DEV226/nice-Scan/internal/detect"
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
 
-var (
-	dbErrorPatterns = []struct {
-		db      string
-		pattern *regexp.Regexp
-	}{
-		{"MySQL", regexp.MustCompile(`(?i)SQL\s+syntax.*?MySQL|You have an error in your SQL syntax|Warning.*?mysql_|MariaDB server|driver.*?mysql`)},
-		{"PostgreSQL", regexp.MustCompile(`(?i)PostgreSQL|ERROR:\s+.*?pg_|driver.*?postgres|psql`)},
-		{"MSSQL", regexp.MustCompile(`(?i)Microsoft\s+SQL\s+Server|Driver.*?SQL\s*Server|OLEDB|SQLServer|\[SQL Server\]`)},
-		{"Oracle", regexp.MustCompile(`(?i)Oracle\s+Driver|ORA-[0-9]{5}|oracle\.jdbc`)},
-		{"SQLite", regexp.MustCompile(`(?i)SQLite|sqlite_.*?\(|SQLITE_ERROR`)},
-		{"DB2", regexp.MustCompile(`(?i)DB2|IBM\s+DB2|db2_\w+`)},
-		{"HSQLDB", regexp.MustCompile(`(?i)HSQLDB|org\.hsqldb`)},
-		{"Firebird", regexp.MustCompile(`(?i)Firebird|interbase`)},
-		{"CockroachDB", regexp.MustCompile(`(?i)cockroach`)},
-		{"Generic", regexp.MustCompile(`(?i)unclosed quotation mark|quot;|division by zero|pg_|mysqli_|sqlite_|odbc_`)},
-	}
-
-	sqliErrorIndicators = []*regexp.Regexp{
-		regexp.MustCompile(`(?i)unclosed\s+quotation\s+mark`),
-		regexp.MustCompile(`(?i)unclosed\s+quote`),
-		regexp.MustCompile(`(?i)unexpected\s+end\s+of\s+SQL`),
-		regexp.MustCompile(`(?i)mysql_fetch|mysql_num_rows|mysql_query`),
-		regexp.MustCompile(`(?i)supplied\s+argument\s+is\s+not\s+a\s+valid`),
-		regexp.MustCompile(`(?i)Column\s+not\s+found`),
-		regexp.MustCompile(`(?i)Unknown\s+column`),
-		regexp.MustCompile(`(?i)Table\s+.*?doesn't\s+exist`),
-		regexp.MustCompile(`(?i)Syntax\s+error\s+in\s+string`),
-		regexp.MustCompile(`(?i)Warning.*?mysql_`),
-		regexp.MustCompile(`(?i)Conversion\s+failed`),
-		regexp.MustCompile(`(?i)Invalid\s+query\s+string`),
-	}
-)
-
+// SQLiAnalyzer works on anchored, error-message-shaped signatures only
+// (internal/detect). Product-name mentions, brand text or `&quot;` HTML
+// entities never qualify. The verdict splits in two levels:
+//
+//   - a response to the scanner's own quote-break probe (a parameter
+//     value of exactly `1'`) that carries an anchored DB error: the error
+//     shape is attributable to our input — error-based injection surface;
+//   - any other response carrying an anchored DB error: a backend
+//     fingerprint disclosure, not an injection claim.
 type SQLiAnalyzer struct{}
 
 func NewSQLiAnalyzer() *SQLiAnalyzer {
@@ -55,67 +33,78 @@ func (a *SQLiAnalyzer) Analyze(ctx context.Context, resp *types.Response) []type
 	if resp == nil || len(resp.Body) == 0 {
 		return nil
 	}
+	select {
+	case <-ctx.Done():
+		return nil
+	default:
+	}
 
-	var findings []types.Finding
 	body := string(resp.Body)
+	db, idx, ok := detect.SQLErrorMatch(body)
+	if !ok {
+		return nil
+	}
 
-	for _, sq := range sqliErrorIndicators {
-		select {
-		case <-ctx.Done():
-			return findings
-		default:
-		}
+	meta := map[string]string{
+		"database":    db,
+		"request_url": resp.RequestURL,
+	}
 
-		if sq.MatchString(body) {
-			var matchedDB string
-			for _, db := range dbErrorPatterns {
-				if db.pattern.MatchString(body) {
-					matchedDB = db.db
-					break
-				}
-			}
-			if matchedDB == "" {
-				matchedDB = "Unknown"
-			}
-
-			findings = append(findings, types.Finding{
-				Type:        types.FindingMisconfig,
-				Name:        fmt.Sprintf("SQL Injection — %s", matchedDB),
-				Severity:    types.SeverityCritical,
-				Description: fmt.Sprintf("Database error message detected indicating possible SQL injection — %s", matchedDB),
-				Evidence:    fmt.Sprintf("DB Error: %s", extractSnippet(body, sq.String(), 80)),
-				Confidence:  0.85,
-				Metadata: map[string]string{
-					"database": matchedDB,
-					"request_url": resp.RequestURL,
-				},
-			})
-			return findings
+	if isOwnSQLiProbe(resp) {
+		return []types.Finding{
+			{
+				Type:       types.FindingMisconfig,
+				Name:       "SQL Error Surfacing (error-based surface)",
+				Severity:   types.SeverityHigh,
+				Confidence: 0.7,
+				Description: fmt.Sprintf(
+					"An anchored %s error message surfaced on the scanner's own quote-break probe — the error shape is attributable to our input", db),
+				Evidence: fmt.Sprintf("DB %s: %s", db, centeredSnippet(body, idx, 100)),
+				Metadata: meta,
+			},
 		}
 	}
 
-	for _, db := range dbErrorPatterns {
-		select {
-		case <-ctx.Done():
-			return findings
-		default:
-		}
+	return []types.Finding{
+		{
+			Type:       types.FindingMisconfig,
+			Name:       fmt.Sprintf("Database Error Text in Response — %s", db),
+			Severity:   types.SeverityMedium,
+			Confidence: 0.55,
+			Description: fmt.Sprintf(
+				"An anchored %s error message is present on a response our probes did not trigger — backend fingerprint, not an injection claim", db),
+			Evidence: fmt.Sprintf("DB %s: %s", db, centeredSnippet(body, idx, 100)),
+			Metadata: meta,
+		},
+	}
+}
 
-		if db.pattern.MatchString(body) {
-			findings = append(findings, types.Finding{
-				Type:        types.FindingMisconfig,
-				Name:        fmt.Sprintf("Database Information Disclosure — %s", db.db),
-				Severity:    types.SeverityMedium,
-				Description: fmt.Sprintf("Response contains database fingerprint or error pattern indicating %s usage", db.db),
-				Evidence:    fmt.Sprintf("Pattern: %s: %s", db.db, extractSnippet(body, db.pattern.String(), 80)),
-				Confidence:  0.6,
-				Metadata: map[string]string{
-					"database": db.db,
-					"request_url": resp.RequestURL,
-				},
-			})
+// isOwnSQLiProbe decodes the request URL and recognizes the quote-break
+// probe value (`1'`) that buildProbes injects.
+func isOwnSQLiProbe(resp *types.Response) bool {
+	u, err := url.Parse(resp.RequestURL)
+	if err != nil {
+		return false
+	}
+	for _, vals := range u.Query() {
+		for _, v := range vals {
+			if v == "1'" {
+				return true
+			}
 		}
 	}
+	return false
+}
 
-	return findings
+// centeredSnippet cuts a readable evidence window around idx.
+func centeredSnippet(body string, idx, radius int) string {
+	start := idx - 60
+	if start < 0 {
+		start = 0
+	}
+	end := idx + radius
+	if end > len(body) {
+		end = len(body)
+	}
+	return strings.ReplaceAll(body[start:end], "\n", " ")
 }
