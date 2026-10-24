@@ -217,7 +217,7 @@ func TestOOBServerBindsLoopback(t *testing.T) {
 	srv := a.server
 	kb := NewKnowledge("example.com")
 	client := transport.NewClient()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	res := a.Execute(testCtx(), "", kb, client)
 	_ = res

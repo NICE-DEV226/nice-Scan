@@ -64,7 +64,7 @@ func (a *S3Action) Execute(ctx context.Context, target string, kb *Knowledge, cl
 				// traffic doesn't bypass the configured exit route.
 				transport.WithProxy(a.Proxy),
 			)
-			defer fastClient.Close()
+			defer func() { _ = fastClient.Close() }()
 
 			for c := range checks {
 				select {

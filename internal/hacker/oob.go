@@ -118,7 +118,7 @@ func (s *OOBServer) Start(ctx context.Context) error {
 		_ = http.Serve(s.listener, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Enforce a hard cap on body size regardless of client behaviour.
 			body, _ := io.ReadAll(io.LimitReader(r.Body, oobMaxBodySize))
-			r.Body.Close()
+			_ = r.Body.Close() // request body fully consumed
 
 			req := OOBRequest{
 				ID:         fmt.Sprintf("oob-%d", time.Now().UnixNano()),
@@ -168,7 +168,7 @@ func (s *OOBServer) IsRunning() bool {
 
 func (s *OOBServer) Stop() {
 	if s.listener != nil {
-		s.listener.Close()
+		_ = s.listener.Close() // cleanup; Stop is called on shutdown paths only
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

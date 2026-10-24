@@ -106,5 +106,5 @@ func (r *JSONRenderer) RenderResult(res *engine.ScanResult) {
 		return
 	}
 
-	fmt.Fprintln(os.Stdout, string(data))
+	_, _ = fmt.Fprintln(os.Stdout, string(data))
 }

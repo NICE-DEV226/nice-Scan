@@ -81,7 +81,9 @@ func (a *PortScanAction) Execute(ctx context.Context, target string, kb *Knowled
 				if err != nil {
 					continue
 				}
-				conn.Close()
+				// Probe port only: the close error of a dial-done
+				// probe connection carries no operator signal.
+				_ = conn.Close()
 
 				service := guessService(t.port)
 				results <- Finding{

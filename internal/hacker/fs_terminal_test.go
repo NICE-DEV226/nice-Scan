@@ -25,8 +25,14 @@ func TestReportDirPermissions(t *testing.T) {
 	// NewReportDir creates ./reports/<target>; chdir into a temp workspace
 	// so the test never touches the repo tree.
 	tmp := t.TempDir()
-	os.Chdir(tmp)
-	defer os.Chdir(wd)
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("chdir tmp: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(wd); err != nil {
+			t.Errorf("restore working dir: %v", err)
+		}
+	}()
 
 	rd := NewReportDir("perms.example.org")
 
@@ -98,8 +104,8 @@ func TestOOBServerBoundedAndLoopbackPost(t *testing.T) {
 		if err != nil {
 			t.Fatalf("callback %d: %v", i, err)
 		}
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body) // drain: flood test, copy error not actionable
+		_ = resp.Body.Close()
 	}
 	if got := len(srv.GetCallbacks()); got > oobMaxCallbacks {
 		t.Errorf("callbacks unbounded: %d > %d", got, oobMaxCallbacks)
@@ -112,8 +118,8 @@ func TestOOBServerBoundedAndLoopbackPost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("huge callback: %v", err)
 	}
-	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body) // drain: test asserts truncation only
+	_ = resp.Body.Close()
 
 	cbs := srv.GetCallbacks()
 	if len(cbs) == 0 {

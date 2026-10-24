@@ -443,7 +443,7 @@ func (c *Client) execute(ctx context.Context, req *types.Request) (*types.Respon
 		}
 		return nil, fmt.Errorf("%w: %w", types.ErrRequestFailed, err)
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	resp := &types.Response{
 		StatusCode:    httpResp.StatusCode,

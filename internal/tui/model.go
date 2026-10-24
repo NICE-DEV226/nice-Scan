@@ -356,8 +356,8 @@ func (m *Model) renderFindingsSummary() string {
 		sev := lipgloss.NewStyle().Foreground(color).Render(strings.ToUpper(string(f.Severity[0])))
 		desc := mutedStyle.Padding(0, 4).Render(f.Description)
 
-		b.WriteString(fmt.Sprintf("  %s  %s\n", sev, name))
-		b.WriteString(fmt.Sprintf("%s\n", desc))
+		fmt.Fprintf(&b, "  %s  %s\n", sev, name)
+		fmt.Fprintf(&b, "%s\n", desc)
 		b.WriteString("\n")
 	}
 

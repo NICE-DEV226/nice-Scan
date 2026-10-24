@@ -15,14 +15,6 @@ import (
 
 // Phase 2 — credential scoping and redirect replay regressions.
 
-func requestCookieElse(r *http.Request) string {
-	c, err := r.Cookie("sessionid")
-	if err != nil {
-		return ""
-	}
-	return c.Value
-}
-
 func TestCookieNotReplayedOnCrossHostRedirect(t *testing.T) {
 	cookieSeenCrossHost := ""
 
@@ -42,7 +34,7 @@ func TestCookieNotReplayedOnCrossHostRedirect(t *testing.T) {
 	defer targetA.Close()
 
 	client := NewClient(WithCookie("sessionid=SECRET; Path=/"), WithFollowRedirects(true))
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	resp, err := client.Do(context.Background(), &types.Request{
 		Method: "GET",
@@ -75,7 +67,7 @@ func TestCookieKeptOnSameHostRedirect(t *testing.T) {
 	defer srv.Close()
 
 	client := NewClient(WithCookie("sessionid=SECRET; Path=/"), WithFollowRedirects(true))
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	_, err := client.Do(context.Background(), &types.Request{
 		Method: "GET",
@@ -116,7 +108,7 @@ func TestCredScopeBlocksOutOfScopeHost(t *testing.T) {
 	defer srv.srv.Close()
 
 	client := NewClient(WithCookie("sessionid=SECRET"))
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	client.SetCredScope("example.com")
 
 	_, err := client.Do(ctx, &types.Request{Method: "GET", URL: srv.srv.URL + "/x"})
@@ -132,7 +124,7 @@ func TestCredScopeBlocksOutOfScopeHost(t *testing.T) {
 	defer srv2.srv.Close()
 	host := HostDomain(srv2.srv.URL)
 	client2 := NewClient(WithCookie("sessionid=SECRET"), WithCredScope([]string{host}))
-	defer client2.Close()
+	defer func() { _ = client2.Close() }()
 	_, err = client2.Do(ctx, &types.Request{Method: "GET", URL: srv2.srv.URL + "/y"})
 	if err != nil {
 		t.Fatalf("request failed: %v", err)

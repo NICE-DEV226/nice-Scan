@@ -64,7 +64,7 @@ func (a *PassiveReconAction) Execute(ctx context.Context, target string, kb *Kno
 		reconOpts = append(reconOpts, transport.WithProxy(a.Proxy))
 	}
 	reconClient := transport.NewClient(reconOpts...)
-	defer reconClient.Close()
+	defer func() { _ = reconClient.Close() }()
 
 	type crtResult struct {
 		subs []string
@@ -88,6 +88,7 @@ func (a *PassiveReconAction) Execute(ctx context.Context, target string, kb *Kno
 	var subdomains []string
 	var waybackURLs []string
 
+collect:
 	for i := 0; i < 2; i++ {
 		select {
 		case r := <-crtCh:
@@ -95,7 +96,10 @@ func (a *PassiveReconAction) Execute(ctx context.Context, target string, kb *Kno
 		case r := <-wbCh:
 			waybackURLs = r.urls
 		case <-reconCtx.Done():
-			break
+			// Cancellation: keep whatever arrived, stop waiting for
+			// the rest. A bare `break` would only exit the select and
+			// spin the remaining loop iterations.
+			break collect
 		}
 	}
 

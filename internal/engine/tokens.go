@@ -207,11 +207,12 @@ func (t *TokenExtractor) analyzeJWT(raw string) types.Finding {
 	// Algorithm confusion (none algorithm)
 	sev := types.SeverityMedium
 	conf := 0.7
-	if hdr.Alg == "none" {
+	switch hdr.Alg {
+	case "none":
 		sev = types.SeverityCritical
 		conf = 0.95
 		details = append(details, "VULNERABILITY: alg=none — JWT signature verification bypass!")
-	} else if hdr.Alg == "HS256" || hdr.Alg == "HS384" || hdr.Alg == "HS512" {
+	case "HS256", "HS384", "HS512":
 		conf = 0.85
 		details = append(details, "Symmetric algorithm — susceptible to key confusion if public key is used as HMAC secret")
 	}

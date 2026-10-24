@@ -119,20 +119,20 @@ func NewTerminal() *TerminalRenderer {
 func (r *TerminalRenderer) RenderBanner() {
 	SetTab()
 
-	fmt.Fprintln(os.Stdout)
-	fmt.Fprintln(os.Stdout, RenderLogoCompact())
-	fmt.Fprintln(os.Stdout)
+	_, _ = fmt.Fprintln(os.Stdout)
+	_, _ = fmt.Fprintln(os.Stdout, RenderLogoCompact())
+	_, _ = fmt.Fprintln(os.Stdout)
 }
 
 func (r *TerminalRenderer) RenderResult(res *engine.ScanResult) {
 	r.renderDashboard(res.Stats)
-	fmt.Fprintln(os.Stdout)
+	_, _ = fmt.Fprintln(os.Stdout)
 
 	r.renderCheckGrid(res)
-	fmt.Fprintln(os.Stdout)
+	_, _ = fmt.Fprintln(os.Stdout)
 
 	r.renderFindingsOverview(res.Findings)
-	fmt.Fprintln(os.Stdout)
+	_, _ = fmt.Fprintln(os.Stdout)
 
 	r.renderEmptyState(res.Findings)
 }
@@ -169,7 +169,7 @@ func (r *TerminalRenderer) renderCheckGrid(res *engine.ScanResult) {
 			content,
 		),
 	)
-	fmt.Fprintln(os.Stdout, panel)
+	_, _ = fmt.Fprintln(os.Stdout, panel)
 }
 
 func (r *TerminalRenderer) RenderTransportStats(s transport.RequestStats) {
@@ -239,7 +239,7 @@ func (r *TerminalRenderer) renderDashboard(stats engine.ScanStats) {
 		),
 	)
 
-	fmt.Fprintln(os.Stdout, panel)
+	_, _ = fmt.Fprintln(os.Stdout, panel)
 }
 
 func (r *TerminalRenderer) renderFindingsOverview(findings []types.Finding) {
@@ -282,7 +282,7 @@ func (r *TerminalRenderer) renderFindingsOverview(findings []types.Finding) {
 
 	header := lipgloss.NewStyle().Foreground(textMuted).Padding(0, 2).Render("Findings")
 
-	fmt.Fprintln(os.Stdout, lipgloss.JoinVertical(lipgloss.Left,
+	_, _ = fmt.Fprintln(os.Stdout, lipgloss.JoinVertical(lipgloss.Left,
 		header,
 		lipgloss.NewStyle().Padding(0, 2, 1, 2).Render(summary),
 	))
@@ -307,7 +307,7 @@ func (r *TerminalRenderer) renderSeverityGroup(sev types.Severity, findings []ty
 		Padding(0, 2, 0, 2).
 		Render(fmt.Sprintf("%s  %s", sym, label))
 
-	fmt.Fprintln(os.Stdout, header)
+	_, _ = fmt.Fprintln(os.Stdout, header)
 
 	for _, f := range findings {
 		if f.Severity != sev {
@@ -316,7 +316,7 @@ func (r *TerminalRenderer) renderSeverityGroup(sev types.Severity, findings []ty
 		r.renderFinding(f, color)
 	}
 
-	fmt.Fprintln(os.Stdout)
+	_, _ = fmt.Fprintln(os.Stdout)
 }
 
 func (r *TerminalRenderer) renderFinding(f types.Finding, color lipgloss.Color) {
@@ -337,14 +337,14 @@ func (r *TerminalRenderer) renderFinding(f types.Finding, color lipgloss.Color) 
 			Padding(0, 0, 0, 4).
 			Render(version)
 
-		fmt.Fprintln(os.Stdout, name)
-		fmt.Fprintln(os.Stdout, ver)
+		_, _ = fmt.Fprintln(os.Stdout, name)
+		_, _ = fmt.Fprintln(os.Stdout, ver)
 	} else {
 		name = lipgloss.NewStyle().
 			Foreground(textPrimary).
 			Padding(0, 0, 0, 4).
 			Render(types.Sanitize(f.Name))
-		fmt.Fprintln(os.Stdout, name)
+		_, _ = fmt.Fprintln(os.Stdout, name)
 	}
 
 	var desc string
@@ -361,10 +361,10 @@ func (r *TerminalRenderer) renderFinding(f types.Finding, color lipgloss.Color) 
 		Render(fmt.Sprintf("%.0f%% confidence", f.Confidence*100))
 
 	if desc != "" {
-		fmt.Fprintln(os.Stdout, desc)
+		_, _ = fmt.Fprintln(os.Stdout, desc)
 	}
-	fmt.Fprintln(os.Stdout, confidence)
-	fmt.Fprintln(os.Stdout)
+	_, _ = fmt.Fprintln(os.Stdout, confidence)
+	_, _ = fmt.Fprintln(os.Stdout)
 }
 
 func (r *TerminalRenderer) renderEmptyState(findings []types.Finding) {
@@ -377,7 +377,7 @@ func (r *TerminalRenderer) renderEmptyState(findings []types.Finding) {
 		Padding(0, 2).
 		Render("No issues detected. Target appears clean.")
 
-	fmt.Fprintln(os.Stdout, msg)
+	_, _ = fmt.Fprintln(os.Stdout, msg)
 }
 
 func (r *TerminalRenderer) renderTransportStats(s transport.RequestStats) {
@@ -407,7 +407,7 @@ func (r *TerminalRenderer) renderTransportStats(s transport.RequestStats) {
 
 	panel := r.styles.panel.Render(content)
 
-	fmt.Fprintln(os.Stdout, panel)
+	_, _ = fmt.Fprintln(os.Stdout, panel)
 }
 
 func (r *TerminalRenderer) progressBar(current, total int) string {

@@ -126,7 +126,7 @@ func RenderHTMLReport(r *Report) string {
     <h2>Attack Chains Discovered</h2>
 `)
 		for _, chain := range r.AttackChains {
-			buf.WriteString(fmt.Sprintf(
+			fmt.Fprintf(&buf,
 				`    <div class="chain">
       <div class="chain-name">⚡ %s</div>
       <div class="chain-risk risk-%s">Risk: %.0f/10</div>
@@ -137,7 +137,7 @@ func RenderHTMLReport(r *Report) string {
 				riskClass(chain.RiskScore),
 				chain.RiskScore,
 				html.EscapeString(chain.Impact),
-			))
+			)
 		}
 		buf.WriteString("  </section>\n")
 	}
@@ -148,7 +148,7 @@ func RenderHTMLReport(r *Report) string {
 `)
 		for _, f := range r.Findings {
 			sev := string(f.Severity)
-			buf.WriteString(fmt.Sprintf(
+			fmt.Fprintf(&buf,
 				`    <div class="finding %s">
       <div class="sev %s">%s</div>
       <div class="name">%s</div>
@@ -161,7 +161,7 @@ func RenderHTMLReport(r *Report) string {
 				html.EscapeString(f.Name),
 				html.EscapeString(f.Description),
 				html.EscapeString(f.Evidence),
-			))
+			)
 		}
 		buf.WriteString("  </section>\n")
 	}
@@ -172,11 +172,11 @@ func RenderHTMLReport(r *Report) string {
     <div class="cap-grid">
 `)
 		for _, c := range r.Capabilities {
-			buf.WriteString(fmt.Sprintf(
+			fmt.Fprintf(&buf,
 				`      <span class="cap-badge">%s</span>
 `,
 				html.EscapeString(c.Name),
-			))
+			)
 		}
 		buf.WriteString("    </div>\n  </section>\n")
 	}
@@ -190,7 +190,7 @@ func RenderHTMLReport(r *Report) string {
 			if !c.Valid {
 				valid = "tested"
 			}
-			buf.WriteString(fmt.Sprintf(
+			fmt.Fprintf(&buf,
 				`    <div class="finding critical">
       <div class="name">%s:%s (%s)</div>
       <div class="desc">Source: %s</div>
@@ -198,7 +198,7 @@ func RenderHTMLReport(r *Report) string {
 `,
 				html.EscapeString(c.Username), html.EscapeString(c.Password), valid,
 				html.EscapeString(c.Source),
-			))
+			)
 		}
 		buf.WriteString("  </section>\n")
 	}
@@ -208,36 +208,36 @@ func RenderHTMLReport(r *Report) string {
     <h2>Endpoints Discovered</h2>
 `)
 		for _, e := range r.Endpoints {
-			buf.WriteString(fmt.Sprintf(
+			fmt.Fprintf(&buf,
 				`    <div class="endpoint"><span class="method method-%s">%s</span> <span style="color:#C0CAF5">%s</span> <span style="color:#565F89">[%d]</span></div>
 `,
 				e.Method, e.Method,
 				html.EscapeString(e.Path), e.Status,
-			))
+			)
 		}
 		buf.WriteString("  </section>\n")
 	}
 
 	if len(r.Pages) > 0 {
-		buf.WriteString(fmt.Sprintf(`  <section>
+		fmt.Fprintf(&buf, `  <section>
     <h2>Pages Crawled (%d)</h2>
-`, len(r.Pages)))
+`, len(r.Pages))
 		for _, p := range r.Pages {
-			buf.WriteString(fmt.Sprintf(
+			fmt.Fprintf(&buf,
 				`    <div class="page-item"><span class="url">%s</span> <span class="meta">(%d bytes, %d forms, %d links, %d JS)</span></div>
 `,
 				html.EscapeString(p.URL), p.BodyLen, p.Forms, len(p.Links), len(p.JSFiles),
-			))
+			)
 		}
 		buf.WriteString("  </section>\n")
 	}
 
-	buf.WriteString(fmt.Sprintf(`  <div class="footer">
+	fmt.Fprintf(&buf, `  <div class="footer">
     NICE HACKER — Attack Complete &mdash; %d steps in %.0f seconds
   </div>
 </div>
 </body>
-</html>`, r.Steps, r.Duration.Seconds()))
+</html>`, r.Steps, r.Duration.Seconds())
 
 	return buf.String()
 }

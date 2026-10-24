@@ -688,7 +688,9 @@ func (m *Model) helpText() []string {
 
 func (m *Model) Close() {
 	if m.client != nil {
-		m.client.Close()
+		// Close frees transport resources shared with the session; a
+		// close error at this point has no interactive recovery path.
+		_ = m.client.Close()
 	}
 }
 

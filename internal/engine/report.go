@@ -190,26 +190,26 @@ func (r *Report) RenderHTML() string {
       Duration: <span>`)
 	b.WriteString(r.Duration.Round(time.Millisecond).String())
 	b.WriteString(`</span> | Requests: <span>`)
-	b.WriteString(fmt.Sprintf("%d/%d", r.TotalReqs-r.FailedReqs, r.TotalReqs))
+	fmt.Fprintf(&b, "%d/%d", r.TotalReqs-r.FailedReqs, r.TotalReqs)
 	b.WriteString(`</span>
     </div>
   </div>
 
   <div class="score-card">
     <div class="score-item"><div class="num critical">`)
-	b.WriteString(fmt.Sprintf("%d", r.Summary.Critical))
+	fmt.Fprintf(&b, "%d", r.Summary.Critical)
 	b.WriteString(`</div><div class="lbl">Critical</div></div>
     <div class="score-item"><div class="num high">`)
-	b.WriteString(fmt.Sprintf("%d", r.Summary.High))
+	fmt.Fprintf(&b, "%d", r.Summary.High)
 	b.WriteString(`</div><div class="lbl">High</div></div>
     <div class="score-item"><div class="num medium">`)
-	b.WriteString(fmt.Sprintf("%d", r.Summary.Medium))
+	fmt.Fprintf(&b, "%d", r.Summary.Medium)
 	b.WriteString(`</div><div class="lbl">Medium</div></div>
     <div class="score-item"><div class="num low">`)
-	b.WriteString(fmt.Sprintf("%d", r.Summary.Low))
+	fmt.Fprintf(&b, "%d", r.Summary.Low)
 	b.WriteString(`</div><div class="lbl">Low</div></div>
     <div class="score-item"><div class="num info">`)
-	b.WriteString(fmt.Sprintf("%d", r.Summary.Info))
+	fmt.Fprintf(&b, "%d", r.Summary.Info)
 	b.WriteString(`</div><div class="lbl">Info</div></div>
     <div class="score-item"><div class="num `)
 	if r.Summary.Critical > 0 || r.Summary.High > 0 {
@@ -230,16 +230,16 @@ func (r *Report) RenderHTML() string {
 	b.WriteString(r.Summary.Risk)
 	b.WriteString(`</span></div>
     <div class="row"><span class="lbl">Total Findings</span><span class="val">`)
-	b.WriteString(fmt.Sprintf("%d", r.Summary.Total))
+	fmt.Fprintf(&b, "%d", r.Summary.Total)
 	b.WriteString(`</span></div>
     <div class="row"><span class="lbl">Technologies Detected</span><span class="val">`)
-	b.WriteString(fmt.Sprintf("%d", len(r.TechFound)))
+	fmt.Fprintf(&b, "%d", len(r.TechFound))
 	b.WriteString(`</span></div>
     <div class="row"><span class="lbl">Secrets / Credentials</span><span class="val">`)
-	b.WriteString(fmt.Sprintf("%d", len(r.Secrets)))
+	fmt.Fprintf(&b, "%d", len(r.Secrets))
 	b.WriteString(`</span></div>
     <div class="row"><span class="lbl">Active Requests</span><span class="val">`)
-	b.WriteString(fmt.Sprintf("%d", r.TotalReqs))
+	fmt.Fprintf(&b, "%d", r.TotalReqs)
 	b.WriteString(`</span></div>
   </div>`)
 
@@ -288,7 +288,7 @@ func (r *Report) renderSection(b *strings.Builder, title string, findings []type
 
 	b.WriteString(`<div class="section"><h2>`)
 	b.WriteString(title)
-	b.WriteString(fmt.Sprintf(` <span style="color:#565f89;font-size:14px;">(%d)</span></h2>`, len(findings)))
+	fmt.Fprintf(b, ` <span style="color:#565f89;font-size:14px;">(%d)</span></h2>`, len(findings))
 
 	for _, f := range findings {
 		sevClass := "severity-" + string(f.Severity)
@@ -305,7 +305,7 @@ func (r *Report) renderSection(b *strings.Builder, title string, findings []type
 		b.WriteString(string(f.Severity))
 		b.WriteString(`</span>`)
 		if f.Confidence > 0 {
-			b.WriteString(fmt.Sprintf(` <span style="color:#565f89;font-size:11px;">%.0f%% confidence</span>`, f.Confidence*100))
+			fmt.Fprintf(b, ` <span style="color:#565f89;font-size:11px;">%.0f%% confidence</span>`, f.Confidence*100)
 		}
 		b.WriteString(`</div>`)
 

@@ -215,7 +215,7 @@ func scanCmd() *cobra.Command {
 			target := normalizeTarget(args[0])
 
 			client := buildClientForTarget(target)
-			defer client.Close()
+			defer func() { _ = client.Close() }()
 
 			scanner := engine.NewScanner(cfg, client)
 			scanner.RegisterAnalyzers(
@@ -289,7 +289,7 @@ func auditCmd() *cobra.Command {
 			}
 
 			client := buildClientForTarget(target)
-			defer client.Close()
+			defer func() { _ = client.Close() }()
 
 			scanner := engine.NewScanner(cfg, client)
 			scanner.RegisterAnalyzers(
@@ -374,7 +374,7 @@ func exploitCmd() *cobra.Command {
 			}
 
 			client := buildClientForTarget(target)
-			defer client.Close()
+			defer func() { _ = client.Close() }()
 
 			opts := exploit.Options{
 				Target:  target,
@@ -637,7 +637,7 @@ func hackCmd() *cobra.Command {
 			target := normalizeTarget(args[0])
 
 			client := buildClientForTarget(target)
-			defer client.Close()
+			defer func() { _ = client.Close() }()
 
 			renderer := output.NewTerminal()
 			renderer.RenderBanner()
@@ -706,7 +706,7 @@ func techCmd() *cobra.Command {
 			renderer.RenderBanner()
 
 			client := buildClientForTarget(target)
-			defer client.Close()
+			defer func() { _ = client.Close() }()
 
 			scanner := engine.NewScanner(cfg, client)
 			scanner.RegisterAnalyzer(fingerprint.New())
@@ -740,7 +740,7 @@ func tlsCmd() *cobra.Command {
 			renderer.RenderBanner()
 
 			client := buildClientForTarget(target)
-			defer client.Close()
+			defer func() { _ = client.Close() }()
 
 			scanner := engine.NewScanner(cfg, client)
 			scanner.RegisterAnalyzer(engine.NewTLSAnalyzer())
