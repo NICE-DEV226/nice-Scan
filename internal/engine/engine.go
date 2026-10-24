@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"sync"
 	"time"
 
+	"github.com/NICE-DEV226/nice-Scan/internal/detect"
 	"github.com/NICE-DEV226/nice-Scan/internal/transport"
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
@@ -20,8 +22,11 @@ type Scanner struct {
 	client    *transport.Client
 	analyzers []Analyzer
 	opts      *types.Config
-	stats     ScanStats
-	mu        sync.Mutex
+	// canary is this scan's unique reflection token: XSS probes embed it
+	// and the XSS analyzer renders opinions only when it round-trips.
+	canary string
+	stats  ScanStats
+	mu     sync.Mutex
 }
 
 type ScanStats struct {
@@ -48,8 +53,13 @@ func NewScanner(cfg *types.Config, client *transport.Client) *Scanner {
 	return &Scanner{
 		client: client,
 		opts:   cfg,
+		canary: detect.NewCanary(),
 	}
 }
+
+// XSSCanary exposes this scan's unique probe token so XSS analyzers can be
+// built against exactly the token the probes embed.
+func (s *Scanner) XSSCanary() string { return s.canary }
 
 func (s *Scanner) RegisterAnalyzer(a Analyzer) {
 	s.analyzers = append(s.analyzers, a)
@@ -160,18 +170,25 @@ func (s *Scanner) buildProbes(target string) []*types.Request {
 
 	// SQLi probes — common parameter names
 	sqliParams := []string{"id", "q", "search", "page", "name", "user", "cat", "prod", "order", "pid"}
-	xssPayload := "<script>alert(1)</script>"
 	sqliPayload := "1'"
+
+	// XSS probes — canary-tagged reflection shapes. The XSS analyzer
+	// renders opinions only when this scan's canary comes back through
+	// the wire; there is no keyword matching on foreign pages.
+	for _, xp := range detect.XssProbes(s.canary) {
+		for _, p := range sqliParams {
+			reqs = append(reqs, &types.Request{
+				Method:  "GET",
+				URL:     baseURL + "/?" + p + "=" + url.QueryEscape(xp.Value),
+				Timeout: s.opts.Timeout,
+			})
+		}
+	}
 
 	for _, p := range sqliParams {
 		reqs = append(reqs, &types.Request{
 			Method:  "GET",
-			URL:     baseURL + "/?" + p + "=" + sqliPayload,
-			Timeout: s.opts.Timeout,
-		})
-		reqs = append(reqs, &types.Request{
-			Method:  "GET",
-			URL:     baseURL + "/?" + p + "=" + xssPayload,
+			URL:     baseURL + "/?" + p + "=" + url.QueryEscape(sqliPayload),
 			Timeout: s.opts.Timeout,
 		})
 	}

