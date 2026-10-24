@@ -14,9 +14,12 @@ jobs:
     runs-on: ubuntu-latest
     # Escalation is job-scoped: signing and publish rights live only where
     # they are used, never across the workflow's future jobs.
+    # github/attestations is required by the build-provenance attestation
+    # step below ("Resource not accessible by integration" without it).
     permissions:
       contents: write
       id-token: write
+      attestations: write
 
     steps:
       # Actions pinned to release-tag commit SHAs (resolved from the GitHub
