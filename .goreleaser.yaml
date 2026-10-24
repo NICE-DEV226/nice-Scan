@@ -2,6 +2,12 @@ version: 2
 
 project_name: nice_scan
 
+# Source snapshot is required by the source SBOM (sboms.artifacts: source):
+# without it the SPDX document silently never ships (this is why v0.1.0
+# had no SBOM asset).
+source:
+  enabled: true
+
 before:
   hooks:
     - go mod tidy
@@ -71,7 +77,7 @@ sboms:
       - "{{.ProjectName}}_{{.Version}}_sbom.spdx.json"
     cmd: syft
     args:
-      - "$(pwd)"
+      - "${artifact}"
       - --output
       - spdx-json
       - --file
