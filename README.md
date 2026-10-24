@@ -305,7 +305,7 @@ gpg --verify nice_scan_0.1.0_checksums.txt.sig nice_scan_0.1.0_checksums.txt
 git clone --branch v0.1.0 https://github.com/NICE-DEV226/nice-Scan.git && cd nice-Scan && go build ./cmd/nice_scan
 ```
 
-> **Note:** the maintainer GPG key is imported on first use from `https://github.com/NICE-DEV226.gpg` (trust-on-first-use) and must match the **pinned fingerprint** `4CE466095C5B3185883288C593FBFE29F62FA4DB` (verified on keyserver.ubuntu.com; published in SECURITY.md) — a mismatched key makes `install.sh` abort. For a hardcoded chain of trust, clone and build from source.
+> **Note:** the maintainer GPG key is imported on first use from `keyserver.ubuntu.com` (hkps) and must match the **pinned fingerprint** `4CE466095C5B3185883288C593FBFE29F62FA4DB` (verified out-of-band on the same keyserver; published in SECURITY.md) — a mismatched key makes `install.sh` abort. For a hardcoded chain of trust, clone and build from source.
 
 See [SECURITY.md](SECURITY.md) for the full security policy, including the
 scanner's risk-honesty statement (verified evidence vs. remote-text hints).

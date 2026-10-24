@@ -15,10 +15,10 @@
 #     cover the archive (checksum mismatch = abort)
 #   - Verifies the GPG signature over checksums.txt; a signature that
 #     cannot be verified aborts the install
-#   - The GPG key is fetched from https://github.com/NICE-DEV226.gpg and
-#     must match the PINNED fingerprint below (verified on
-#     keyserver.ubuntu.com, published in SECURITY.md). A key channel
-#     serving a different key makes the installer abort
+#   - The GPG key is imported from the OUT-OF-BAND VERIFIED channel
+#     (keyserver.ubuntu.com, hkps/443 — see SECURITY.md) and must match the
+#     PINNED fingerprint below. A channel serving a different key makes the
+#     installer abort
 #   - Source fallback builds the commit of the resolved release TAG, never
 #     an unpinned branch head
 #   - Installs to ~/.local/bin (user-local, no sudo)
@@ -88,7 +88,7 @@ esac
 if [ "$REQUESTED_VERSION" = "latest" ]; then
     info "Resolving latest release tag from GitHub..."
     RELEASE_JSON=$(curl -sfL "https://api.github.com/repos/${REPO}/releases/latest") || die "Could not reach the GitHub API."
-    TAG=$(echo "$RELEASE_JSON" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": "\(.*\)",/\1/')
+    TAG=$(echo "$RELEASE_JSON" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name":[[:space:]]*"\([^"]*\)"[[:space:]]*,\{0,1\}[[:space:]]*/\1/')
     [ -n "$TAG" ] || die "Could not resolve the latest release tag. Aborting rather than installing an unpredictable version."
 else
     TAG="$REQUESTED_VERSION"
@@ -116,8 +116,11 @@ fi
 # ── Download release ──
 RELEASE_JSON=$(curl -sfL "https://api.github.com/repos/${REPO}/releases/latest") || die "Could not reach the GitHub API."
 
-ARCHIVE_NAME="${BINARY}_${TAG}_${OS}_${ARCH}.tar.gz"
-ASSET_URL=$(echo "$RELEASE_JSON" | grep "browser_download_url" | grep "$ARCHIVE_NAME" | head -1 | sed 's/.*"browser_download_url": "\(.*\)",/\1/')
+# goreleaser names assets after the VERSION (no "v" prefix) while the
+# release TAG carries it (v0.2.0): normalize once, reference nowhere else.
+VERSION="${TAG#v}"
+ARCHIVE_NAME="${BINARY}_${VERSION}_${OS}_${ARCH}.tar.gz"
+ASSET_URL=$(echo "$RELEASE_JSON" | grep "browser_download_url" | grep "$ARCHIVE_NAME" | head -1 | sed 's/.*"browser_download_url":[[:space:]]*"\([^"]*\)"[[:space:]]*,\{0,1\}[[:space:]]*/\1/' || true)
 
 if [ -z "$ASSET_URL" ]; then
     # ── Source fallback: clone the RELEASE TAG, never main HEAD ──
@@ -147,7 +150,7 @@ else
     curl -sfL "$ASSET_URL" -o "$DL_PATH" || die "Download failed."
 
     # ── checksums.txt is MANDATORY (fail-closed) ──
-    CHECKSUMS_URL=$(echo "$RELEASE_JSON" | grep "browser_download_url" | grep "checksums" | head -1 | sed 's/.*"browser_download_url": "\(.*\)",/\1/' || true)
+    CHECKSUMS_URL=$(echo "$RELEASE_JSON" | grep "browser_download_url" | grep "checksums" | head -1 | sed 's/.*"browser_download_url":[[:space:]]*"\([^"]*\)"[[:space:]]*,\{0,1\}[[:space:]]*/\1/' || true)
     [ -n "$CHECKSUMS_URL" ] || die "No checksums.txt published for this release. The installer refuses to install an unverifiable binary."
 
     info "Verifying SHA256 checksum..."
@@ -168,7 +171,7 @@ else
 
     # ── GPG signature over checksums.txt must VERIFY (fail-closed) ──
     if command -v gpg >/dev/null 2>&1; then
-        SIG_URL=$(echo "$RELEASE_JSON" | grep "browser_download_url" | grep "checksums.*\.sig" | head -1 | sed 's/.*"browser_download_url": "\(.*\)",/\1/' || true)
+        SIG_URL=$(echo "$RELEASE_JSON" | grep "browser_download_url" | grep "checksums.*\.sig" | head -1 | sed 's/.*"browser_download_url":[[:space:]]*"\([^"]*\)"[[:space:]]*,\{0,1\}[[:space:]]*/\1/' || true)
         if [ -n "$SIG_URL" ]; then
             info "Verifying GPG signature..."
             SIG_PATH="${TMPDIR}/checksums.txt.sig"
@@ -176,19 +179,19 @@ else
 
             # Pinned trust root: the release fingerprint is verified
             # out-of-band on keyserver.ubuntu.com (see SECURITY.md). The key
-            # is imported on demand, then the keyring is required to contain
-            # exactly the pinned fingerprint — a .gpg channel serving a
-            # different key for this uid fails here instead of silently
-            # validating an attacker's signature.
+            # is imported on demand from THAT channel (hkps/443), then the
+            # keyring is required to contain exactly the pinned fingerprint —
+            # a keyserver serving a different key for this uid fails here
+            # instead of silently validating an attacker's signature.
             GPG_FP="4CE466095C5B3185883288C593FBFE29F62FA4DB"
             if ! gpg --list-keys "$GPG_FP" >/dev/null 2>&1; then
-                warn "Importing NICE-DEV226 GPG key from github.com..."
-                curl -sfL "https://github.com/NICE-DEV226.gpg" | gpg --import 2>/dev/null || die "Could not import the maintainer GPG key."
+                warn "Importing pinned release key from keyserver.ubuntu.com..."
+                gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys "$GPG_FP" >/dev/null 2>&1 || die "Could not import the pinned release key from keyserver.ubuntu.com. Refusing to verify."
             fi
             if ! gpg --list-keys "$GPG_FP" >/dev/null 2>&1; then
-                err "Imported key does not match the pinned fingerprint:"
+                err "Keyring does not contain the pinned fingerprint:"
                 err "  expected: $GPG_FP   (see SECURITY.md / keyserver.ubuntu.com)"
-                die "The .gpg channel is not serving the pinned release key. Refusing to verify."
+                die "The key channel is not serving the pinned release key. Refusing to verify."
             fi
 
             if gpg --verify "$SIG_PATH" "$CHECKSUMS_PATH" >/dev/null 2>&1; then

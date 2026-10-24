@@ -32,7 +32,7 @@ The installers (`scripts/install.sh`, `scripts/install.ps1`) do exactly this
 and **fail closed**: no checksums file, an uncovered archive or a failed
 GPG verification aborts with nothing installed.
 
-> **Trust root:** the GPG key is imported from `https://github.com/NICE-DEV226.gpg` on first use (TOFU). For a stronger setup, verify the key fingerprint out-of-band with the maintainer and remove the auto-import step.
+> **Trust root:** the GPG key is imported from `keyserver.ubuntu.com` on first use (hkps/443) and must match the pinned fingerprint below — verified out-of-band on the same keyserver. A key channel that serves a different key makes the installers abort.
 
 ### Project GPG Key
 
@@ -44,11 +44,11 @@ GPG verification aborts with nothing installed.
 Independent lookup:
 [keyserver.ubuntu.com — 4CE466095C5B3185883288C593FBFE29F62FA4DB](https://keyserver.ubuntu.com/pks/lookup?op=index&search=0x4CE466095C5B3185883288C593FBFE29F62FA4DB)
 
-`scripts/install.sh` pins this fingerprint as a **constant**: the key served
-by the `https://github.com/NICE-DEV226.gpg` channel is only trusted if the
-installed key matches it, otherwise the installer aborts. Verify the
-keyserver entry against GitHub's served key out-of-band before relying on a
-downloaded archive.
+`scripts/install.sh` pins this fingerprint as a **constant**: the key
+imported from the `keyserver.ubuntu.com` channel is only trusted if the
+installed key matches it, otherwise the installer aborts. The key is
+therefore accepted only on a channel it was independently verified on —
+there is no reliance on a profile page serving a key it does not have.
 
 ### Build from Source (audit path)
 
