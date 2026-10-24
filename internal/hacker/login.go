@@ -2,7 +2,12 @@ package hacker
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"net/http"
+	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/NICE-DEV226/nice-Scan/internal/transport"
@@ -48,6 +53,7 @@ func (a *LoginBruteAction) Execute(ctx context.Context, target string, kb *Knowl
 	pages := kb.GetPages()
 	var findings []Finding
 	var spawned []Action
+	totalSprayed := 0
 
 	for _, page := range pages {
 		if page.Forms == 0 {
@@ -64,11 +70,26 @@ func (a *LoginBruteAction) Execute(ctx context.Context, target string, kb *Knowl
 
 		body := string(resp.Body)
 		formAction, formFields := extractLoginForm(body)
-		if formAction == "" || len(formFields) < 1 {
+		if len(formFields) < 1 {
 			continue
 		}
 
-		actionURL := resolveURL(formAction, page.URL)
+		// Login forms self-reference constantly (action="" or the page's
+		// own path). The crawl-grade resolveURL treats that as "nothing
+		// new" and returns "", which silently skipped the most common
+		// real-world login shape. Resolve for POSTing: a missing or
+		// self-resolving action posts to the page itself; the same-host
+		// gate still applies to everything.
+		var actionURL string
+		switch formAction {
+		case "", "/":
+			actionURL = page.URL
+		default:
+			actionURL = resolveURL(formAction, page.URL)
+			if actionURL == "" {
+				actionURL = page.URL
+			}
+		}
 		// A cross-host form action would POST generated credential
 		// material to another origin (open redirect / injected form).
 		// Only same-host actions participate in the brute force.
@@ -76,6 +97,25 @@ func (a *LoginBruteAction) Execute(ctx context.Context, target string, kb *Knowl
 			continue
 		}
 
+		// Baseline-differential verification: two junk-credential POSTs
+		// shape what a FAILURE looks like on this exact endpoint. Anything
+		// the spray cannot distinguish from that baseline is not evidence
+		// of a valid credential (fail-closed).
+		base, cookiesTrusted := establishLoginBaseline(ctx, client, actionURL, formFields)
+		if base == nil {
+			findings = append(findings, Finding{
+				Type:     "login_baseline_unavailable",
+				Severity: SevInfo,
+				Name:     "Login spray skipped — baseline failed",
+				Description: fmt.Sprintf(
+					"Two junk-credential POSTs to %s failed; verdicts would be untrustworthy so the spray was not attempted",
+					actionURL,
+				),
+			})
+			continue
+		}
+
+		sprayed := 0
 		for _, cred := range commonCreds {
 			select {
 			case <-ctx.Done():
@@ -83,18 +123,13 @@ func (a *LoginBruteAction) Execute(ctx context.Context, target string, kb *Knowl
 			default:
 			}
 
-			formData := buildFormData(formFields, cred[0], cred[1])
-			loginResp, err := client.Do(ctx, &types.Request{
-				Method:  "POST",
-				URL:     actionURL,
-				Headers: map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
-				Body:    []byte(formData),
-			})
+			loginResp, err := postLoginForm(ctx, client, actionURL, formFields, cred[0], cred[1])
 			if err != nil {
 				continue
 			}
+			sprayed++
 
-			if isLoginSuccess(loginResp) {
+			if loginVerdict(loginResp, *base, cookiesTrusted) {
 				kb.AddCredential(Credential{
 					Username: cred[0],
 					Password: cred[1],
@@ -106,8 +141,9 @@ func (a *LoginBruteAction) Execute(ctx context.Context, target string, kb *Knowl
 					Type:        "login_valid",
 					Name:        fmt.Sprintf("Valid credentials: %s:%s", cred[0], cred[1]),
 					Severity:    SevCritical,
-					Description: fmt.Sprintf("Login successful at %s", actionURL),
-					Evidence:    fmt.Sprintf("%s:%s → %d", cred[0], cred[1], loginResp.StatusCode),
+					Description: fmt.Sprintf("Login successful at %s (differential verdict vs junk-credential baseline)", actionURL),
+					Evidence:    fmt.Sprintf("%s:%s → %d richer than baseline", cred[0], cred[1], loginResp.StatusCode),
+					Details:     map[string]string{"verification": "baseline-differential"},
 				})
 
 				spawned = append(spawned, &PostLoginCrawlAction{
@@ -119,6 +155,7 @@ func (a *LoginBruteAction) Execute(ctx context.Context, target string, kb *Knowl
 				break
 			}
 		}
+		totalSprayed += sprayed
 	}
 
 	if len(findings) == 0 {
@@ -132,7 +169,7 @@ func (a *LoginBruteAction) Execute(ctx context.Context, target string, kb *Knowl
 			Type:        "login_brute_complete",
 			Name:        fmt.Sprintf("Login bruteforce complete — %d forms tested, no valid creds", pagesWithForms),
 			Severity:    SevInfo,
-			Description: "Tested " + fmt.Sprintf("%d credentials against %d forms", len(commonCreds), pagesWithForms),
+			Description: "Tested " + fmt.Sprintf("%d credentials against %d forms (differential validation)", totalSprayed, pagesWithForms),
 		})
 	}
 
@@ -282,30 +319,221 @@ func buildFormData(fields []string, username, password string) string {
 	return strings.Join(parts, "&")
 }
 
-func isLoginSuccess(resp *types.Response) bool {
-	if resp.StatusCode == 302 || resp.StatusCode == 301 {
+// ── Baseline-differential login verification ─────────────────────────────
+// The previous isLoginSuccess() decided from a single response (30x =
+// success, magic words on 200). That produced provable false positives on
+// two very common real-world shapes:
+//   - PRG failure flows (POST → 302 → error page) — a 302 meant "success";
+//   - pages carrying static "Welcome/Logout" strings on the error page.
+// The verdict is now differential: BEFORE spraying, two junk-credential
+// POSTs establish what a failure looks like on this exact endpoint. A
+// valid credential may only be claimed on a session/navigation-level delta
+// that junk credentials could not reproduce (cookie delta on stable-churn
+// endpoints, or a final destination different from the failure one). When
+// the baseline is unstable (per-request cookie churn, transport errors),
+// signals are downgraded or the spray is skipped — fail-closed.
+
+type loginFingerprint struct {
+	status       int
+	finalURL     string
+	finalPath    string
+	finalHost    string
+	location     string
+	cookieBlob   string // canonicalized "name=value" pairs, sorted
+	cookieNames  string // canonicalized cookie names, sorted
+	failWords    bool
+	successWords bool
+}
+
+func fingerprintLogin(r *types.Response) loginFingerprint {
+	var f loginFingerprint
+	if r == nil {
+		return f
+	}
+	f.status = r.StatusCode
+	f.finalURL = r.FinalURL
+	if u, err := url.Parse(r.FinalURL); err == nil {
+		f.finalPath = u.Path
+		f.finalHost = u.Host
+	}
+	f.location = r.Headers.Get("Location")
+	f.cookieBlob, f.cookieNames = canonicalCookies(r.Headers)
+	f.failWords, f.successWords = classifyLoginBody(r.Body)
+	return f
+}
+
+// Word lists are failure markers first. Their only affirmative role is
+// documentation in the finding; they can never claim success alone.
+var (
+	loginSuccessWords = []string{"dashboard", "welcome", "logout", "profile", "my account"}
+	loginFailWords    = []string{"invalid", "incorrect", "failed", "error", "wrong"}
+)
+
+// classifyLoginBody detects failure markers anywhere in the final body.
+// Conservative by design: a legitimate dashboard whose JS bundle contains
+// the string "failed" yields a false negative, never a false positive.
+func classifyLoginBody(body []byte) (fail, success bool) {
+	if len(body) == 0 {
+		return false, false
+	}
+	low := strings.ToLower(string(body))
+	for _, w := range loginFailWords {
+		if strings.Contains(low, w) {
+			fail = true
+			break
+		}
+	}
+	for _, w := range loginSuccessWords {
+		if strings.Contains(low, w) {
+			success = true
+			break
+		}
+	}
+	return fail, success
+}
+
+// canonicalCookies normalizes Set-Cookie pairs so that a session-name or
+// value delta can be compared across responses of the same endpoint.
+func canonicalCookies(h http.Header) (blob, names string) {
+	var pairs, only []string
+	for _, v := range h.Values("Set-Cookie") {
+		eq := strings.IndexByte(v, '=')
+		if eq <= 0 {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(v[:eq]))
+		val := v[eq+1:]
+		if semi := strings.IndexByte(val, ';'); semi >= 0 {
+			val = val[:semi]
+		}
+		pairs = append(pairs, name+"="+val)
+		only = append(only, name)
+	}
+	sort.Strings(pairs)
+	sort.Strings(only)
+	return strings.Join(pairs, "; "), strings.Join(only, ",")
+}
+
+func postLoginForm(ctx context.Context, client *transport.Client, actionURL string, formFields []string, username, password string) (*types.Response, error) {
+	return client.Do(ctx, &types.Request{
+		Method: "POST",
+		URL:    actionURL,
+		Headers: map[string]string{
+			"Content-Type": "application/x-www-form-urlencoded",
+		},
+		Body: []byte(buildFormData(formFields, username, password)),
+	})
+}
+
+func randLoginJunk() (string, string) {
+	u := make([]byte, 8)
+	p := make([]byte, 12)
+	if _, err := rand.Read(u); err != nil {
+		return "junkuser", "junkpassword"
+	}
+	if _, err := rand.Read(p); err != nil {
+		return "junkuser", "junkpassword"
+	}
+	return "ns_" + hex.EncodeToString(u), hex.EncodeToString(p)
+}
+
+// establishLoginBaseline performs two junk-credential POSTs and returns the
+// failure fingerprint plus whether the endpoint's cookie churn is stable
+// enough for cookie blobs to act as a success signal.
+func establishLoginBaseline(ctx context.Context, client *transport.Client, actionURL string, formFields []string) (*loginFingerprint, bool) {
+	u1, p1 := randLoginJunk()
+	r1, err := postLoginForm(ctx, client, actionURL, formFields, u1, p1)
+	if err != nil || r1 == nil {
+		return nil, false
+	}
+	u2, p2 := randLoginJunk()
+	r2, err := postLoginForm(ctx, client, actionURL, formFields, u2, p2)
+	if err != nil || r2 == nil {
+		return nil, false
+	}
+	f1, f2 := fingerprintLogin(r1), fingerprintLogin(r2)
+	// Per-request cookie value churn (rotating CSRF/session ids on every
+	// response, including failures) makes value deltas meaningless; only
+	// name-set changes remain a signal in that case.
+	cookiesTrusted := f1.cookieBlob == f2.cookieBlob
+	return &f1, cookiesTrusted
+}
+
+// loginVerdict decides whether resp PROVES the credentials are valid.
+// Strictly differential: the response must differ from the junk baseline on
+// a signal junk credentials could not produce:
+//   - redirect (non-following mode): a same-host Location the baseline did
+//     not target, or a session cookie delta;
+//   - 200 (following mode): a cookie delta, or the final destination left
+//     the baseline's failure path.
+//
+// Body words and body size alone can never claim a valid credential — that
+// is exactly the false-positive class this rewrite removes.
+func loginVerdict(resp *types.Response, base loginFingerprint, cookiesTrusted bool) bool {
+	if resp == nil || base.finalHost == "" {
+		return false
+	}
+	cur := fingerprintLogin(resp)
+	if cur.failWords {
+		return false
+	}
+
+	cookieDelta := cur.cookieNames != base.cookieNames ||
+		(cookiesTrusted && cur.cookieBlob != base.cookieBlob)
+
+	if cur.status >= 300 && cur.status < 400 {
+		// The client returned the redirect itself (followRedirects=false).
+		// Compare destinations by PATH: failure flows commonly carry a
+		// timestamped or randomized query, which would resurrect the
+		// false-positive if compared verbatim.
+		loc := cur.location
+		if loc == "" || locationPath(loc) == locationPath(base.location) {
+			return false
+		}
+		if !locationSameHost(loc, base.finalURL) {
+			return false
+		}
 		return true
 	}
-	if resp.StatusCode == 200 && len(resp.Body) > 0 {
-		lowBody := strings.ToLower(string(resp.Body))
-		successWords := []string{"dashboard", "welcome", "logout", "profile", "my account"}
-		failWords := []string{"invalid", "incorrect", "failed", "error", "wrong"}
 
-		hasSuccess := false
-		for _, w := range successWords {
-			if strings.Contains(lowBody, w) {
-				hasSuccess = true
-				break
-			}
-		}
-		hasFail := false
-		for _, w := range failWords {
-			if strings.Contains(lowBody, w) {
-				hasFail = true
-				break
-			}
-		}
-		return hasSuccess && !hasFail
+	if cur.status != 200 {
+		// 4xx/5xx, rate-limit responses, etc. — no credential claim.
+		return false
 	}
-	return false
+
+	return cookieDelta || cur.finalPath != base.finalPath
+}
+
+// locationSameHost accepts relative locations unconditionally and absolute
+// ones only when they stay on the form's origin — a cross-host redirect is
+// never evidence of successful authentication.
+func locationSameHost(loc, refererURL string) bool {
+	lu, err := url.Parse(loc)
+	if err != nil {
+		return false
+	}
+	if lu.Host == "" {
+		return true
+	}
+	if lu.Scheme != "http" && lu.Scheme != "https" {
+		return false
+	}
+	r, err := url.Parse(refererURL)
+	if err != nil {
+		return false
+	}
+	return lu.Host == r.Host
+}
+
+// locationPath extracts just the path of a Location header, tolerating
+// relative references and host-only URLs.
+func locationPath(loc string) string {
+	u, err := url.Parse(loc)
+	if err != nil {
+		return loc
+	}
+	if u.Path == "" {
+		return "/"
+	}
+	return u.Path
 }
