@@ -19,13 +19,13 @@ const (
 type FindingType string
 
 const (
-	FindingTech       FindingType = "technology"
-	FindingExposure   FindingType = "exposure"
-	FindingMisconfig  FindingType = "misconfiguration"
-	FindingTLS        FindingType = "tls"
-	FindingHeader     FindingType = "header"
-	FindingWAF        FindingType = "waf"
-	FindingSecret     FindingType = "secret"
+	FindingTech      FindingType = "technology"
+	FindingExposure  FindingType = "exposure"
+	FindingMisconfig FindingType = "misconfiguration"
+	FindingTLS       FindingType = "tls"
+	FindingHeader    FindingType = "header"
+	FindingWAF       FindingType = "waf"
+	FindingSecret    FindingType = "secret"
 )
 
 type Request struct {
@@ -50,13 +50,13 @@ type RedirectHop struct {
 }
 
 type Response struct {
-	StatusCode  int
-	Status      string
-	Headers     http.Header
-	Body        []byte
-	BodySize    int64
-	Duration    time.Duration
-	ContentType string
+	StatusCode    int
+	Status        string
+	Headers       http.Header
+	Body          []byte
+	BodySize      int64
+	Duration      time.Duration
+	ContentType   string
 	ContentLength int64
 
 	TLSVersion    string
@@ -71,37 +71,42 @@ type Response struct {
 }
 
 type Result struct {
-	Target    string
-	Request   *Request
-	Response  *Response
-	Findings  []Finding
-	Error     error
-	Duration  time.Duration
+	Target   string
+	Request  *Request
+	Response *Response
+	Findings []Finding
+	Error    error
+	Duration time.Duration
 }
 
 type Finding struct {
-	Type        FindingType `json:"type"`
-	Name        string      `json:"name"`
-	Severity    Severity    `json:"severity"`
-	Description string      `json:"description"`
-	Evidence    string      `json:"evidence,omitempty"`
-	Confidence  float64     `json:"confidence"`
+	Type        FindingType       `json:"type"`
+	Name        string            `json:"name"`
+	Severity    Severity          `json:"severity"`
+	Description string            `json:"description"`
+	Evidence    string            `json:"evidence,omitempty"`
+	Confidence  float64           `json:"confidence"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 type Config struct {
-	Targets  []string
-	Workers  int
-	Timeout  time.Duration
-	Retries  int
-	RateLimit int
-	Proxy    string
-	OutputFormat string
-	OutputFile   string
-	Verbose  bool
+	Targets         []string
+	Workers         int
+	Timeout         time.Duration
+	Retries         int
+	RateLimit       int
+	Proxy           string
+	OutputFormat    string
+	OutputFile      string
+	Verbose         bool
 	FollowRedirects bool
-	MaxRedirects   int
-	Headers  map[string]string
-	HTTP2    bool
-	Cookie   string
+	MaxRedirects    int
+	Headers         map[string]string
+	HTTP2           bool
+	Cookie          string
+	// Destructive: explicit operator consent for state-modifying actions
+	// (command/shell uploads, account registration). Anything that writes
+	// or spawns state on the target is gated on this — a default-on scan
+	// must never create or alter assets the operator did not opt into.
+	Destructive bool
 }

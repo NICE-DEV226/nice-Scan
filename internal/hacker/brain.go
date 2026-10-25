@@ -51,6 +51,16 @@ func NewBrain(target string, client *transport.Client, actions ...Action) *Brain
 	}
 }
 
+// AppendAction registers additional actions before the run — the only
+// sanctioned way for the CLI to add destructive modules after NewBrain
+// (they stay absent entirely without operator consent).
+func (b *Brain) AppendAction(as ...Action) {
+	for _, a := range as {
+		b.actions = append(b.actions, a)
+		b.planner.AddAction(a)
+	}
+}
+
 func (b *Brain) Run(ctx context.Context) *Report {
 	b.startAt = time.Now()
 	step := 0

