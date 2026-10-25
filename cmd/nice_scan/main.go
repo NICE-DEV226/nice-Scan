@@ -7,9 +7,12 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/NICE-DEV226/nice-Scan/internal/engine"
 	"github.com/NICE-DEV226/nice-Scan/internal/exploit"
@@ -20,6 +23,7 @@ import (
 	"github.com/NICE-DEV226/nice-Scan/internal/transport"
 	"github.com/NICE-DEV226/nice-Scan/internal/tui"
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
+	"github.com/NICE-DEV226/nice-Scan/internal/update"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -93,6 +97,7 @@ func main() {
 				slog.Error("invalid --proxy", "error", err)
 				os.Exit(2)
 			}
+			notifyNewRelease(cmd)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if showVersion {
@@ -142,6 +147,7 @@ func main() {
 	root.PersistentFlags().IntVar(&cfg.MaxRedirects, "max-redirects", 5, "max redirects to follow")
 	root.PersistentFlags().StringVarP(&reportFile, "report", "R", "", "save detailed HTML report to file")
 	root.PersistentFlags().BoolVar(&cfg.Destructive, "destructive", false, "consent to state-modifying actions (command upload/registration spawns) — modifies target state, authorized targets only")
+	root.PersistentFlags().BoolVar(&noUpdateCheck, "no-update-check", false, "disable the automatic new-release check (also honored via NICE_SCAN_NO_UPDATE_CHECK=1)")
 
 	root.AddCommand(scanCmd())
 	root.AddCommand(auditCmd())
@@ -150,6 +156,7 @@ func main() {
 	root.AddCommand(exploitCmd())
 	root.AddCommand(hackCmd())
 	root.AddCommand(shellCmd())
+	root.AddCommand(updateCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -158,6 +165,134 @@ func main() {
 }
 
 var headers []string
+
+var noUpdateCheck bool
+
+// notifyNewRelease tells the operator the running binary is behind the
+// latest published release. One network call per day (cache), 3 s
+// budget, silent fail-open: the CLI must never break or slow a session
+// over an advisory. Dev builds (source trees) never get compared —
+// their version carries no registry meaning.
+func notifyNewRelease(cmd *cobra.Command) {
+	if showVersion || noUpdateCheck || os.Getenv("NICE_SCAN_NO_UPDATE_CHECK") == "1" {
+		return
+	}
+	if cmd != nil && cmd.Name() == "update" {
+		return // the update command performs its own, fresher check
+	}
+	current := displayVersion()
+	if !update.IsComparable(current) {
+		return // dev trees: pseudo-versions carry no registry meaning
+	}
+
+	latest, fresh, _ := update.CachedLatest()
+	if !fresh {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		tag, err := update.DefaultClient().Latest(ctx)
+		if err != nil {
+			return // offline / rate-limited: silent, fail-open
+		}
+		latest = tag
+		update.StoreCheck(tag)
+	}
+	if !update.IsNewer(latest, current) {
+		return
+	}
+
+	fmt.Println()
+	fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Render(
+		"  Update available: " + latest + " (running v" + current + ") — run \"nice_scan update\" (--no-update-check disables)"))
+}
+
+func updateCmd() *cobra.Command {
+	var checkOnly bool
+	var force bool
+	cmd := &cobra.Command{
+		Use:   "update",
+		Short: "Self-update to the latest release (checksum-verified)",
+		Long: `Resolve the latest GitHub release, download the asset for this
+platform, verify it against the release's published sha256 checksums
+(fail-closed on any mismatch) and atomically replace the running
+binary. The previous binary is kept as nice_scan.old next to it for
+rollback.
+
+The full GPG-verified supply chain (pinned fingerprint, builder
+attestations) remains on the installer path: this in-place update is
+checksum-verified only, and says so.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			current := displayVersion()
+
+			ctx, cancel := signalContext()
+			defer cancel()
+
+			client := update.DefaultClient()
+			rel, err := client.FetchRelease(ctx)
+			if err != nil {
+				return err
+			}
+
+			if checkOnly {
+				if !update.IsComparable(current) {
+					fmt.Printf("  Latest release: %s — running %q (non-release build, no comparison)\n", rel.TagName, current)
+					return nil
+				}
+				if update.IsNewer(rel.TagName, current) {
+					fmt.Printf("  Update available: %s (running v%s)\n", rel.TagName, current)
+				} else {
+					fmt.Printf("  Up to date: v%s\n", current)
+				}
+				update.StoreCheck(rel.TagName)
+				return nil
+			}
+
+			if !update.IsComparable(current) && !force {
+				return fmt.Errorf("running %q (non-release build): version comparison is meaningless here — use --force to replace it with %s", current, rel.TagName)
+			}
+			if update.IsComparable(current) && !update.IsNewer(rel.TagName, current) {
+				fmt.Printf("  Up to date: v%s (latest release %s)\n", current, rel.TagName)
+				update.StoreCheck(rel.TagName)
+				return nil
+			}
+			if !update.IsComparable(current) {
+				fmt.Printf("  Installing %s over the non-release build %q\n", rel.TagName, current)
+			}
+
+			assets, err := client.Assets(ctx, rel, runtime.GOOS, runtime.GOARCH)
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("  Downloading %s…\n", assets[0].Name)
+			archivePath, err := client.Download(ctx, assets[0])
+			if err != nil {
+				return err
+			}
+			defer func() { _ = os.Remove(archivePath) }()
+
+			binPath, err := update.Extract(archivePath, runtime.GOOS)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = os.RemoveAll(filepath.Dir(binPath)) }()
+
+			installed, backup, err := update.ReplaceSelf(binPath)
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("  Updated nice_scan → %s\n", rel.TagName)
+			fmt.Printf("  Installed at %s (previous binary kept as %s for rollback)\n", installed, backup)
+			fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Render("  Verified: sha256 against the release's published checksums. The GPG-signed chain (pinned fingerprint) remains on the installer path."))
+			fmt.Println(lipgloss.NewStyle().Foreground(clCyan).Render("  Restart nice_scan to run the new version."))
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&checkOnly, "check", false, "only report the comparison with the latest release, no download")
+	cmd.Flags().BoolVar(&force, "force", false, "download and install even when the running version is a dev build")
+	return cmd
+}
 
 func buildClient() *transport.Client {
 	opts := []transport.ClientOption{
