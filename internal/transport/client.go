@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -41,13 +42,16 @@ type clientOptions struct {
 	proxy           string
 	headers         map[string]string
 	cookie          string
-	// credScope restricts where credentials (cookie + configured headers)
-	// are attached. When set, requests to hosts outside the scope never
-	// carry the operator's cookie or header credentials. Empty means "no
-	// scoping requested" (attach everywhere) — commands that know their
-	// target must always configure it.
-	credScope       []string
-	rateLimit       int
+	// credScope restricts where operator credentials (cookie + configured
+	// headers) are attached. When set, requests to hosts outside the scope
+	// never carry them. Empty means "no scoping requested" (attach
+	// everywhere) — commands that know their target must always configure
+	// it.
+	credScope      []string
+	// sessionCookies enables capture/attach of target-issued cookies for
+	// authenticated workflows (off by default; runtime toggle only).
+	sessionCookies bool
+	rateLimit      int
 	verbose         bool
 	dialTimeout     time.Duration
 	tlsTimeout      time.Duration
@@ -121,13 +125,26 @@ func (c *Client) SetCredScope(domains ...string) {
 func (c *Client) credsAllowedFor(rawURL string) bool {
 	c.opts.mu.Lock()
 	cookie := c.opts.cookie
-	scope := c.opts.credScope
 	headersCount := len(c.opts.headers)
 	c.opts.mu.Unlock()
 
 	hasCreds := cookie != "" || headersCount > 0
-	if !hasCreds || len(scope) == 0 {
-		return hasCreds
+	if !hasCreds {
+		return false
+	}
+	return c.hostInScope(rawURL)
+}
+
+// hostInScope is the pure scope rule, without the "operator has
+// credentials at all" clause: target-issued session cookies use it with
+// that clause removed (they exist even on clients with no operator
+// credentials configured).
+func (c *Client) hostInScope(rawURL string) bool {
+	c.opts.mu.Lock()
+	scope := c.opts.credScope
+	c.opts.mu.Unlock()
+	if len(scope) == 0 {
+		return true
 	}
 	host := HostDomain(rawURL)
 	if host == "" {
@@ -192,6 +209,9 @@ func isSameOriginURL(a, b *url.URL) bool {
 	return a.Scheme == b.Scheme && a.Host == b.Host
 }
 
+// hopsCtxKey carries the per-request redirect-hop buffer.
+type hopsCtxKey struct{}
+
 func WithRateLimit(r int) ClientOption {
 	return func(o *clientOptions) { o.rateLimit = r }
 }
@@ -204,6 +224,7 @@ type Client struct {
 	opts    *clientOptions
 	http    *http.Client
 	rl      *RateLimiter
+	sess    *cookieStore
 	stats   RequestStats
 	statsMu sync.Mutex
 }
@@ -218,10 +239,46 @@ type RequestStats struct {
 	TotalTime   time.Duration
 }
 
+// SetSessionCookies enables (or disables) capture and re-attach of cookies
+// the target itself issues. Only workflows whose credential was verified
+// (e.g. a login confirmed by a differential verdict) enable it, for their
+// own requests; passive scanning stays unauthenticated so Set-Cookie
+// banners cannot silently grow a scanner session.
+func (c *Client) SetSessionCookies(enabled bool) {
+	c.opts.mu.Lock()
+	c.opts.sessionCookies = enabled
+	c.opts.mu.Unlock()
+}
+
+func (c *Client) sessionCookiesEnabled() bool {
+	c.opts.mu.Lock()
+	v := c.opts.sessionCookies
+	c.opts.mu.Unlock()
+	return v
+}
+
+// captureStoreFromResponse records Set-Cookie values of one response into
+// the session store, bounded to the session mode. hi = the URL the response
+// belongs to (the host that issued the cookies).
+func (c *Client) captureStoreFromResponse(u *url.URL, resp *http.Response) {
+	if resp == nil || u == nil || !c.sessionCookiesEnabled() {
+		return
+	}
+	c.sess.capture(u.Host, resp.Cookies())
+}
+
 func NewClient(opts ...ClientOption) *Client {
 	o := defaultOptions()
 	for _, opt := range opts {
 		opt(o)
+	}
+
+	// The Client exists before the http.Client: the redirect callback
+	// captures per-hop Set-Cookie values from redirect responses
+	// (req.Response), which stdlib never surfaces to the caller.
+	c := &Client{
+		opts: o,
+		sess: newCookieStore(),
 	}
 
 	tr := newTransport(o)
@@ -237,16 +294,35 @@ func NewClient(opts ...ClientOption) *Client {
 		}
 	} else {
 		// The stdlib's redirect header stripping is a thin guarantee (and on
-		// this toolchain it keeps Cookie over redirects that match the
-		// hostname ignoring ports). OPSEC-enforce it here: operator
-		// credentials (cookie + configured headers) survive a redirect hop
-		// only when the destination is covered by the same allow rules as
-		// the initial request; every other hop is stripped down.
+		// this toolchain it keeps Cookie headers across redirects that match
+		// the hostname ignoring ports). OPSEC-enforce it here: any Cookie
+		// header riding the request — the operator's credentials or target-
+		// issued session cookies — survives a redirect hop only when the
+		// destination is covered by the same allow rules as the initial
+		// request; every other hop is stripped down. Redirect responses are
+		// also the only place interim Set-Cookie hops can be captured for
+		// the session store.
 		httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 			if len(via) >= o.maxRedirects {
 				return fmt.Errorf("max redirects exceeded (%d)", o.maxRedirects)
 			}
-			if len(via) == 0 || (o.cookie == "" && len(o.headers) == 0) {
+
+			// Interim hop capture: this request was built from a 3xx
+			// response stdlib handled internally. Its Set-Cookie values get
+			// attached to the same store as the final hop's, and the
+			// redirect chain is recorded for verdicts that need it.
+			if req.Response != nil && req.Response.Request != nil {
+				c.captureStoreFromResponse(req.Response.Request.URL, req.Response)
+				if buf, ok := req.Context().Value(hopsCtxKey{}).(*[]types.RedirectHop); ok && buf != nil {
+					*buf = append(*buf, types.RedirectHop{
+						Status:   req.Response.StatusCode,
+						URL:      req.Response.Request.URL.String(),
+						Location: req.Response.Header.Get("Location"),
+					})
+				}
+			}
+
+			if len(via) == 0 {
 				return nil
 			}
 
@@ -270,37 +346,41 @@ func NewClient(opts ...ClientOption) *Client {
 					}
 				}
 			} else {
-				// No scope configured: credentials stay on the exact origin
+				// No scope configured: cookies stay on the exact origin
 				// (scheme+host+port) they were issued for — mirroring the
 				// stdlib's domain-sensitive redirect rule, which this
 				// toolchain does not honor for cookies.
 				allowed = isSameOriginURL(via[0].URL, req.URL)
 			}
 
-			// Belt and suspenders: assert exactly the credentials that are
-			// allowed, remove anything else that came along.
-			if !allowed {
+			// Belt and suspenders: whatever cookie reached this hop, wrong
+			// destination means no cookie. This now also covers the session
+			// store: an authenticated redirect bounce (login open redirect)
+			// must not replay the captured session out of the target origin.
+			if !allowed && req.Header.Get("Cookie") != "" {
 				req.Header.Del("Cookie")
-				req.Header.Del("Authorization")
-				for k := range o.headers {
-					req.Header.Del(k)
-				}
-				return nil
 			}
+
+			// Operator credentials: assert exactly what is allowed.
 			if o.cookie != "" {
-				req.Header.Set("Cookie", o.cookie)
+				if allowed {
+					req.Header.Set("Cookie", o.cookie)
+				} else {
+					req.Header.Del("Authorization")
+					for k := range o.headers {
+						req.Header.Del(k)
+					}
+				}
 			}
-			for k, v := range o.headers {
-				req.Header.Set(k, v)
+			if allowed {
+				for k, v := range o.headers {
+					req.Header.Set(k, v)
+				}
 			}
 			return nil
 		}
 	}
-
-	c := &Client{
-		opts: o,
-		http: httpClient,
-	}
+	c.http = httpClient
 
 	if o.rateLimit > 0 {
 		c.rl = NewRateLimiter(o.rateLimit)
@@ -343,14 +423,17 @@ func newTransport(o *clientOptions) *http.Transport {
 
 func (c *Client) Do(ctx context.Context, req *types.Request) (*types.Response, error) {
 	if c.rl != nil {
-		c.rl.Wait(ctx)
-		c.statsMu.Lock()
-		c.stats.RateLimited++
-		c.statsMu.Unlock()
+		// Count only requests the limiter actually delayed, not every
+		// request sent while the limiter exists.
+		if c.rl.Wait(ctx) {
+			c.statsMu.Lock()
+			c.stats.RateLimited++
+			c.statsMu.Unlock()
+		}
 	}
 
 	start := time.Now()
-	resp, err := c.doWithRetries(ctx, req)
+	resp, err := doWithRetries(ctx, c, req)
 	duration := time.Since(start)
 
 	c.statsMu.Lock()
@@ -367,15 +450,32 @@ func (c *Client) Do(ctx context.Context, req *types.Request) (*types.Response, e
 		return nil, err
 	}
 
-	if resp != nil {
+	// resp.Duration is the wire-attempt time set inside execute(); keep it
+	// (time oracles gate on it). duration here additionally covers rate-
+	// limiter waits and only fills in when nothing else could measure.
+	if resp != nil && resp.Duration == 0 {
 		resp.Duration = duration
 	}
 
 	return resp, nil
 }
 
-func (c *Client) doWithRetries(ctx context.Context, req *types.Request) (*types.Response, error) {
+// idempotentMethod reports whether repeating a request can never cause a
+// second state change at the target: the retry loop must never resend a
+// POST Spray of credentials or a state-changing request on a 500/429 or a
+// timeout — the first attempt may have been processed, and a resend
+// double-submits the payload (account lockouts, double registrations).
+func idempotentMethod(method string) bool {
+	switch strings.ToUpper(method) {
+	case "GET", "HEAD", "OPTIONS", "TRACE":
+		return true
+	}
+	return false
+}
+
+func doWithRetries(ctx context.Context, c *Client, req *types.Request) (*types.Response, error) {
 	var lastErr error
+	var lastResp *types.Response
 
 	for attempt := 0; attempt <= c.opts.retries; attempt++ {
 		if attempt > 0 {
@@ -386,24 +486,40 @@ func (c *Client) doWithRetries(ctx context.Context, req *types.Request) (*types.
 			wait := backoffDuration(attempt, c.opts.retryWaitMin, c.opts.retryWaitMax)
 			select {
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return lastResp, ctx.Err()
 			case <-time.After(wait):
 			}
 		}
 
 		resp, err := c.execute(ctx, req)
-		if err == nil {
+		lastErr = err
+		lastResp = resp
+
+		// Non-idempotent requests get exactly one attempt, whatever the
+		// outcome: a timeout on a POST means the server may already have
+		// processed it, and a 500/429 does not undo that. Resending would
+		// double-submit credentials, registrations, uploads.
+		if !idempotentMethod(req.Method) {
+			if err != nil {
+				return nil, err
+			}
 			return resp, nil
 		}
 
-		lastErr = err
-
-		if !isRetryable(err, resp) {
+		// Idempotent: retry real retryable conditions only.
+		if err == nil && !isRetryable(nil, resp) {
+			return resp, nil
+		}
+		if err != nil && !isRetryable(err, resp) {
 			return resp, err
 		}
+		// else: retryable — loop (backoff happens at iteration start).
 	}
 
-	return nil, fmt.Errorf("%w after %d attempts: %w", types.ErrMaxRetries, c.opts.retries+1, lastErr)
+	if lastErr != nil {
+		return nil, fmt.Errorf("%w after %d attempts: %w", types.ErrMaxRetries, c.opts.retries+1, lastErr)
+	}
+	return lastResp, nil
 }
 
 func (c *Client) execute(ctx context.Context, req *types.Request) (*types.Response, error) {
@@ -412,28 +528,59 @@ func (c *Client) execute(ctx context.Context, req *types.Request) (*types.Respon
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
+	// Per-request redirect-hop buffer: seeded into the request context so
+	// the CheckRedirect callback (which sees every interim 3xx the stdlib
+	// handles) can record the chain the caller otherwise never receives.
+	var hops []types.RedirectHop
+	httpReq = httpReq.WithContext(context.WithValue(httpReq.Context(), hopsCtxKey{}, &hops))
+
 	if len(req.Body) > 0 {
 		httpReq.Body = io.NopCloser(bytes.NewReader(req.Body))
 		httpReq.ContentLength = int64(len(req.Body))
 	}
 
-	for k, v := range c.opts.headers {
-		httpReq.Header.Set(k, v)
+	// Operator credentials ride only hosts covered by credScope (cookie #
+	// custom headers — both carry secrets the operator entered for a known
+	// target; legacy behaviour attaches everywhere when no scope is set).
+	// Target-issued session cookies ride only when session mode is enabled.
+	cookieAllowed := c.credsAllowedFor(req.URL)
+	if cookieAllowed {
+		if c.opts.cookie != "" {
+			httpReq.Header.Set("Cookie", c.opts.cookie)
+		}
+		for k, v := range c.opts.headers {
+			httpReq.Header.Set(k, v)
+		}
 	}
 	for k, v := range req.Headers {
 		httpReq.Header.Set(k, v)
 	}
-	if c.credsAllowedFor(req.URL) {
-		if c.opts.cookie != "" {
-			httpReq.Header.Set("Cookie", c.opts.cookie)
+	if c.sessionCookiesEnabled() && c.hostInScope(req.URL) {
+		if sessionHdr := c.sess.cookieHeader(req.URL); sessionHdr != "" {
+			existing := httpReq.Header.Get("Cookie")
+			if existing == "" {
+				httpReq.Header.Set("Cookie", sessionHdr)
+			} else {
+				// Target-issued cookies come last: servers keep the last
+				// duplicate, so a refreshed session wins over a stale
+				// operator-supplied one for the same name.
+				httpReq.Header.Set("Cookie", existing+"; "+sessionHdr)
+			}
 		}
 	}
 
 	httpReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
 	httpReq.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	httpReq.Header.Set("Accept-Language", "en-US,en;q=0.5")
-	httpReq.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	// Note: Accept-Encoding is deliberately NOT set. When the caller sets
+	// it manually, net/http stops transparently decompressing the response
+	// and delivers raw gzip/deflate/br bytes — which silently blinded every
+	// body-based detection (canaries, error signatures, keyword classes)
+	// on any server that compresses. With no manual header and
+	// DisableCompression=false, the transport adds gzip itself and hands
+	// back plain bytes.
 
+	wireStart := time.Now()
 	httpResp, err := c.http.Do(httpReq)
 	if err != nil {
 		select {
@@ -454,6 +601,7 @@ func (c *Client) execute(ctx context.Context, req *types.Request) (*types.Respon
 		Proto:         httpResp.Proto,
 		ContentType:   httpResp.Header.Get("Content-Type"),
 		ContentLength: httpResp.ContentLength,
+		RedirectHops:  append([]types.RedirectHop(nil), hops...),
 	}
 
 	if httpResp.TLS != nil {
@@ -463,9 +611,16 @@ func (c *Client) execute(ctx context.Context, req *types.Request) (*types.Respon
 	}
 
 	body, err := io.ReadAll(io.LimitReader(httpResp.Body, c.opts.maxBodySize))
+	// The response duration measures the wire attempt only (request sent →
+	// body fully read): time-based oracles gate on this value, so rate-
+	// limiter waits and retry backoff that previously inflated it must not
+	// contribute.
+	resp.Duration = time.Since(wireStart)
 	if err != nil {
 		return resp, fmt.Errorf("read body: %w", err)
 	}
+	c.captureStoreFromResponse(httpResp.Request.URL, httpResp)
+
 	resp.Body = body
 	resp.BodySize = int64(len(body))
 
@@ -540,42 +695,22 @@ func (c *Client) Close() error {
 }
 
 func isRetryable(err error, resp *types.Response) bool {
+	// Server-side hiccups are retry conditions regardless of err==nil: the
+	// response completed, the status itself signals a transient failure.
+	if resp != nil {
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			return true
+		}
+		return false
+	}
 	if err == nil {
 		return false
 	}
-	if errorsIs(err, types.ErrRateLimited) {
+	if errors.Is(err, types.ErrRateLimited) {
 		return true
 	}
-	if errorsIs(err, context.DeadlineExceeded) {
+	if errors.Is(err, context.DeadlineExceeded) {
 		return true
-	}
-	if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
-		return true
-	}
-	if resp != nil && resp.StatusCode >= 500 {
-		return true
-	}
-	return false
-}
-
-func errorsIs(err, target error) bool {
-	for err != nil {
-		if err == target {
-			return true
-		}
-		if ue, ok := err.(interface{ Unwrap() error }); ok {
-			err = ue.Unwrap()
-			continue
-		}
-		if ue, ok := err.(interface{ Unwrap() []error }); ok {
-			for _, e := range ue.Unwrap() {
-				if errorsIs(e, target) {
-					return true
-				}
-			}
-			return false
-		}
-		return false
 	}
 	return false
 }

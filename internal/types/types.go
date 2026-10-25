@@ -38,6 +38,17 @@ type Request struct {
 	Metadata map[string]any
 }
 
+// RedirectHop records one hop of an internally-followed redirect chain:
+// the 3xx the server answered (its own URL) and the Location it advertised
+// toward the next request. stdlib hides these responses from the caller —
+// verdicts that reason about login flows need them (the Location a login
+// POST redirect advertises is only visible here).
+type RedirectHop struct {
+	Status   int
+	URL      string
+	Location string
+}
+
 type Response struct {
 	StatusCode  int
 	Status      string
@@ -55,6 +66,8 @@ type Response struct {
 	FinalURL      string
 	RedirectCount int
 	Proto         string
+	// RedirectHops is scanner-internal observation, not report content.
+	RedirectHops []RedirectHop `json:"-"`
 }
 
 type Result struct {

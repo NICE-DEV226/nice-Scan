@@ -44,14 +44,20 @@ func (rl *RateLimiter) refill() {
 	}
 }
 
-func (rl *RateLimiter) Wait(ctx context.Context) {
+// Wait consumes one token, blocking while none are available. It reports
+// whether the caller was actually delayed (statistics must not count
+// requests that went through immediately).
+func (rl *RateLimiter) Wait(ctx context.Context) bool {
+	waited := false
+
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
 	for rl.tokens <= 0 && !rl.done {
+		waited = true
 		select {
 		case <-ctx.Done():
-			return
+			return waited
 		default:
 		}
 		rl.cond.Wait()
@@ -60,6 +66,7 @@ func (rl *RateLimiter) Wait(ctx context.Context) {
 	if rl.tokens > 0 {
 		rl.tokens--
 	}
+	return waited
 }
 
 func (rl *RateLimiter) Stop() {
