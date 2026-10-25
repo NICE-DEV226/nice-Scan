@@ -176,43 +176,49 @@ func (a *LoginBruteAction) Execute(ctx context.Context, target string, kb *Knowl
 	return ActionResult{Findings: findings, Actions: spawned}
 }
 
-type PostLoginAction struct {
-	username string
-	password string
+// ── Form extraction: names AND pre-rendered values ──────────────────────
+// The previous extractor kept field names only and posted "=test" for any
+// field it did not recognise — including hidden CSRF/anti-forgery tokens,
+// which modern frameworks validate. The very common "invalid CSRF token"
+// failure shape then made login spray conclusions untrustworthy (or
+// silently skipped whole endpoints). Hidden inputs now carry their real
+// value into the POST body; token-like names are treated as verbatim
+// values even when their type attribute is missing.
+
+// formField is one <input> of a form: name, pre-rendered value (hidden
+// fields typically carry the anti-CSRF token), and the declared type.
+type formField struct {
+	name  string
+	value string
+	ftype string
 }
 
-func (a *PostLoginAction) Metadata() ActionMetadata {
-	return ActionMetadata{
-		Name:        "Post-Logon Recon",
-		Description: "Explore authenticated area with valid session",
-		Priority:    41,
-		Requires:    []string{},
-		Provides:    []string{"has_admin_session"},
+// tokenNameHints are name substrings that identify anti-forgery inputs
+// even without a type="hidden" attribute (framework-side naming: Django,
+// Rails, PHP, Struts, SAP, Spring Security...).
+var tokenNameHints = []string{
+	"csrf", "csrftoken", "_token", "xsrf", "xsrf-token", "nonce",
+	"authenticity", "antiforgery", "_wpnonce", "__requestverificationtoken",
+	"_csrf_token", "anticsrf", "requesttoken",
+}
+
+func isTokenLikeField(name string) bool {
+	low := strings.ToLower(name)
+	for _, h := range tokenNameHints {
+		if strings.Contains(low, h) {
+			return true
+		}
 	}
+	return false
 }
 
-func (a *PostLoginAction) Execute(ctx context.Context, target string, kb *Knowledge, client *transport.Client) ActionResult {
-	kb.AddCapability(Capability{
-		Name:   "has_admin_session",
-		Target: target,
-		Details: map[string]string{
-			"username": a.username,
-			"password": a.password,
-		},
-	})
-	return ActionResult{
-		Findings: []Finding{
-			{
-				Type:        "post_login_session",
-				Name:        "Authenticated session captured",
-				Severity:    SevHigh,
-				Description: fmt.Sprintf("Logged in as %s — session ready for authenticated scanning", a.username),
-			},
-		},
-	}
+func fieldIsHidden(inputLow string) bool {
+	return strings.Contains(inputLow, `type="hidden"`) ||
+		strings.Contains(inputLow, "type=hidden") ||
+		strings.Contains(inputLow, `type='hidden'`)
 }
 
-func extractLoginForm(body string) (action string, fields []string) {
+func extractLoginForm(body string) (action string, fields []formField) {
 	lowBody := strings.ToLower(body)
 	for i := 0; i < len(lowBody); {
 		idx := strings.Index(lowBody[i:], "<form")
@@ -251,8 +257,8 @@ func extractLoginForm(body string) (action string, fields []string) {
 	return "", nil
 }
 
-func extractFormFields(content string) []string {
-	var fields []string
+func extractFormFields(content string) []formField {
+	var fields []formField
 	lowContent := strings.ToLower(content)
 	for i := 0; i < len(lowContent); {
 		idx := strings.Index(lowContent[i:], "<input")
@@ -267,10 +273,24 @@ func extractFormFields(content string) []string {
 		inputTag := content[inputStart : inputStart+closeTag+1]
 		inputLow := strings.ToLower(inputTag)
 
-		if !strings.Contains(inputLow, "type=\"submit\"") && !strings.Contains(inputLow, "type=submit") {
+		isSubmit := strings.Contains(inputLow, `type="submit"`) || strings.Contains(inputLow, "type=submit")
+		if !isSubmit {
 			name := extractAttribute(inputTag, "name")
 			if name != "" {
-				fields = append(fields, name)
+				f := formField{
+					name:  name,
+					value: extractAttribute(inputTag, "value"),
+					ftype: "text",
+				}
+				switch {
+				case fieldIsHidden(inputLow):
+					f.ftype = "hidden"
+				case strings.Contains(inputLow, `type="password"`), strings.Contains(inputLow, "type=password"):
+					f.ftype = "password"
+				case isTokenLikeField(name):
+					f.ftype = "token"
+				}
+				fields = append(fields, f)
 			}
 		}
 		i = inputStart + closeTag + 1
@@ -304,17 +324,33 @@ func extractAttribute(tag, attr string) string {
 	return tag[valStart : valStart+end]
 }
 
-func buildFormData(fields []string, username, password string) string {
+// buildFormData assembles the POST body from the form's own fields:
+//   - user/password fields get the credential under test;
+//   - hidden/token fields keep their pre-rendered value (anti-CSRF tokens,
+//     "next" targets, state markers) — sending "=test" for them is what
+//     made whole classes of modern login pages untestable;
+//   - anything else falls back to the historical filler.
+func formValueFor(f formField, username, password string) (string, bool) {
+	flow := strings.ToLower(f.name)
+	switch {
+	case strings.Contains(flow, "user") || strings.Contains(flow, "email") ||
+		strings.Contains(flow, "login") || strings.Contains(flow, "name"):
+		return strings.ReplaceAll(username, " ", "+"), true
+	case strings.Contains(flow, "pass") || strings.Contains(flow, "pwd"):
+		return strings.ReplaceAll(password, " ", "+"), true
+	case f.ftype == "password":
+		return strings.ReplaceAll(password, " ", "+"), true
+	case f.ftype == "hidden" || f.ftype == "token" || isTokenLikeField(f.name):
+		return f.value, true
+	}
+	return "test", true
+}
+
+func buildFormData(fields []formField, username, password string) string {
 	var parts []string
 	for _, f := range fields {
-		fLow := strings.ToLower(f)
-		if strings.Contains(fLow, "user") || strings.Contains(fLow, "email") || strings.Contains(fLow, "login") || strings.Contains(fLow, "name") {
-			parts = append(parts, f+"="+strings.ReplaceAll(username, " ", "+"))
-		} else if strings.Contains(fLow, "pass") || strings.Contains(fLow, "pwd") {
-			parts = append(parts, f+"="+strings.ReplaceAll(password, " ", "+"))
-		} else {
-			parts = append(parts, f+"=test")
-		}
+		v, _ := formValueFor(f, username, password)
+		parts = append(parts, f.name+"="+v)
 	}
 	return strings.Join(parts, "&")
 }
@@ -414,7 +450,7 @@ func canonicalCookies(h http.Header) (blob, names string) {
 	return strings.Join(pairs, "; "), strings.Join(only, ",")
 }
 
-func postLoginForm(ctx context.Context, client *transport.Client, actionURL string, formFields []string, username, password string) (*types.Response, error) {
+func postLoginForm(ctx context.Context, client *transport.Client, actionURL string, formFields []formField, username, password string) (*types.Response, error) {
 	return client.Do(ctx, &types.Request{
 		Method: "POST",
 		URL:    actionURL,
@@ -440,7 +476,7 @@ func randLoginJunk() (string, string) {
 // establishLoginBaseline performs two junk-credential POSTs and returns the
 // failure fingerprint plus whether the endpoint's cookie churn is stable
 // enough for cookie blobs to act as a success signal.
-func establishLoginBaseline(ctx context.Context, client *transport.Client, actionURL string, formFields []string) (*loginFingerprint, bool) {
+func establishLoginBaseline(ctx context.Context, client *transport.Client, actionURL string, formFields []formField) (*loginFingerprint, bool) {
 	u1, p1 := randLoginJunk()
 	r1, err := postLoginForm(ctx, client, actionURL, formFields, u1, p1)
 	if err != nil || r1 == nil {

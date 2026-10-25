@@ -39,11 +39,11 @@ profile.out
 
 # Output
 /output/
-/reports/
+reports/
 *.sarif
 
 # HTML reports (but not docs/)
-/reports/*.html
+reports/*.html
 /*.html
 
 # Env

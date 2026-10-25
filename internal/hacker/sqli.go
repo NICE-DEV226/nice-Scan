@@ -33,8 +33,15 @@ func (a *SQLiAction) Metadata() ActionMetadata {
 		Name:        "SQL Injection",
 		Description: "Baseline-differential boolean, error-surface and gated time detection",
 		Priority:    50,
-		Requires:    []string{"has_sqli"},
-		Provides:    []string{"has_sqli_exploit"},
+		// Self-qualifying: every verdict needs its own double-control (a
+		// benign baseline plus either a replayed boolean differential or a
+		// 2/2 gated latency above that baseline). Requiring a has_sqli
+		// capability seeded from remote text left the whole feature dead in
+		// orchestrated runs: nothing in the flow ever produced it (proven
+		// end-to-end against an injectable target), while the wire-valid
+		// detection code sat behind a gate no scheduled action opened.
+		Requires: []string{},
+		Provides: []string{"has_sqli_exploit"},
 	}
 }
 
@@ -280,11 +287,6 @@ func (a *SQLiAction) Execute(ctx context.Context, target string, kb *Knowledge, 
 	return ActionResult{Findings: findings, Actions: spawned}
 }
 
-// sleepGateLatency computes the delay threshold for one time-probe sample:
-// an absolute floor (SLEEP(3) realistically overshoots it) or 1.2x the
-// baseline latency, whichever dominates. On endpoints with a baseline
-// above ~1.9s the sleep-3 gate bars the verdict — a documented
-// limitation: latency evidence needs the pairing to stay trustworthy.
 // sleepGateLatency computes the delay threshold for one time-probe sample:
 // an absolute floor (SLEEP(3) realistically overshoots it) or 1.2x the
 // baseline latency, whichever dominates. On endpoints with a baseline

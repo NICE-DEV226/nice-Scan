@@ -25,8 +25,14 @@ func (a *XSSAction) Metadata() ActionMetadata {
 		Name:        "XSS Injector",
 		Description: "Canary-tagged reflection probes with context classification",
 		Priority:    45,
-		Requires:    []string{"has_xss"},
-		Provides:    []string{"has_xss_exploit"},
+		// Self-qualifying: the probe itself is a canary randomised per
+		// action/param; a verdict requires the canary's OWN reflection on
+		// the wire. No capability seed needed — needing a "has_xss" hint
+		// seeded by reading the word "XSS" in ANOTHER finding's remote-
+		// controlled text was the wiring defect that left this feature dead
+		// in orchestrated runs (it only ever fired by accident).
+		Requires: []string{},
+		Provides: []string{"has_xss_exploit"},
 	}
 }
 
@@ -221,28 +227,23 @@ func (a *XSSExploitAction) Execute(ctx context.Context, target string, kb *Knowl
 
 // findReflectedParams discovers which parameters echo our input, using the
 // same canary discipline: unique random token, no fixed-marker collisions
-// across concurrent actions.
+// across concurrent actions. Existing query parameters are preserved (a
+// rebuilt query string dropping state params is what made the boolean
+// oracle flip endpoints offline — see setQueryParam in sqli.go).
 func findReflectedParams(ctx context.Context, client *transport.Client, pageURL string, kb *Knowledge) []string {
 	testPayload := detect.NewCanary()
 	probe := url.QueryEscape(testPayload)
 
 	var candidates []string
-	u := pageURL
-	if strings.Contains(u, "?") {
-		parts := strings.SplitN(u, "?", 2)
-		base := parts[0]
-		params := strings.Split(parts[1], "&")
-		for _, param := range params {
-			pair := strings.SplitN(param, "=", 2)
-			if len(pair) == 2 && len(pair[0]) > 0 {
-				testURL := base + "?" + pair[0] + "=" + probe
-				resp, err := client.Do(ctx, &types.Request{Method: "GET", URL: testURL})
-				if err != nil {
-					continue
-				}
-				if strings.Contains(string(resp.Body), testPayload) {
-					candidates = append(candidates, pair[0])
-				}
+	if existing := extractURLParams(pageURL); len(existing) > 0 {
+		for _, param := range existing {
+			testURL := setQueryParam(pageURL, param, probe)
+			resp, err := client.Do(ctx, &types.Request{Method: "GET", URL: testURL})
+			if err != nil {
+				continue
+			}
+			if strings.Contains(string(resp.Body), testPayload) {
+				candidates = append(candidates, param)
 			}
 		}
 	}
@@ -250,7 +251,7 @@ func findReflectedParams(ctx context.Context, client *transport.Client, pageURL 
 	if len(candidates) == 0 {
 		commonParams := []string{"q", "s", "search", "query", "id", "page", "p", "name", "user", "message", "text", "comment", "content", "title", "url", "file", "path", "redirect"}
 		for _, param := range commonParams {
-			testURL := pageURL + "?" + url.QueryEscape(param) + "=" + probe
+			testURL := setQueryParam(pageURL, param, probe)
 			resp, err := client.Do(ctx, &types.Request{Method: "GET", URL: testURL})
 			if err != nil {
 				continue
