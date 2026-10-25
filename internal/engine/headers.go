@@ -41,46 +41,46 @@ func (a *HeaderAnalyzer) Analyze(ctx context.Context, resp *types.Response) []ty
 		checkValue  func(string) (bool, string)
 	}{
 		{
-			header: "Content-Security-Policy",
-			name: "Missing CSP Header",
-			severity: types.SeverityMedium,
+			header:      "Content-Security-Policy",
+			name:        "Missing CSP Header",
+			severity:    types.SeverityMedium,
 			description: "Content-Security-Policy header is missing, increasing risk of XSS and data injection attacks",
-			missing: true,
+			missing:     true,
 		},
 		{
-			header: "Strict-Transport-Security",
-			name: "Missing HSTS Header",
-			severity: types.SeverityMedium,
+			header:      "Strict-Transport-Security",
+			name:        "Missing HSTS Header",
+			severity:    types.SeverityMedium,
 			description: "HTTP Strict-Transport-Security header is missing, allowing MITM downgrade attacks",
-			missing: true,
+			missing:     true,
 		},
 		{
-			header: "X-Frame-Options",
-			name: "Missing X-Frame-Options",
-			severity: types.SeverityLow,
+			header:      "X-Frame-Options",
+			name:        "Missing X-Frame-Options",
+			severity:    types.SeverityLow,
 			description: "X-Frame-Options header is missing, clickjacking may be possible",
-			missing: true,
+			missing:     true,
 		},
 		{
-			header: "X-Content-Type-Options",
-			name: "Missing X-Content-Type-Options",
-			severity: types.SeverityLow,
+			header:      "X-Content-Type-Options",
+			name:        "Missing X-Content-Type-Options",
+			severity:    types.SeverityLow,
 			description: "X-Content-Type-Options: nosniff is missing, MIME sniffing may be possible",
-			missing: true,
+			missing:     true,
 		},
 		{
-			header: "Referrer-Policy",
-			name: "Missing Referrer-Policy",
-			severity: types.SeverityInfo,
+			header:      "Referrer-Policy",
+			name:        "Missing Referrer-Policy",
+			severity:    types.SeverityInfo,
 			description: "Referrer-Policy header is missing, referrer information may leak",
-			missing: true,
+			missing:     true,
 		},
 		{
-			header: "Server",
-			name:   "Server Version Disclosure",
-			severity: types.SeverityLow,
+			header:      "Server",
+			name:        "Server Version Disclosure",
+			severity:    types.SeverityLow,
 			description: "Server header reveals server version information to attackers",
-			missing: false,
+			missing:     false,
 			checkValue: func(val string) (bool, string) {
 				// The logic was INVERTED: it skipped nginx/apache (the
 				// headers actually carrying versions) and only flagged
@@ -94,11 +94,11 @@ func (a *HeaderAnalyzer) Analyze(ctx context.Context, resp *types.Response) []ty
 			},
 		},
 		{
-			header: "X-Powered-By",
-			name: "Technology Disclosure",
-			severity: types.SeverityInfo,
+			header:      "X-Powered-By",
+			name:        "Technology Disclosure",
+			severity:    types.SeverityInfo,
 			description: "X-Powered-By header reveals technology stack",
-			missing: false,
+			missing:     false,
 			checkValue: func(val string) (bool, string) {
 				if val == "" {
 					return false, ""

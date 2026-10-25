@@ -140,9 +140,6 @@ func (a *AuthAnalyzer) Analyze(ctx context.Context, resp *types.Response) []type
 		})
 	}
 
-
-	
-
 	// The old finding sold "Admin Panel Found" at HIGH confidence for any
 	// page whose URL or body contained an admin keyword — a blog post about
 	// admins qualified. A keyword is not a panel: demoted to a medium

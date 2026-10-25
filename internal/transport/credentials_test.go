@@ -88,6 +88,8 @@ type scopeServerSuite struct {
 }
 
 func newScopeServer(t *testing.T) *scopeServerSuite {
+	t.Helper()
+
 	s := &scopeServerSuite{}
 	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if c, err := r.Cookie("sessionid"); err == nil {

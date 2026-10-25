@@ -54,3 +54,4 @@ reports/*.html
 # Secrets (signing keys)
 gpg-private.key
 cosign.key
+attack_report.html

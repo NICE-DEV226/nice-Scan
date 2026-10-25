@@ -37,10 +37,10 @@ func (a *TLSAnalyzer) checkVersion(resp *types.Response) []types.Finding {
 	var findings []types.Finding
 
 	versionChecks := []struct {
-		version   uint16
-		name      string
-		severity  types.Severity
-		message   string
+		version    uint16
+		name       string
+		severity   types.Severity
+		message    string
 		deprecated bool
 	}{
 		{tls.VersionTLS10, "TLS 1.0", types.SeverityHigh, "TLS 1.0 is deprecated and insecure", true},

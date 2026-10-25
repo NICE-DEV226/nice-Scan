@@ -19,7 +19,7 @@ func TestShellTargetScope(t *testing.T) {
 		{"http://USER:PW@host.example.com:8080/p", "http://USER:PW@host.example.com:8080/p", "host.example.com"},
 		{"HTTPS://Mixed.Case.ORG", "HTTPS://Mixed.Case.ORG", "mixed.case.org"}, // case-insensitive scheme detection
 		{"http://127.0.0.1:8080", "http://127.0.0.1:8080", "127.0.0.1"},
-		{"", "https:", ""},   // degenerate input: no scope bound (fail-closed)
+		{"", "https:", ""},         // degenerate input: no scope bound (fail-closed)
 		{":::", "https://:::", ""}, // garbage input: no scope bound (fail-closed)
 	}
 	for _, c := range cases {

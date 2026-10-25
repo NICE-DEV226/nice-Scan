@@ -20,7 +20,7 @@ import (
 	"github.com/NICE-DEV226/nice-Scan/internal/tui"
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
 
-	"github.com/charmbracelet/bubbletea"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )

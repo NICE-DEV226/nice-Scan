@@ -16,11 +16,11 @@ type Fingerprinter struct {
 }
 
 type Signature struct {
-	Name       string
-	Type       string
-	Category   string
-	Confidence float64
-	CWE        string
+	Name        string
+	Type        string
+	Category    string
+	Confidence  float64
+	CWE         string
 	Remediation string
 
 	Headers map[string]*regexp.Regexp
@@ -138,7 +138,7 @@ func (s *Signature) Match(resp *types.Response) (bool, string, string) {
 		if pattern.MatchString(string(resp.Body)) {
 			matched = true
 			evidence = fmt.Sprintf("html: %s", pattern.String())
-			if v, ok := s.extractVersionHTML(string(resp.Body), pattern); ok {
+			if v, ok := s.extractVersionHTML(string(resp.Body)); ok {
 				version = v
 			}
 			break
@@ -186,7 +186,7 @@ func (s *Signature) Match(resp *types.Response) (bool, string, string) {
 		if pattern.MatchString(string(resp.Body)) {
 			matched = true
 			evidence = fmt.Sprintf("meta: %s", pattern.String())
-			if v, ok := s.extractVersionHTML(string(resp.Body), pattern); ok {
+			if v, ok := s.extractVersionHTML(string(resp.Body)); ok {
 				version = v
 			}
 			break
@@ -228,7 +228,7 @@ func (s *Signature) extractVersionCookie(name, val string) (string, bool) {
 	return "", false
 }
 
-func (s *Signature) extractVersionHTML(body string, pattern *regexp.Regexp) (string, bool) {
+func (s *Signature) extractVersionHTML(body string) (string, bool) {
 	for _, pat := range s.VersionHTML {
 		m := pat.FindStringSubmatch(body)
 		if len(m) > 1 && m[1] != "" {

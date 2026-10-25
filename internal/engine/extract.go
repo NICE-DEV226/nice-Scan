@@ -67,7 +67,7 @@ func (a *DataExtractionAnalyzer) Analyze(ctx context.Context, resp *types.Respon
 			Evidence:    fmt.Sprintf("Emails: %s", truncate(strings.Join(emails, ", "), 120)),
 			Confidence:  0.9,
 			Metadata: map[string]string{
-				"count": fmt.Sprintf("%d", len(emails)),
+				"count":  fmt.Sprintf("%d", len(emails)),
 				"emails": strings.Join(emails, ","),
 			},
 		})

@@ -38,44 +38,44 @@ func (f *Fingerprinter) loadSignatures() {
 
 		{
 			Name: "nginx", Type: "web_server", Category: "Web Server",
-			Confidence: 0.97,
-			Headers:    hdr("Server", `(?i)nginx(?:/([\d.]+))?`),
+			Confidence:     0.97,
+			Headers:        hdr("Server", `(?i)nginx(?:/([\d.]+))?`),
 			VersionHeaders: vhdr("Server", `nginx/([\d.]+)`),
 		},
 		{
 			Name: "Apache HTTP Server", Type: "web_server", Category: "Web Server",
-			Confidence: 0.97,
-			Headers:    hdr("Server", `(?i)Apache(?:/([\d.]+))?(?: \(.*?\))?`),
+			Confidence:     0.97,
+			Headers:        hdr("Server", `(?i)Apache(?:/([\d.]+))?(?: \(.*?\))?`),
 			VersionHeaders: vhdr("Server", `Apache/([\d.]+)`),
 		},
 		{
 			Name: "IIS", Type: "web_server", Category: "Web Server",
-			Confidence: 0.95,
-			Headers:    hdr("Server", `(?i)Microsoft-IIS(?:/([\d.]+))?`),
+			Confidence:     0.95,
+			Headers:        hdr("Server", `(?i)Microsoft-IIS(?:/([\d.]+))?`),
 			VersionHeaders: vhdr("Server", `Microsoft-IIS/([\d.]+)`),
 		},
 		{
 			Name: "Tomcat", Type: "web_server", Category: "Web Server",
-			Confidence: 0.9,
-			Headers: hdr("Server", `(?i)Apache-Coyote|Apache Tomcat(?:/([\d.]+))?`),
+			Confidence:     0.9,
+			Headers:        hdr("Server", `(?i)Apache-Coyote|Apache Tomcat(?:/([\d.]+))?`),
 			VersionHeaders: vhdr("Server", `Apache Tomcat/([\d.]+)`),
 		},
 		{
 			Name: "Caddy", Type: "web_server", Category: "Web Server",
-			Confidence: 0.9,
-			Headers:    hdr("Server", `(?i)Caddy(?:/([\d.]+))?(?:\s|$)`),
+			Confidence:     0.9,
+			Headers:        hdr("Server", `(?i)Caddy(?:/([\d.]+))?(?:\s|$)`),
 			VersionHeaders: vhdr("Server", `Caddy/([\d.]+)`),
 		},
 		{
 			Name: "LiteSpeed", Type: "web_server", Category: "Web Server",
-			Confidence: 0.9,
-			Headers:    hdr("Server", `(?i)LiteSpeed(?:/([\d.]+))?`),
+			Confidence:     0.9,
+			Headers:        hdr("Server", `(?i)LiteSpeed(?:/([\d.]+))?`),
 			VersionHeaders: vhdr("Server", `LiteSpeed/([\d.]+)`),
 		},
 		{
 			Name: "Lighttpd", Type: "web_server", Category: "Web Server",
-			Confidence: 0.9,
-			Headers:    hdr("Server", `(?i)lighttpd(?:/([\d.]+))?`),
+			Confidence:     0.9,
+			Headers:        hdr("Server", `(?i)lighttpd(?:/([\d.]+))?`),
 			VersionHeaders: vhdr("Server", `lighttpd/([\d.]+)`),
 		},
 		{
@@ -85,31 +85,31 @@ func (f *Fingerprinter) loadSignatures() {
 		},
 		{
 			Name: "HAProxy", Type: "web_server", Category: "Reverse Proxy",
-			Confidence: 0.85,
-			Headers:    hdr("Server", `(?i)HAProxy(?:/([\d.]+))?`),
+			Confidence:     0.85,
+			Headers:        hdr("Server", `(?i)HAProxy(?:/([\d.]+))?`),
 			VersionHeaders: vhdr("Server", `HAProxy/([\d.]+)`),
 		},
 		{
 			Name: "Envoy", Type: "web_server", Category: "Reverse Proxy",
 			Confidence: 0.8,
-			Headers: hdr("Server", `(?i)envoy`),
+			Headers:    hdr("Server", `(?i)envoy`),
 		},
 		{
 			Name: "OpenResty", Type: "web_server", Category: "Web Server",
-			Confidence: 0.85,
-			Headers: hdr("Server", `(?i)openresty(?:/([\d.]+))?`),
+			Confidence:     0.85,
+			Headers:        hdr("Server", `(?i)openresty(?:/([\d.]+))?`),
 			VersionHeaders: vhdr("Server", `openresty/([\d.]+)`),
 		},
 		{
 			Name: "Jetty", Type: "web_server", Category: "Web Server",
-			Confidence: 0.85,
-			Headers: hdr("Server", `(?i)Jetty(?:\(([\d.]+)\))?`),
+			Confidence:     0.85,
+			Headers:        hdr("Server", `(?i)Jetty(?:\(([\d.]+)\))?`),
 			VersionHeaders: vhdr("Server", `Jetty\(([\d.]+)\)`),
 		},
 		{
 			Name: "JBoss / WildFly", Type: "web_server", Category: "Application Server",
 			Confidence: 0.8,
-			Headers: hdr("Server", `(?i)JBoss|WildFly`),
+			Headers:    hdr("Server", `(?i)JBoss|WildFly`),
 		},
 
 		// ──────────────────────────────────────────────────
@@ -124,52 +124,52 @@ func (f *Fingerprinter) loadSignatures() {
 		{
 			Name: "Akamai", Type: "cdn", Category: "CDN",
 			Confidence: 0.9,
-			Headers: hdr("Server", `(?i)Akamai(?:GHost)?`),
+			Headers:    hdr("Server", `(?i)Akamai(?:GHost)?`),
 		},
 		{
 			Name: "Fastly", Type: "cdn", Category: "CDN",
 			Confidence: 0.9,
-			Headers: hdr("Fastly-Debug-Path|X-Served-By|X-Cache-Hits", `(?i)fastly`),
+			Headers:    hdr("Fastly-Debug-Path|X-Served-By|X-Cache-Hits", `(?i)fastly`),
 		},
 		{
 			Name: "Amazon CloudFront", Type: "cdn", Category: "CDN",
 			Confidence: 0.9,
-			Headers: hdr("X-Amz-Cf-Id|X-Amz-Cf-Pop", `.+`),
+			Headers:    hdr("X-Amz-Cf-Id|X-Amz-Cf-Pop", `.+`),
 		},
 		{
 			Name: "StackPath", Type: "cdn", Category: "CDN",
 			Confidence: 0.7,
-			Headers: hdr("Server", `(?i)stackpath`),
+			Headers:    hdr("Server", `(?i)stackpath`),
 		},
 		{
 			Name: "KeyCDN", Type: "cdn", Category: "CDN",
 			Confidence: 0.7,
-			Headers: hdr("X-Edge-Connect-Key|X-Cache", `(?i)keycdn`),
+			Headers:    hdr("X-Edge-Connect-Key|X-Cache", `(?i)keycdn`),
 		},
 		{
 			Name: "BunnyCDN", Type: "cdn", Category: "CDN",
 			Confidence: 0.8,
-			Headers: hdr("Server", `(?i)BunnyCDN`),
+			Headers:    hdr("Server", `(?i)BunnyCDN`),
 		},
 		{
 			Name: "Imperva Incapsula", Type: "cdn", Category: "CDN/WAF",
 			Confidence: 0.85,
-			Headers: hdr("X-CDN|X-Iinfo", `(?i)Incapsula`),
+			Headers:    hdr("X-CDN|X-Iinfo", `(?i)Incapsula`),
 		},
 		{
 			Name: "Sucuri", Type: "cdn", Category: "CDN/WAF",
 			Confidence: 0.8,
-			Headers: hdr("X-Sucuri-ID|X-Sucuri-Cache", `.+`),
+			Headers:    hdr("X-Sucuri-ID|X-Sucuri-Cache", `.+`),
 		},
 		{
 			Name: "Azure CDN", Type: "cdn", Category: "CDN",
 			Confidence: 0.7,
-			Headers: hdr("Server", `(?i)Azure-CDN`),
+			Headers:    hdr("Server", `(?i)Azure-CDN`),
 		},
 		{
 			Name: "CacheFly", Type: "cdn", Category: "CDN",
 			Confidence: 0.65,
-			Headers: hdr("Server", `(?i)CacheFly`),
+			Headers:    hdr("Server", `(?i)CacheFly`),
 		},
 
 		// ──────────────────────────────────────────────────
@@ -179,51 +179,51 @@ func (f *Fingerprinter) loadSignatures() {
 		{
 			Name: "Cloudflare WAF", Type: "waf", Category: "WAF",
 			Confidence: 0.85,
-			Headers: hdr("CF-Cache-Status|CF-Worker", `.+`),
+			Headers:    hdr("CF-Cache-Status|CF-Worker", `.+`),
 		},
 		{
 			Name: "AWS WAF", Type: "waf", Category: "WAF",
 			Confidence: 0.75,
-			Headers: merge(hdr("x-amzn-RequestId", `.+`), hdr("x-amzn-WAF", `.+`)),
+			Headers:    merge(hdr("x-amzn-RequestId", `.+`), hdr("x-amzn-WAF", `.+`)),
 		},
 		{
 			Name: "ModSecurity", Type: "waf", Category: "WAF",
 			Confidence: 0.75,
-			Headers: hdr("Server", `(?i)ModSecurity`)},
+			Headers:    hdr("Server", `(?i)ModSecurity`)},
 		{
 			Name: "NAXSI", Type: "waf", Category: "WAF",
 			Confidence: 0.7,
-			Headers: hdr("X-Naxsi", `.+`),
+			Headers:    hdr("X-Naxsi", `.+`),
 		},
 		{
 			Name: "F5 BIG-IP ASM", Type: "waf", Category: "WAF",
 			Confidence: 0.8,
-			Headers: hdr("X-ASM|X-ASM-Policy|X-BIG-IP", `.+`),
+			Headers:    hdr("X-ASM|X-ASM-Policy|X-BIG-IP", `.+`),
 		},
 		{
 			Name: "Fortinet FortiWeb", Type: "waf", Category: "WAF",
 			Confidence: 0.7,
-			Headers: hdr("X-FortiWeb|X-FW-Server", `.+`),
+			Headers:    hdr("X-FortiWeb|X-FW-Server", `.+`),
 		},
 		{
 			Name: "Barracuda WAF", Type: "waf", Category: "WAF",
 			Confidence: 0.7,
-			Headers: hdr("X-Barracuda|X-BWAF", `.+`),
+			Headers:    hdr("X-Barracuda|X-BWAF", `.+`),
 		},
 		{
 			Name: "Radware WAF", Type: "waf", Category: "WAF",
 			Confidence: 0.65,
-			Headers: hdr("X-RWAF|X-SL-CompState", `.+`),
+			Headers:    hdr("X-RWAF|X-SL-CompState", `.+`),
 		},
 		{
 			Name: "Akamai Kona", Type: "waf", Category: "WAF",
 			Confidence: 0.75,
-			Headers: hdr("X-Akamai-Staging|X-Akamai-RequestHeader", `.+`),
+			Headers:    hdr("X-Akamai-Staging|X-Akamai-RequestHeader", `.+`),
 		},
 		{
 			Name: "Google Cloud Armor", Type: "waf", Category: "WAF",
 			Confidence: 0.6,
-			Headers: hdr("Via|X-Cloud-Trace-Context", `(?i)google`),
+			Headers:    hdr("Via|X-Cloud-Trace-Context", `(?i)google`),
 		},
 
 		// ──────────────────────────────────────────────────
@@ -248,47 +248,47 @@ func (f *Fingerprinter) loadSignatures() {
 		{
 			Name: "Heroku", Type: "hosting", Category: "Hosting",
 			Confidence: 0.85,
-			Headers: hdr("Via|Server", `(?i)heroku`),
+			Headers:    hdr("Via|Server", `(?i)heroku`),
 		},
 		{
 			Name: "Firebase Hosting", Type: "hosting", Category: "Hosting",
 			Confidence: 0.85,
-			Headers: hdr("Server", `(?i)Firebase`),
+			Headers:    hdr("Server", `(?i)Firebase`),
 		},
 		{
 			Name: "Render", Type: "hosting", Category: "Hosting",
 			Confidence: 0.75,
-			Headers: hdr("Server", `(?i)render`),
+			Headers:    hdr("Server", `(?i)render`),
 		},
 		{
 			Name: "Railway", Type: "hosting", Category: "Hosting",
 			Confidence: 0.65,
-			Headers: hdr("Server", `(?i)railway`),
+			Headers:    hdr("Server", `(?i)railway`),
 		},
 		{
 			Name: "Fly.io", Type: "hosting", Category: "Hosting",
 			Confidence: 0.7,
-			Headers: hdr("Server", `(?i)Fly`),
+			Headers:    hdr("Server", `(?i)Fly`),
 		},
 		{
 			Name: "DigitalOcean App Platform", Type: "hosting", Category: "Hosting",
 			Confidence: 0.7,
-			Headers: hdr("Server", `(?i)DigitalOcean`),
+			Headers:    hdr("Server", `(?i)DigitalOcean`),
 		},
 		{
 			Name: "AWS EC2", Type: "hosting", Category: "Cloud Hosting",
 			Confidence: 0.7,
-			Headers: merge(hdr("Server", `(?i)Amazon(?:S3|EC2)?`), hdr("x-amz-request-id", `.+`)),
+			Headers:    merge(hdr("Server", `(?i)Amazon(?:S3|EC2)?`), hdr("x-amz-request-id", `.+`)),
 		},
 		{
 			Name: "AWS S3", Type: "hosting", Category: "Cloud Storage",
 			Confidence: 0.92,
-			Headers: hdr("Server", `(?i)AmazonS3`),
+			Headers:    hdr("Server", `(?i)AmazonS3`),
 		},
 		{
 			Name: "AWS Lambda", Type: "hosting", Category: "Serverless",
 			Confidence: 0.65,
-			Headers: hdr("x-amz-invocation-type|x-amz-log-type", `.+`),
+			Headers:    hdr("x-amz-invocation-type|x-amz-log-type", `.+`),
 		},
 
 		// ──────────────────────────────────────────────────
@@ -310,12 +310,12 @@ func (f *Fingerprinter) loadSignatures() {
 		{
 			Name: "Gatsby", Type: "framework", Category: "React Framework",
 			Confidence: 0.85,
-			HTML: html(`___gatsby`, `gatsby-`, `gatsby\.js`),
+			HTML:       html(`___gatsby`, `gatsby-`, `gatsby\.js`),
 		},
 		{
 			Name: "Remix", Type: "framework", Category: "React Framework",
 			Confidence: 0.8,
-			HTML: html(`__remixContext`, `remix:route`),
+			HTML:       html(`__remixContext`, `remix:route`),
 		},
 		{
 			Name: "Vue.js", Type: "frontend", Category: "UI Library",
@@ -330,8 +330,8 @@ func (f *Fingerprinter) loadSignatures() {
 		},
 		{
 			Name: "Angular", Type: "frontend", Category: "UI Library",
-			Confidence: 0.85,
-			HTML:       html(`ng-version`, `ng-app`, `_ngcontent`),
+			Confidence:  0.85,
+			HTML:        html(`ng-version`, `ng-app`, `_ngcontent`),
 			VersionHTML: vhtml(`ng-version="([\d.]+)"`),
 		},
 		{
@@ -416,9 +416,9 @@ func (f *Fingerprinter) loadSignatures() {
 		},
 		{
 			Name: "Flask", Type: "framework", Category: "Python Backend",
-			Confidence: 0.8,
-			Headers:    hdr("Server", `(?i)Werkzeug(?:/([\d.]+))?`),
-			Cookies:    cook("session", `\.eJ`),
+			Confidence:     0.8,
+			Headers:        hdr("Server", `(?i)Werkzeug(?:/([\d.]+))?`),
+			Cookies:        cook("session", `\.eJ`),
 			VersionHeaders: vhdr("Server", `Werkzeug/([\d.]+)`),
 		},
 		{
@@ -435,8 +435,8 @@ func (f *Fingerprinter) loadSignatures() {
 		},
 		{
 			Name: "ASP.NET", Type: "framework", Category: ".NET Backend",
-			Confidence: 0.8,
-			Headers:    hdr("X-AspNet-Version", `(.+)`),
+			Confidence:     0.8,
+			Headers:        hdr("X-AspNet-Version", `(.+)`),
 			VersionHeaders: vhdr("X-AspNet-Version", `(.+)`),
 		},
 		{
@@ -522,8 +522,8 @@ func (f *Fingerprinter) loadSignatures() {
 
 		{
 			Name: "WordPress", Type: "cms", Category: "CMS",
-			Confidence: 0.95,
-			HTML:       html(`(?i)wp-content`, `(?i)wp-includes`, `<generator[^>]+WordPress`),
+			Confidence:  0.95,
+			HTML:        html(`(?i)wp-content`, `(?i)wp-includes`, `<generator[^>]+WordPress`),
 			VersionHTML: vhtml(`generator[^>]+WordPress\s*([\d.]+)`),
 		},
 		{
@@ -655,22 +655,22 @@ func (f *Fingerprinter) loadSignatures() {
 		{
 			Name: "Hetzner", Type: "cloud", Category: "Cloud Provider",
 			Confidence: 0.5,
-			Headers: hdr("Server", `(?i)Hetzner`),
+			Headers:    hdr("Server", `(?i)Hetzner`),
 		},
 		{
 			Name: "OVHcloud", Type: "cloud", Category: "Cloud Provider",
 			Confidence: 0.5,
-			Headers: hdr("Server|X-OVH", `(?i)OVH`),
+			Headers:    hdr("Server|X-OVH", `(?i)OVH`),
 		},
 		{
 			Name: "Linode", Type: "cloud", Category: "Cloud Provider",
 			Confidence: 0.4,
-			Headers: hdr("Server", `(?i)Linode`),
+			Headers:    hdr("Server", `(?i)Linode`),
 		},
 		{
 			Name: "Alibaba Cloud", Type: "cloud", Category: "Cloud Provider",
 			Confidence: 0.6,
-			Headers: hdr("Server|X-Alibaba", `(?i)Alibaba`),
+			Headers:    hdr("Server|X-Alibaba", `(?i)Alibaba`),
 		},
 
 		// ──────────────────────────────────────────────────

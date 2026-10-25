@@ -55,7 +55,7 @@ func (a *XSSAction) Execute(ctx context.Context, target string, kb *Knowledge, c
 		default:
 		}
 
-		reflectedParams := findReflectedParams(ctx, client, page.URL, kb)
+		reflectedParams := findReflectedParams(ctx, client, page.URL)
 		if len(reflectedParams) == 0 {
 			continue
 		}
@@ -230,7 +230,7 @@ func (a *XSSExploitAction) Execute(ctx context.Context, target string, kb *Knowl
 // across concurrent actions. Existing query parameters are preserved (a
 // rebuilt query string dropping state params is what made the boolean
 // oracle flip endpoints offline — see setQueryParam in sqli.go).
-func findReflectedParams(ctx context.Context, client *transport.Client, pageURL string, kb *Knowledge) []string {
+func findReflectedParams(ctx context.Context, client *transport.Client, pageURL string) []string {
 	testPayload := detect.NewCanary()
 	probe := url.QueryEscape(testPayload)
 

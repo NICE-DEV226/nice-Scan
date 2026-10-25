@@ -36,8 +36,8 @@ func TestParseHeaderFlags(t *testing.T) {
 	got := parseHeaderFlags([]string{
 		"Cookie: sid=1; theme=dark:extras", // value keeps inner colon
 		"X-Custom:   spaced value  ",
-		"no-colon-line",      // malformed: dropped
-		"Cookie: sid=999",    // last flag wins
+		"no-colon-line",   // malformed: dropped
+		"Cookie: sid=999", // last flag wins
 	})
 	if got["X-Custom"] != "spaced value" {
 		t.Errorf("value must be trimmed, got %q", got["X-Custom"])

@@ -57,7 +57,7 @@ func (a *CrawlAction) Execute(ctx context.Context, target string, kb *Knowledge,
 		}
 
 		body := string(resp.Body)
-		links := extractLinks(body, baseURL)
+		links := extractLinks(body)
 		jsFiles := extractJS(body)
 		forms := extractFormCount(body)
 		title := extractTitle(body)
@@ -156,7 +156,7 @@ type CrawlResult struct {
 	Findings []Finding
 }
 
-func extractLinks(body, baseURL string) []string {
+func extractLinks(body string) []string {
 	var links []string
 	seen := make(map[string]bool)
 
@@ -173,7 +173,7 @@ func extractLinks(body, baseURL string) []string {
 		quote := body[start]
 		if quote == '"' || quote == '\'' {
 			for end = start + 1; end < len(body); end++ {
-				if body[end] == byte(quote) {
+				if body[end] == quote {
 					break
 				}
 			}
@@ -209,7 +209,7 @@ func extractJS(body string) []string {
 		quote := body[start]
 		if quote == '"' || quote == '\'' {
 			for end = start + 1; end < len(body); end++ {
-				if body[end] == byte(quote) {
+				if body[end] == quote {
 					break
 				}
 			}

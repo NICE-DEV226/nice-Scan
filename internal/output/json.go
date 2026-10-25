@@ -17,11 +17,11 @@ func NewJSON() *JSONRenderer {
 }
 
 type JSONOutput struct {
-	Version  string            `json:"version"`
-	Target   string            `json:"target"`
-	Stats    JSONStats         `json:"stats"`
-	Findings []JSONFinding     `json:"findings"`
-	Results  []JSONResult      `json:"results,omitempty"`
+	Version  string        `json:"version"`
+	Target   string        `json:"target"`
+	Stats    JSONStats     `json:"stats"`
+	Findings []JSONFinding `json:"findings"`
+	Results  []JSONResult  `json:"results,omitempty"`
 }
 
 type JSONStats struct {
@@ -78,8 +78,8 @@ func (r *JSONRenderer) RenderResult(res *engine.ScanResult) {
 
 	for _, r := range res.Results {
 		jr := JSONResult{
-			URL:        r.Target,
-			Duration:   r.Duration.String(),
+			URL:      r.Target,
+			Duration: r.Duration.String(),
 		}
 		if r.Response != nil {
 			jr.StatusCode = r.Response.StatusCode

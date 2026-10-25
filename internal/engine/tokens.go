@@ -109,11 +109,11 @@ func (t *TokenExtractor) Analyze(ctx context.Context, resp *types.Response) []ty
 	}
 
 	patterns := []struct {
-		rx    *regexp.Regexp
-		name  string
-		sev   types.Severity
-		desc  string
-		conf  float64
+		rx   *regexp.Regexp
+		name string
+		sev  types.Severity
+		desc string
+		conf float64
 	}{
 		{rxAccessToken, "Access Token Leaked", types.SeverityCritical, "Access token exposed in response body", 0.85},
 		{rxAPIToken, "API Key / Token Leaked", types.SeverityCritical, "API key or token exposed in response body", 0.85},

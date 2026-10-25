@@ -71,7 +71,7 @@ func (a *FuzzAction) Execute(ctx context.Context, target string, kb *Knowledge, 
 			continue
 		}
 
-		if isInterestingPath(resp, path) {
+		if isInterestingPath(resp) {
 			ep := Endpoint{
 				Path:        path,
 				Method:      "GET",
@@ -140,7 +140,7 @@ func (a *FuzzAction) Execute(ctx context.Context, target string, kb *Knowledge, 
 	return ActionResult{Findings: findings}
 }
 
-func isInterestingPath(resp *types.Response, path string) bool {
+func isInterestingPath(resp *types.Response) bool {
 	if resp.StatusCode == 404 {
 		return false
 	}

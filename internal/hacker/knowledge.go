@@ -1,6 +1,11 @@
 package hacker
 
-import "sync"
+import (
+	"strings"
+	"sync"
+
+	"github.com/NICE-DEV226/nice-Scan/internal/types"
+)
 
 type Knowledge struct {
 	mu           sync.RWMutex
@@ -85,10 +90,15 @@ func (kb *Knowledge) deriveCapabilities(f Finding) {
 }
 
 func truncateEvidence(s string) string {
-	if len(s) > 200 {
-		return s[:197] + "..."
+	// Report sink: remote evidence may carry terminal/HTML control data
+	// and multibyte runes. Sanitize + cut on rune boundaries (byte
+	// slicing left corrupted partial runes in reports).
+	s = types.Sanitize(s)
+	runes := []rune(s)
+	if len(runes) <= 200 {
+		return s
 	}
-	return s
+	return string(runes[:197]) + "…"
 }
 
 func (kb *Knowledge) capability(name string) *Capability {
@@ -378,28 +388,7 @@ func containsStr(slice []string, s string) bool {
 }
 
 func containsFold(s, substr string) bool {
-	if len(s) < len(substr) {
-		return false
-	}
-	for i := 0; i <= len(s)-len(substr); i++ {
-		match := true
-		for j := 0; j < len(substr); j++ {
-			sc := s[i+j]
-			tc := substr[j]
-			if sc >= 'A' && sc <= 'Z' {
-				sc += 32
-			}
-			if tc >= 'A' && tc <= 'Z' {
-				tc += 32
-			}
-			if sc != tc {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
+	// stdlib fold: the hand-rolled ASCII loop dropped non-ASCII case
+	// evidence (accented hosts, UTF-8 paths) to invisible mismatches.
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }

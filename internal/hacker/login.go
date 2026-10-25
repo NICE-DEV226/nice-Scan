@@ -309,7 +309,7 @@ func extractAttribute(tag, attr string) string {
 	}
 	quote := tag[valStart]
 	if quote == '"' || quote == '\'' {
-		end := strings.IndexByte(tag[valStart+1:], byte(quote))
+		end := strings.IndexByte(tag[valStart+1:], quote)
 		if end == -1 {
 			return ""
 		}
@@ -328,26 +328,26 @@ func extractAttribute(tag, attr string) string {
 //     "next" targets, state markers) — sending "=test" for them is what
 //     made whole classes of modern login pages untestable;
 //   - anything else falls back to the historical filler.
-func formValueFor(f formField, username, password string) (string, bool) {
+func formValueFor(f formField, username, password string) string {
 	flow := strings.ToLower(f.name)
 	switch {
 	case strings.Contains(flow, "user") || strings.Contains(flow, "email") ||
 		strings.Contains(flow, "login") || strings.Contains(flow, "name"):
-		return strings.ReplaceAll(username, " ", "+"), true
+		return strings.ReplaceAll(username, " ", "+")
 	case strings.Contains(flow, "pass") || strings.Contains(flow, "pwd"):
-		return strings.ReplaceAll(password, " ", "+"), true
+		return strings.ReplaceAll(password, " ", "+")
 	case f.ftype == "password":
-		return strings.ReplaceAll(password, " ", "+"), true
+		return strings.ReplaceAll(password, " ", "+")
 	case f.ftype == "hidden" || f.ftype == "token" || isTokenLikeField(f.name):
-		return f.value, true
+		return f.value
 	}
-	return "test", true
+	return "test"
 }
 
 func buildFormData(fields []formField, username, password string) string {
 	var parts []string
 	for _, f := range fields {
-		v, _ := formValueFor(f, username, password)
+		v := formValueFor(f, username, password)
 		parts = append(parts, f.name+"="+v)
 	}
 	return strings.Join(parts, "&")

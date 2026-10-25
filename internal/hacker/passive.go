@@ -109,7 +109,7 @@ collect:
 			Name:        fmt.Sprintf("Subdomains discovered via crt.sh (%d)", len(subdomains)),
 			Severity:    SevMedium,
 			Description: fmt.Sprintf("Certificate Transparency logs reveal %d subdomains", len(subdomains)),
-			Evidence:    strings.Join(subdomains[:minInt(10, len(subdomains))], ", "),
+			Evidence:    strings.Join(subdomains[:min(10, len(subdomains))], ", "),
 			Details:     map[string]string{"count": fmt.Sprintf("%d", len(subdomains))},
 		})
 
@@ -157,7 +157,7 @@ collect:
 			Name:        fmt.Sprintf("Historical URLs via Wayback Machine (%d)", len(waybackURLs)),
 			Severity:    SevLow,
 			Description: "Wayback Machine reveals historical endpoints that may not be indexed anymore",
-			Evidence:    strings.Join(waybackURLs[:minInt(10, len(waybackURLs))], ", "),
+			Evidence:    strings.Join(waybackURLs[:min(10, len(waybackURLs))], ", "),
 			Details:     map[string]string{"count": fmt.Sprintf("%d", len(waybackURLs))},
 		})
 
@@ -316,7 +316,7 @@ func queryWayback(ctx context.Context, client *transport.Client, domain string) 
 	return urls
 }
 
-func minInt(a, b int) int {
+func min(a, b int) int {
 	if a < b {
 		return a
 	}

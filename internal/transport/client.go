@@ -47,11 +47,11 @@ type clientOptions struct {
 	// never carry them. Empty means "no scoping requested" (attach
 	// everywhere) — commands that know their target must always configure
 	// it.
-	credScope      []string
+	credScope []string
 	// sessionCookies enables capture/attach of target-issued cookies for
 	// authenticated workflows (off by default; runtime toggle only).
-	sessionCookies bool
-	rateLimit      int
+	sessionCookies  bool
+	rateLimit       int
 	verbose         bool
 	dialTimeout     time.Duration
 	tlsTimeout      time.Duration

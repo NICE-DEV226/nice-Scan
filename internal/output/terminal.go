@@ -310,16 +310,20 @@ func (r *TerminalRenderer) renderSeverityGroup(sev types.Severity, findings []ty
 	_, _ = fmt.Fprintln(os.Stdout, header)
 
 	for _, f := range findings {
+		// A finding renders with its OWN severity color: grouping is by
+		// header, and a mis-stamped severity must not inherit the group
+		// hue (a Critical row in the Medium block reads as Medium).
 		if f.Severity != sev {
 			continue
 		}
-		r.renderFinding(f, color)
+		r.renderFinding(f)
 	}
 
 	_, _ = fmt.Fprintln(os.Stdout)
 }
 
-func (r *TerminalRenderer) renderFinding(f types.Finding, color lipgloss.Color) {
+func (r *TerminalRenderer) renderFinding(f types.Finding) {
+	color := severityColors[f.Severity]
 	var version string
 	if f.Metadata != nil {
 		version = types.Sanitize(f.Metadata["version"])
@@ -328,7 +332,7 @@ func (r *TerminalRenderer) renderFinding(f types.Finding, color lipgloss.Color) 
 	var name string
 	if version != "" {
 		name = lipgloss.NewStyle().
-			Foreground(textPrimary).
+			Foreground(color).
 			Padding(0, 0, 0, 4).
 			Render(types.Sanitize(f.Name))
 
@@ -341,7 +345,7 @@ func (r *TerminalRenderer) renderFinding(f types.Finding, color lipgloss.Color) 
 		_, _ = fmt.Fprintln(os.Stdout, ver)
 	} else {
 		name = lipgloss.NewStyle().
-			Foreground(textPrimary).
+			Foreground(color).
 			Padding(0, 0, 0, 4).
 			Render(types.Sanitize(f.Name))
 		_, _ = fmt.Fprintln(os.Stdout, name)

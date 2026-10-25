@@ -86,8 +86,8 @@ func (a *JWTForgeAction) Execute(ctx context.Context, target string, kb *Knowled
 
 		if sig != "" && len(sig) > 0 {
 			for _, secret := range commonSecrets {
-				forged, err := signJWT(payload, secret)
-				if err == nil {
+				forged := signJWT(payload, secret)
+				if forged != "" {
 					findings = append(findings, Finding{
 						Type:        "jwt_cracked_candidate",
 						Name:        fmt.Sprintf("JWT signing candidate: '%s'", secret),
@@ -220,7 +220,7 @@ func decodeJWT(token string) (header, payload map[string]any, sig string, err er
 	return header, payload, sig, nil
 }
 
-func signJWT(payload map[string]any, secret string) (string, error) {
+func signJWT(payload map[string]any, secret string) string {
 	header := map[string]any{"alg": "HS256", "typ": "JWT"}
 	hBytes, _ := json.Marshal(header)
 	pBytes, _ := json.Marshal(payload)
@@ -232,7 +232,7 @@ func signJWT(payload map[string]any, secret string) (string, error) {
 	mac.Write([]byte(headerB64 + "." + payloadB64))
 	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 
-	return headerB64 + "." + payloadB64 + "." + sig, nil
+	return headerB64 + "." + payloadB64 + "." + sig
 }
 
 func truncateMap(m map[string]any) string {
