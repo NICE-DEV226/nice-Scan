@@ -261,8 +261,16 @@ func scanCmd() *cobra.Command {
 			if interactive {
 				model := tui.NewModel(scanner, []string{target})
 				p := tea.NewProgram(model, tea.WithAltScreen())
-				if _, err := p.Run(); err != nil {
+				fm, err := p.Run()
+				if err != nil {
 					return err
+				}
+				// The alt-screen dashboard closes with the program; the
+				// final model carries the outcome — print it on the
+				// regular screen or a finished (and a fully-failed) scan
+				// leaves the terminal empty.
+				if final, ok := fm.(*tui.Model); ok {
+					fmt.Print(final.PostRunSummary())
 				}
 				return nil
 			}

@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/NICE-DEV226/nice-Scan/internal/engine"
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
@@ -109,4 +111,86 @@ func TestProgressClampsAboveOneHundred(t *testing.T) {
 	}))
 	out := m.renderProgress()
 	assertSanitized(t, out)
+}
+
+// -i scans quit on completion (or instant, fully-failed failure) and the
+// alt screen is torn down; PostRunSummary is the only durable outcome the
+// operator sees. These tests pin its three explanations.
+func TestPostRunSummaryExplainsAllFailed(t *testing.T) {
+	m := NewModel(nil, []string{"example.com"})
+	m.stats = engine.ScanStats{Total: 42, Failed: 42, Duration: 3 * time.Second}
+	out := m.PostRunSummary()
+
+	if !containsStr(out, "Requests 0/42 completed") || !containsStr(out, "42 failed") {
+		t.Fatalf("stats line missing/incorrect:\n%q", out)
+	}
+	if !containsStr(out, "Every request failed") {
+		t.Fatalf("fully-failed scan must get an explicit unreachable verdict:\n%q", out)
+	}
+	assertSanitized(t, out)
+}
+
+func TestPostRunSummaryReportsError(t *testing.T) {
+	m := NewModel(nil, []string{"example.com"})
+	m.err = fmt.Errorf("proxy refused connection")
+	out := m.PostRunSummary()
+
+	if !containsStr(out, "Scan error: proxy refused connection") {
+		t.Fatalf("error verdict missing:\n%q", out)
+	}
+	assertSanitized(t, out)
+}
+
+func TestPostRunSummaryMarksOperatorCancel(t *testing.T) {
+	m := NewModel(nil, []string{"example.com"})
+	m.quitting = true
+	out := m.PostRunSummary()
+
+	if !containsStr(out, "canceled by operator") {
+		t.Fatalf("operator-cancel verdict missing:\n%q", out)
+	}
+}
+
+func TestPostRunSummaryCarriesFindingsCounts(t *testing.T) {
+	m := NewModel(nil, []string{"example.com"})
+	m.stats = engine.ScanStats{Total: 8, Completed: 8}
+	m.findings = []types.Finding{{Name: "Sqli"}, {Name: "Cors"}}
+	out := m.PostRunSummary()
+
+	if !containsStr(out, "2 findings") {
+		t.Fatalf("finding count missing:\n%q", out)
+	}
+	if !containsStr(out, "Requests 8/8 completed") {
+		t.Fatalf("completed stats missing:\n%q", out)
+	}
+}
+
+// A transport-level failure carries a nil Result.Response; dereferencing
+// StatusCode panicked the bubbletea event loop — the whole dashboard was
+// torn down mid-scan ("program was killed: program experienced a panic").
+// Any unreachable/dead target hit this on its first failed request.
+func TestUpdateFailedRequestEventSurvives(t *testing.T) {
+	m := NewModel(nil, []string{"example.com"})
+	m.state = stateRunning
+
+	failed := engine.ScanEvent{
+		Result: &types.Result{Target: "http://127.0.0.1:1", Duration: 3 * time.Millisecond},
+		Stats:  engine.ScanStats{Total: 2, Failed: 1},
+	}
+	if _, _ = m.Update(scanEventMsg(failed)); len(m.requestLog) != 1 {
+		t.Fatalf("failed request must still be logged, log=%q", m.requestLog)
+	}
+	if !containsStr(m.requestLog[0], "failed") || !containsStr(m.requestLog[0], "127.0.0.1:1") {
+		t.Fatalf("failed-request entry lacks target/verdict: %q", m.requestLog[0])
+	}
+
+	success := engine.ScanEvent{
+		Result: &types.Result{Target: "http://127.0.0.1:1", Duration: time.Millisecond,
+			Response: &types.Response{StatusCode: 404}},
+		Stats: engine.ScanStats{Total: 2, Completed: 1},
+	}
+	if _, _ = m.Update(scanEventMsg(success)); !containsStr(m.requestLog[1], "404") {
+		t.Fatalf("successful-request entry lacks status code: %q", m.requestLog[1])
+	}
+	assertSanitized(t, m.View())
 }

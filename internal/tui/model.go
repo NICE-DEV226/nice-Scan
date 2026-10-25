@@ -126,11 +126,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if evt.Result != nil {
 			// Result.Target can carry redirect-derived content; sanitize at
 			// ingestion so every future render of this entry is safe.
-			entry := fmt.Sprintf("%s %s (%d)",
-				evt.Result.Duration.Round(time.Millisecond),
-				types.Sanitize(evt.Result.Target),
-				evt.Result.Response.StatusCode,
-			)
+			var entry string
+			if evt.Result.Response != nil {
+				entry = fmt.Sprintf("%s %s (%d)",
+					evt.Result.Duration.Round(time.Millisecond),
+					types.Sanitize(evt.Result.Target),
+					evt.Result.Response.StatusCode,
+				)
+			} else {
+				// Transport-level failure: Response is nil. Dereferencing
+				// StatusCode here panicked the event loop and tore down
+				// the whole dashboard mid-scan.
+				entry = fmt.Sprintf("%s %s (failed)",
+					evt.Result.Duration.Round(time.Millisecond),
+					types.Sanitize(evt.Result.Target),
+				)
+			}
 			m.requestLog = append(m.requestLog, entry)
 			if len(m.requestLog) > 50 {
 				m.requestLog = m.requestLog[len(m.requestLog)-50:]
@@ -146,10 +157,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.state = stateDone
 			m.findings = evt.Findings
 			m.stats = evt.Stats
-			return m, tea.Sequence(
-				tea.Printf("Scan complete: %d findings", len(evt.Findings)),
-				tea.Quit,
-			)
+			// No in-dashboard farewell: the alt screen is about to be
+			// torn down — the durable outcome is printed on the regular
+			// screen by PostRunSummary after Run() returns.
+			return m, tea.Quit
 		}
 
 		return m, m.pollEvents()
@@ -326,6 +337,44 @@ func (m *Model) renderSummary() string {
 	return b.String()
 }
 
+// PostRunSummary reports the final scan outcome on the regular screen,
+// after the alt-screen dashboard has closed. Without it, every -i scan
+// ended the same way: the dashboard vanished and the terminal showed
+// nothing at all — indistinguishable from a silent crash. Fully-failed
+// scans (unreachable target) were the worst case: instant vanish, zero
+// explanation.
+func (m *Model) PostRunSummary() string {
+	var b strings.Builder
+	b.WriteString("\n")
+
+	switch {
+	case m.err != nil:
+		errStyle := lipgloss.NewStyle().Foreground(severityColor("critical")).Bold(true)
+		b.WriteString(errStyle.Render("  Scan error: " + m.err.Error()))
+		b.WriteString("\n")
+	case m.quitting:
+		b.WriteString(mutedStyle.Render("  Scan canceled by operator."))
+		b.WriteString("\n")
+	}
+
+	fmt.Fprintf(&b, "  Requests %d/%d completed · %d failed · %d findings · %s\n",
+		m.stats.Completed, m.stats.Total, m.stats.Failed,
+		len(m.findings), m.stats.Duration.Round(time.Second))
+
+	if m.stats.Completed == 0 && m.stats.Total > 0 {
+		b.WriteString(mutedStyle.Render("  Every request failed — the target is likely unreachable (DNS, down, or blocking)."))
+		b.WriteString("\n")
+		b.WriteString(mutedStyle.Render("  Re-run with --verbose for per-request errors, or without -i for the standard report."))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(m.renderFindingsSummary())
+	b.WriteString("\n")
+
+	return b.String()
+}
+
 func (m *Model) renderFindingsSummary() string {
 	if len(m.findings) == 0 {
 		return mutedStyle.Render("No findings detected.")
@@ -355,7 +404,13 @@ func (m *Model) renderFindingsSummary() string {
 	for _, f := range m.findings {
 		color := severityColor(string(f.Severity))
 		name := lipgloss.NewStyle().Foreground(textPrimary).Padding(0, 2).Render(types.Sanitize(f.Name))
-		sev := lipgloss.NewStyle().Foreground(color).Render(strings.ToUpper(string(f.Severity[0])))
+		// A finding may arrive with an unset severity; indexing blindly
+		// crashed the whole TUI on the summary render.
+		sevLabel := ""
+		if len(f.Severity) > 0 {
+			sevLabel = strings.ToUpper(string(f.Severity[0]))
+		}
+		sev := lipgloss.NewStyle().Foreground(color).Render(sevLabel)
 		desc := mutedStyle.Padding(0, 4).Render(types.Sanitize(f.Description))
 
 		fmt.Fprintf(&b, "  %s  %s\n", sev, name)
