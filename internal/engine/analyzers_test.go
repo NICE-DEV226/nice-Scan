@@ -75,6 +75,13 @@ func TestHeaderAnalyzerDisclosesTechnologies(t *testing.T) {
 	if hasFinding(h.Analyze(context.Background(), resp2), "Server Version Disclosure") {
 		t.Errorf("generic nginx banner must not be flagged as high-value disclosure")
 	}
+
+	// The inversion the review caught: nginx WITH a version is the actual
+	// disclosure case the old logic silenced.
+	resp3 := respWithHeaders(map[string]string{"Server": "nginx/1.24.2"})
+	if !hasFinding(h.Analyze(context.Background(), resp3), "Server Version Disclosure") {
+		t.Errorf("nginx/1.24.2 must be flagged as version disclosure")
+	}
 }
 
 func TestCORSAnalyzerWildcardWithCredentials(t *testing.T) {

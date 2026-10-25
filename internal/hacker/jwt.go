@@ -164,7 +164,10 @@ func (a *JWTForgeNoneAction) Execute(ctx context.Context, target string, kb *Kno
 	})
 
 	kb.AddCapability(Capability{
-		Name:   "has_forged_jwt",
+		Name: "has_forged_jwt",
+		// The forging itself ran locally; no target ever accepted one of
+		// these tokens. Observed tier: real artifact, unproven acceptance.
+		Origin: OriginObserved,
 		Target: target,
 		Details: map[string]string{
 			"type": "none_algorithm",

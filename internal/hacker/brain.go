@@ -129,17 +129,21 @@ func (b *Brain) renderKBSummary() {
 	if len(caps) > 0 {
 		var capStrs []string
 		for _, c := range caps {
-			if c.Origin == OriginHint {
+			switch c.Origin {
+			case OriginHint:
 				// Remote-text hints render as suspected, never as facts.
 				capStrs = append(capStrs, lipgloss.NewStyle().Foreground(clYellow).Render("?"+c.Name))
-				continue
+			case OriginObserved:
+				// Page-derived semantics: real fetch, unproven capability.
+				capStrs = append(capStrs, lipgloss.NewStyle().Foreground(clCyan).Render("≈"+c.Name))
+			default:
+				capStrs = append(capStrs, lipgloss.NewStyle().Foreground(clGreen).Render(c.Name))
 			}
-			capStrs = append(capStrs, lipgloss.NewStyle().Foreground(clGreen).Render(c.Name))
 		}
 		fmt.Printf("  %s %s  %s\n",
 			lipgloss.NewStyle().Foreground(clDim).Render("└"),
 			strings.Join(capStrs, " "),
-			lipgloss.NewStyle().Foreground(clDim).Render(fmt.Sprintf("(? = suspected from remote text, %d verified)", countVerified(caps))),
+			lipgloss.NewStyle().Foreground(clDim).Render(fmt.Sprintf("(? = hint from remote text, ≈ = observed on fetched page, %d verified)", countVerified(caps))),
 		)
 	}
 	fmt.Println()
@@ -161,6 +165,13 @@ func (b *Brain) buildReport(steps int) *Report {
 	impact := "No significant vulnerabilities discovered"
 	riskScore := 0.0
 
+	// Executed findings drive the floor of the score. The previous version
+	// ignored Findings entirely — a run with a wire-confirmed XSS (and no
+	// chain pattern) reported risk 0/10 while a single keyword in a page
+	// minted verified-origin chains worth 10/10. Severity of a finding is
+	// itself established truth here: only actions with wire-verified
+	// verdicts emit the high severities (the raw keyword classes emit
+	// info/low-medium).
 	maxRisk := 0.0
 	for _, c := range chains {
 		if c.RiskScore > maxRisk {
@@ -169,9 +180,17 @@ func (b *Brain) buildReport(steps int) *Report {
 	}
 	if maxRisk > 0 {
 		riskScore = maxRisk
-		impact = "Multiple attack chains detected"
+		impact = "Attack chains derived from verified capabilities"
 		for _, c := range chains {
 			impact += fmt.Sprintf("; %s", c.Name)
+		}
+	}
+
+	for _, f := range b.kb.GetFindings() {
+		sevRisk := severityRiskFloor(f.Severity)
+		if sevRisk > riskScore {
+			riskScore = sevRisk
+			impact = fmt.Sprintf("Confirmed finding (%s): %s", f.Severity, f.Name)
 		}
 	}
 
@@ -231,6 +250,24 @@ func (b *Brain) buildReport(steps int) *Report {
 		Endpoints:    b.kb.GetEndpoints(),
 		Pages:        b.kb.GetPages(),
 	}
+}
+
+// severityRiskFloor maps a confirmed finding's severity to the risk floor
+// it justifies in the final report. Conservative by design: a single high
+// finding cannot outrank multi-step verified chains (7.5 caps below the
+// chain ceiling), while criticals carry near-chain weight.
+func severityRiskFloor(s Severity) float64 {
+	switch s {
+	case SevCritical:
+		return 9.5
+	case SevHigh:
+		return 7.5
+	case SevMedium:
+		return 4.5
+	case SevLow:
+		return 2.0
+	}
+	return 0
 }
 
 func severityColor(s Severity) lipgloss.Color {
@@ -357,9 +394,13 @@ func (b *Brain) RenderReport(report *Report) {
 		for _, c := range report.Capabilities {
 			label := c.Name
 			style := styleGreen
-			if c.Origin == OriginHint {
+			switch c.Origin {
+			case OriginHint:
 				label = "?" + c.Name
 				style = styleYellow
+			case OriginObserved:
+				label = "≈" + c.Name
+				style = styleCyan
 			}
 			fmt.Printf("  %s %s\n", style.Render("✓"), styleCyan.Render(types.Sanitize(label)))
 		}
@@ -409,7 +450,7 @@ func (b *Brain) RenderReport(report *Report) {
 			}
 			fmt.Printf("  %s %s %s\n",
 				styleGreen.Render("●"),
-				styleCyan.Render(p.URL),
+				styleCyan.Render(types.Sanitize(p.URL)),
 				styleMuted.Render(detail),
 			)
 		}

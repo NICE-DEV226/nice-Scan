@@ -43,7 +43,8 @@ func TestClassifyXssSilentWithoutCanary(t *testing.T) {
 }
 
 func TestClassifyXssEncodedEcho(t *testing.T) {
-	// htmlspecialchars-style reflection: markup neighbors escaped.
+	// htmlspecialchars-style reflection: markup neighbors escaped (and the
+	// quote encoded with it, which is htmlspecialchars' default).
 	body := []byte(`<p>search: &lt;svg onload=alert(&#39;` + can + `&#39;)></p>`)
 	rx, ok := ClassifyXss(body, can)
 	if !ok {
@@ -54,6 +55,17 @@ func TestClassifyXssEncodedEcho(t *testing.T) {
 	}
 	if !rx.Encoded {
 		t.Fatalf("escaped markup core must mark Encoded, got %+v", rx)
+	}
+}
+
+// The exact false positive the canary-anchoring removes: sanitizers,
+// tutorials and docs pages carry a PRE-encoded '<svg onload=alert(...)'
+// string they were never sent. With the canary absent there is no
+// reflection — and no XSS opinion at all.
+func TestClassifyXssPreEncodedMarkerWithoutCanaryIsSilent(t *testing.T) {
+	body := []byte(`<p>The sanitizer converts <code>&lt;svg onload=alert(&#39;xss&#39;)&gt;</code> into harmless text.</p>`)
+	if _, ok := ClassifyXss(body, can); ok {
+		t.Fatal("a pre-encoded marker without OUR canary must produce no opinion")
 	}
 }
 

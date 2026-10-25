@@ -5,11 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"net/http"
-	"net/url"
-	"sort"
 	"strings"
 
+	"github.com/NICE-DEV226/nice-Scan/internal/detect"
 	"github.com/NICE-DEV226/nice-Scan/internal/transport"
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
@@ -369,85 +367,18 @@ func buildFormData(fields []formField, username, password string) string {
 // the baseline is unstable (per-request cookie churn, transport errors),
 // signals are downgraded or the spray is skipped — fail-closed.
 
-type loginFingerprint struct {
-	status       int
-	finalURL     string
-	finalPath    string
-	finalHost    string
-	location     string
-	cookieBlob   string // canonicalized "name=value" pairs, sorted
-	cookieNames  string // canonicalized cookie names, sorted
-	failWords    bool
-	successWords bool
-}
+// The login verdict grammar moved to internal/detect so the --all exploit
+// engine consumes the exact same formula (the review found a legacy keyword
+// verdict surviving in exploit/login.go — two formulas in one binary would
+// drift). These two wrappers keep the hacker call sites unchanged.
+type loginFingerprint = detect.LoginShape
 
 func fingerprintLogin(r *types.Response) loginFingerprint {
-	var f loginFingerprint
-	if r == nil {
-		return f
-	}
-	f.status = r.StatusCode
-	f.finalURL = r.FinalURL
-	if u, err := url.Parse(r.FinalURL); err == nil {
-		f.finalPath = u.Path
-		f.finalHost = u.Host
-	}
-	f.location = r.Headers.Get("Location")
-	f.cookieBlob, f.cookieNames = canonicalCookies(r.Headers)
-	f.failWords, f.successWords = classifyLoginBody(r.Body)
-	return f
+	return detect.FingerprintLogin(r)
 }
 
-// Word lists are failure markers first. Their only affirmative role is
-// documentation in the finding; they can never claim success alone.
-var (
-	loginSuccessWords = []string{"dashboard", "welcome", "logout", "profile", "my account"}
-	loginFailWords    = []string{"invalid", "incorrect", "failed", "error", "wrong"}
-)
-
-// classifyLoginBody detects failure markers anywhere in the final body.
-// Conservative by design: a legitimate dashboard whose JS bundle contains
-// the string "failed" yields a false negative, never a false positive.
-func classifyLoginBody(body []byte) (fail, success bool) {
-	if len(body) == 0 {
-		return false, false
-	}
-	low := strings.ToLower(string(body))
-	for _, w := range loginFailWords {
-		if strings.Contains(low, w) {
-			fail = true
-			break
-		}
-	}
-	for _, w := range loginSuccessWords {
-		if strings.Contains(low, w) {
-			success = true
-			break
-		}
-	}
-	return fail, success
-}
-
-// canonicalCookies normalizes Set-Cookie pairs so that a session-name or
-// value delta can be compared across responses of the same endpoint.
-func canonicalCookies(h http.Header) (blob, names string) {
-	var pairs, only []string
-	for _, v := range h.Values("Set-Cookie") {
-		eq := strings.IndexByte(v, '=')
-		if eq <= 0 {
-			continue
-		}
-		name := strings.ToLower(strings.TrimSpace(v[:eq]))
-		val := v[eq+1:]
-		if semi := strings.IndexByte(val, ';'); semi >= 0 {
-			val = val[:semi]
-		}
-		pairs = append(pairs, name+"="+val)
-		only = append(only, name)
-	}
-	sort.Strings(pairs)
-	sort.Strings(only)
-	return strings.Join(pairs, "; "), strings.Join(only, ",")
+func loginVerdict(resp *types.Response, base loginFingerprint, cookiesTrusted bool) bool {
+	return detect.LoginVerdict(resp, base, cookiesTrusted)
 }
 
 func postLoginForm(ctx context.Context, client *transport.Client, actionURL string, formFields []formField, username, password string) (*types.Response, error) {
@@ -491,85 +422,6 @@ func establishLoginBaseline(ctx context.Context, client *transport.Client, actio
 	// Per-request cookie value churn (rotating CSRF/session ids on every
 	// response, including failures) makes value deltas meaningless; only
 	// name-set changes remain a signal in that case.
-	cookiesTrusted := f1.cookieBlob == f2.cookieBlob
+	cookiesTrusted := detect.CookiesStable(f1, f2)
 	return &f1, cookiesTrusted
-}
-
-// loginVerdict decides whether resp PROVES the credentials are valid.
-// Strictly differential: the response must differ from the junk baseline on
-// a signal junk credentials could not produce:
-//   - redirect (non-following mode): a same-host Location the baseline did
-//     not target, or a session cookie delta;
-//   - 200 (following mode): a cookie delta, or the final destination left
-//     the baseline's failure path.
-//
-// Body words and body size alone can never claim a valid credential — that
-// is exactly the false-positive class this rewrite removes.
-func loginVerdict(resp *types.Response, base loginFingerprint, cookiesTrusted bool) bool {
-	if resp == nil || base.finalHost == "" {
-		return false
-	}
-	cur := fingerprintLogin(resp)
-	if cur.failWords {
-		return false
-	}
-
-	cookieDelta := cur.cookieNames != base.cookieNames ||
-		(cookiesTrusted && cur.cookieBlob != base.cookieBlob)
-
-	if cur.status >= 300 && cur.status < 400 {
-		// The client returned the redirect itself (followRedirects=false).
-		// Compare destinations by PATH: failure flows commonly carry a
-		// timestamped or randomized query, which would resurrect the
-		// false-positive if compared verbatim.
-		loc := cur.location
-		if loc == "" || locationPath(loc) == locationPath(base.location) {
-			return false
-		}
-		if !locationSameHost(loc, base.finalURL) {
-			return false
-		}
-		return true
-	}
-
-	if cur.status != 200 {
-		// 4xx/5xx, rate-limit responses, etc. — no credential claim.
-		return false
-	}
-
-	return cookieDelta || cur.finalPath != base.finalPath
-}
-
-// locationSameHost accepts relative locations unconditionally and absolute
-// ones only when they stay on the form's origin — a cross-host redirect is
-// never evidence of successful authentication.
-func locationSameHost(loc, refererURL string) bool {
-	lu, err := url.Parse(loc)
-	if err != nil {
-		return false
-	}
-	if lu.Host == "" {
-		return true
-	}
-	if lu.Scheme != "http" && lu.Scheme != "https" {
-		return false
-	}
-	r, err := url.Parse(refererURL)
-	if err != nil {
-		return false
-	}
-	return lu.Host == r.Host
-}
-
-// locationPath extracts just the path of a Location header, tolerating
-// relative references and host-only URLs.
-func locationPath(loc string) string {
-	u, err := url.Parse(loc)
-	if err != nil {
-		return loc
-	}
-	if u.Path == "" {
-		return "/"
-	}
-	return u.Path
 }

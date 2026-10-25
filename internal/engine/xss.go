@@ -134,7 +134,10 @@ func probeParam(rawURL, canary string) string {
 }
 
 func extractSnippet(body, pattern string, width int) string {
-	re := regexp.MustCompile(pattern)
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return "" // caller-supplied patterns must never crash the scan
+	}
 	loc := re.FindStringIndex(body)
 	if loc == nil {
 		return ""

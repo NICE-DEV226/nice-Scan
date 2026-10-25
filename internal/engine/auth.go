@@ -142,14 +142,20 @@ func (a *AuthAnalyzer) Analyze(ctx context.Context, resp *types.Response) []type
 
 
 	
+
+	// The old finding sold "Admin Panel Found" at HIGH confidence for any
+	// page whose URL or body contained an admin keyword — a blog post about
+	// admins qualified. A keyword is not a panel: demoted to a medium
+	// unverified-surface notice; real panels surface through actions that
+	// actually access them.
 	if rxAdminPanel.MatchString(url) || rxAdminPanel.MatchString(body) {
 		findings = append(findings, types.Finding{
 			Type:        types.FindingMisconfig,
-			Name:        "Admin Panel Found",
-			Severity:    types.SeverityHigh,
-			Description: "Administrative panel or restricted area discovered",
+			Name:        "Possible Admin Panel (keyword match — unverified)",
+			Severity:    types.SeverityMedium,
+			Description: "The URL or page content contains admin-panel keywords. No access test was performed — verify manually whether an actual restricted panel exists",
 			Evidence:    fmt.Sprintf("URL: %s", url),
-			Confidence:  0.85,
+			Confidence:  0.45,
 		})
 	}
 

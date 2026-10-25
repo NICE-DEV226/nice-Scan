@@ -1,7 +1,11 @@
 package hacker
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/NICE-DEV226/nice-Scan/internal/transport"
 )
@@ -42,13 +46,16 @@ func TestDeriveCapabilitiesAreHints(t *testing.T) {
 	}
 }
 
-func TestAddCapabilityDefaultsToVerified(t *testing.T) {
+// The deliberate change from the review: a silent default must never
+// fabricate verified evidence. Every caller states its provenance
+// explicitly; forgetting the field fails closed to observed.
+func TestAddCapabilityDefaultsToObserved(t *testing.T) {
 	_, kb := kbForTest("example.com")
 
 	kb.AddCapability(Capability{Name: "has_sqli", Target: "example.com"})
 	cap := kb.capability("has_sqli")
-	if cap == nil || cap.Origin != OriginVerified {
-		t.Fatalf("explicitly reported capability must default to verified, got %+v", cap)
+	if cap == nil || cap.Origin != OriginObserved {
+		t.Fatalf("silent default must be observed (fail-closed), got %+v", cap)
 	}
 }
 
@@ -236,5 +243,111 @@ func TestOOBServerBindsLoopback(t *testing.T) {
 	}
 	if len(kb.GetScannerState()) == 0 {
 		t.Error("OOB callback URL must be recorded as scanner state")
+	}
+}
+
+// ── Wave C: origins tell the truth; risk counts executed findings ────────
+
+// Crawl keyword matches must land at observed tier: a page whose markup
+// mentions "/api" or "dashboard" cannot unlock sensitive actions nor
+// headline critical chains anymore — only structural markers (real
+// password-type input) keep verified provenance.
+func TestCrawlKeywordCapsAreObservedNotVerified(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// NO password input anywhere: has_login must not be verified either.
+		// The admin/api/register markers ride INSIDE a real form segment —
+		// exactly the class the review showed minting verified evidence.
+		_, _ = w.Write([]byte(`<html><body>
+			<form action="/api/register" method="post"><input name="user"><input name="dashboard_url"><button>Join admin panel</button></form>
+			<script src="/app.js"></script></body></html>`))
+	}))
+	defer srv.Close()
+
+	_, kb := kbForTest(srv.URL)
+	client := transport.NewClient(transport.WithRetries(0), transport.WithTimeout(10*time.Second))
+	defer func() { _ = client.Close() }()
+
+	a := &CrawlAction{}
+	a.Execute(testCtx(), srv.URL, kb, client)
+
+	for _, name := range []string{"has_api", "has_register", "has_admin"} {
+		cap := kb.capability(name)
+		if cap == nil {
+			t.Fatalf("crawl forgot %s entirely", name)
+		}
+		if cap.Origin != OriginObserved {
+			t.Errorf("crawl keyword cap %s origin = %q, want %q (page words must not mint verified evidence)", name, cap.Origin, OriginObserved)
+		}
+	}
+	if kb.capability("has_login") != nil {
+		t.Errorf("has_login minted without any password input")
+	}
+}
+
+// A real password-type input IS wire-grounded: that one stays verified —
+// this is what keeps the login-bruteforce feature alive on real targets.
+func TestCrawlPasswordInputStaysVerified(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`<html><body><form action="/login" method="post">
+			<input name="user"><input type="password" name="pass"><button>Login</button></form></body></html>`))
+	}))
+	defer srv.Close()
+
+	_, kb := kbForTest(srv.URL)
+	client := transport.NewClient(transport.WithRetries(0), transport.WithTimeout(10*time.Second))
+	defer func() { _ = client.Close() }()
+	a := &CrawlAction{}
+	a.Execute(testCtx(), srv.URL, kb, client)
+
+	cap := kb.capability("has_login")
+	if cap == nil || cap.Origin != OriginVerified {
+		t.Fatalf("structural password input must keep verified origin, got %+v", cap)
+	}
+	p := NewPlanner(&LoginBruteAction{})
+	if act := p.NextAction(kb); act == nil || act.Metadata().Name != "Login Bruteforce" {
+		t.Error("verified structural has_login must still unlock the login brute force")
+	}
+}
+
+// The second half of the double lie: with a wire-confirmed finding and no
+// chain, the report must not claim risk 0 anymore.
+func TestBuildReportCountsExecutedFindings(t *testing.T) {
+	b, kb := kbForTest("example.com")
+
+	kb.AddFinding(Finding{
+		Type:     "xss_confirmed",
+		Name:     "XSS: executable markup reflection at /search?q",
+		Severity: SevHigh,
+	})
+	rep := b.buildReport(1)
+	if rep.RiskScore < 7.5 {
+		t.Fatalf("confirmed high finding must lift the risk floor, got %.1f (the old score ignored findings entirely)", rep.RiskScore)
+	}
+	if !strings.Contains(rep.Impact, "XSS") {
+		t.Errorf("impact must name the finding that drove it, got %q", rep.Impact)
+	}
+}
+
+// Chain patterns the scheduler runs are hypotheses: the scanner contacts
+// nothing. SevCritical "Risk 10/10" claims over them were the headline lie
+// of the old report.
+func TestGenericChainFindingIsAHypothesis(t *testing.T) {
+	_, kb := kbForTest("example.com")
+	client := transport.NewClient()
+	defer func() { _ = client.Close() }()
+	a := &GenericChainAction{pattern: ChainPattern{
+		Name:     "Upload → RCE",
+		Requires: []string{"has_upload", "has_admin"},
+		Impact:   "Upload shell to admin area",
+		Risk:     10.0,
+	}}
+	res := a.Execute(testCtx(), "example.com", kb, client)
+
+	f := res.Findings[0]
+	if f.Severity != SevInfo {
+		t.Errorf("chain finding severity = %q, want SevInfo (a hypothesis is not a breach)", f.Severity)
+	}
+	if !strings.Contains(f.Name, "hypothesis") {
+		t.Errorf("finding must be labelled a hypothesis, got %q", f.Name)
 	}
 }

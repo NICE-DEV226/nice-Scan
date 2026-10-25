@@ -81,11 +81,22 @@ func ClassifyXss(body []byte, canary string) (XssReflex, bool) {
 	offsets := offsetsGlobal(s, canary)
 	rx.Occurrences = len(offsets)
 
-	// Encoded state: the canary is echoed, but its markup neighbors came
-	// back entity-encoded — the payload cannot execute as markup.
-	encodedCore := strings.Contains(s, "&lt;svg onload=alert") ||
-		strings.Contains(s, "&#x3c;svg onload=alert") ||
-		strings.Contains(s, "&#60;svg onload=alert")
+	// Encoded state: the OUR-canary probe came back entity-encoded — the
+	// payload cannot execute as markup. The marker requires the canary
+	// inside: a page that happens to carry an unrelated pre-encoded
+	// '<svg onload=alert(' string (tutorials, sanitizer demos, docs)
+	// previously produced "escaped reflection" verdicts with no canary on
+	// the page at all — an opinion without evidence. The quote between
+	// alert( and the canary may itself be encoded (htmlspecialchars default)
+	// or left raw (frameworks escaping only markup).
+	encodedCore := false
+	for _, enc := range []string{"&lt;svg onload=alert(", "&#x3c;svg onload=alert(", "&#60;svg onload=alert("} {
+		for _, q := range []string{"&#39;", "&#039;", "&#x27;", "&apos;", "'"} {
+			if strings.Contains(s, enc+q+canary) {
+				encodedCore = true
+			}
+		}
+	}
 
 	if rx.Occurrences == 0 && !encodedCore {
 		return rx, false
@@ -156,6 +167,65 @@ func snippetWindow(s string, center int) string {
 	return strings.ReplaceAll(s[start:end], "\n", " ")
 }
 
+// lowerByte ASCII-lowercases one byte (context scans must not materialize
+// lowercased copies of whole page prefixes).
+func lowerByte(b byte) byte {
+	if b >= 'A' && b <= 'Z' {
+		return b + ('a' - 'A')
+	}
+	return b
+}
+
+// eqTailLower reports whether s[end-len(lit):end] case-insensitively equals
+// lit, without copying.
+func eqTailLower(s string, end int, lit string) bool {
+	start := end - len(lit)
+	if start < 0 {
+		return false
+	}
+	for i := 0; i < len(lit); i++ {
+		if lowerByte(s[start+i]) != lit[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// lastTailOf finds the last case-insensitive occurrence of lit starting
+// strictly before off. Returns the start index or -1.
+func lastTailOf(s string, off int, lit string) int {
+	for end := off; end >= len(lit); end-- {
+		if eqTailLower(s, end, lit) {
+			return end - len(lit)
+		}
+	}
+	return -1
+}
+
+// containsCaseInsensASCII is a no-copy case-insensitive Contains.
+func containsCaseInsensASCII(hay, needle string) bool {
+	if len(needle) == 0 {
+		return true
+	}
+	first := lowerByte(needle[0])
+	for i := 0; i+len(needle) <= len(hay); i++ {
+		if lowerByte(hay[i]) != first {
+			continue
+		}
+		ok := true
+		for j := 1; j < len(needle); j++ {
+			if lowerByte(hay[i+j]) != needle[j] {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return true
+		}
+	}
+	return false
+}
+
 // tagDelimiterOK verifies the character following `<tag` makes it a real
 // tag opening (`<scripter` is not a script tag).
 func tagDelimiterOK(s string, afterOpen int) bool {
@@ -170,30 +240,30 @@ func tagDelimiterOK(s string, afterOpen int) bool {
 }
 
 // insideComment reports whether off sits between `<!--` and its terminator.
+// Backward case-insensitive tail scan — no lowercased prefix copy.
 func insideComment(s string, off int) bool {
-	low := strings.ToLower(s[:off])
-	open := strings.LastIndex(low, "<!--")
+	open := lastTailOf(s, off, "<!--")
 	if open == -1 {
 		return false
 	}
-	// a terminator between the opener and the offset closes the comment
-	return !strings.Contains(low[open:off], "-->")
+	closer := lastTailOf(s, off, "-->")
+	return closer <= open
 }
 
 // insideMarkupBlackHole reports whether off sits inside an unclosed
 // <textarea>, <title> or <noscript>. Browsers do not parse inner markup of
 // those containers, so raw reflected markup cannot execute there.
 func insideMarkupBlackHole(s string, off int) bool {
-	low := strings.ToLower(s[:off])
 	for _, tag := range []string{"textarea", "title", "noscript"} {
 		openTag := "<" + tag
-		open := strings.LastIndex(low, openTag)
-		if open == -1 || !tagDelimiterOK(low, open+len(openTag)) {
+		open := lastTailOf(s, off, openTag)
+		if open == -1 || !tagDelimiterOK(s, open+len(openTag)) {
 			continue
 		}
-		if !strings.Contains(low[open:off], "</"+tag) {
-			return true
+		if closer := lastTailOf(s, off, "</"+tag); closer > open {
+			continue
 		}
+		return true
 	}
 	return false
 }
@@ -201,17 +271,16 @@ func insideMarkupBlackHole(s string, off int) bool {
 // insideScriptBlock reports whether off sits between <script …> opening and
 // its `</script>` terminator; src-attribute tags carry no JS body.
 func insideScriptBlock(s string, off int) bool {
-	low := strings.ToLower(s[:off])
-	open := strings.LastIndex(low, "<script")
-	if open == -1 || !tagDelimiterOK(low, open+len("<script")) {
+	open := lastTailOf(s, off, "<script")
+	if open == -1 || !tagDelimiterOK(s, open+len("<script")) {
 		return false
 	}
-	tagEnd := strings.Index(low[open:], ">")
+	tagEnd := strings.Index(s[open:], ">")
 	if tagEnd == -1 {
 		return false
 	}
-	if strings.Contains(low[open:open+tagEnd], "src=") {
+	if containsCaseInsensASCII(s[open:open+tagEnd+1], "src=") {
 		return false
 	}
-	return !strings.Contains(low[open:off], "</script")
+	return lastTailOf(s, off, "</script") <= open
 }

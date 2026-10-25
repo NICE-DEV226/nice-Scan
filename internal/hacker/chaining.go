@@ -3,6 +3,7 @@ package hacker
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/NICE-DEV226/nice-Scan/internal/transport"
 )
@@ -175,13 +176,25 @@ func (a *GenericChainAction) Metadata() ActionMetadata {
 }
 
 func (a *GenericChainAction) Execute(ctx context.Context, target string, kb *Knowledge, client *transport.Client) ActionResult {
+	// A chain pattern match is a HYPOTHESIS built from verified-input
+	// capabilities: the scanner contacted nothing here. The previous
+	// "SevCritical + Risk 10/10" headline was the exact report lie the
+	// review called out (keyword-derived caps minting critical risk with
+	// zero contacts — and with origins fixed, verified caps are executed
+	// evidence; the chain still is not executed until the operator runs
+	// it).
 	findings := []Finding{
 		{
 			Type:        "chain",
-			Name:        a.pattern.Name,
-			Severity:    SevCritical,
+			Name:        "Chain hypothesis (not executed): " + a.pattern.Name,
+			Severity:    SevInfo,
 			Description: a.pattern.Impact,
-			Evidence:    fmt.Sprintf("Risk Score: %.0f/10", a.pattern.Risk),
+			Evidence:    fmt.Sprintf("Potential risk %.0f/10 if executed — capabilities met, no contact made", a.pattern.Risk),
+			Details: map[string]string{
+				"status":      "hypothesis",
+				"requires":    strings.Join(a.pattern.Requires, ", "),
+				"risk_if_run": fmt.Sprintf("%.0f", a.pattern.Risk),
+			},
 		},
 	}
 	return ActionResult{Findings: findings}
@@ -243,11 +256,11 @@ func (a *CORSXSSChainAction) Execute(ctx context.Context, target string, kb *Kno
 	findings := []Finding{
 		{
 			Type:        "chain_exploit_poc",
-			Name:        "CORS+XSS Data Exfiltration — PoC Ready",
-			Severity:    SevCritical,
-			Description: "Generate crafted HTML page that exfiltrates authenticated data via CORS + XSS",
+			Name:        "CORS+XSS Data Exfiltration — PoC generated (not detonated)",
+			Severity:    SevInfo,
+			Description: "Generated crafted HTML page for manual exfiltration testing via CORS + XSS — the scanner did not deploy or run it",
 			Evidence:    pocHTML[:300] + "...",
-			Details:     map[string]string{"html": pocHTML},
+			Details:     map[string]string{"html": pocHTML, "status": "operator_tool"},
 		},
 	}
 	return ActionResult{Findings: findings}
@@ -272,9 +285,9 @@ func (a *JWTAdminChainAction) Execute(ctx context.Context, target string, kb *Kn
 	findings := []Finding{
 		{
 			Type:        "chain_exploit_jwt_admin",
-			Name:        "JWT → Admin Access Chain",
-			Severity:    SevCritical,
-			Description: fmt.Sprintf("Attempting admin access with forged JWT on %s", target),
+			Name:        "JWT → Admin Access hypothesis (not executed)",
+			Severity:    SevInfo,
+			Description: fmt.Sprintf("Forged JWT available for manual testing against admin endpoints on %s — the scanner contacted nothing", target),
 			Evidence:    fmt.Sprintf("Token: %s", jwtToken),
 		},
 	}

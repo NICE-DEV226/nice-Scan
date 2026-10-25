@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
@@ -13,6 +14,12 @@ type HeaderAnalyzer struct{}
 func NewHeaderAnalyzer() *HeaderAnalyzer {
 	return &HeaderAnalyzer{}
 }
+
+// rxServerVersion flags a version-like numeric sequence inside a Server
+// value: NNN.NNN with optional build suffix ("nginx/1.24.2",
+// "Apache/2.4.41 (Unix)"). A bare technology name ("nginx", "cloudflare")
+// discloses no version and is not flagged.
+var rxServerVersion = regexp.MustCompile(`\d+\.\d+`)
 
 func (a *HeaderAnalyzer) Name() string {
 	return "headers"
@@ -70,12 +77,17 @@ func (a *HeaderAnalyzer) Analyze(ctx context.Context, resp *types.Response) []ty
 		},
 		{
 			header: "Server",
-			name: "Server Version Disclosure",
+			name:   "Server Version Disclosure",
 			severity: types.SeverityLow,
 			description: "Server header reveals server version information to attackers",
 			missing: false,
 			checkValue: func(val string) (bool, string) {
-				if val == "" || strings.Contains(strings.ToLower(val), "nginx") || strings.Contains(strings.ToLower(val), "apache") {
+				// The logic was INVERTED: it skipped nginx/apache (the
+				// headers actually carrying versions) and only flagged
+				// version-less names. A disclosure needs a version-like
+				// number in the value: "nginx/1.24.2" flags, "nginx" does
+				// not.
+				if val == "" || !rxServerVersion.MatchString(val) {
 					return false, ""
 				}
 				return true, fmt.Sprintf("Server: %s", val)

@@ -153,10 +153,16 @@ func (kb *Knowledge) AddSession(s SessionToken) {
 	}
 }
 
-// AddCapability records a capability observed by a scanner action. Callers
-// that only relay remote-controlled text (passive recon lists, crawled page
-// bodies) must set Origin explicitly to OriginHint; executed evidence keeps
-// Origin empty and is recorded as verified.
+// AddCapability records a capability observed by a scanner action.
+//
+// Provenance is explicit by design: executed evidence sets OriginVerified;
+// a pattern observed inside a directly fetched page sets OriginObserved;
+// anything relayed from remote-controlled text (finding descriptions,
+// third-party feeds) must set OriginHint. An empty Origin is recorded as
+// OriginObserved — the honest ceiling a direct fetch can support — so a
+// forgotten field can silently NEVER upgrade an unproven capability to
+// verified evidence (the trap that let keyword noise open destructive
+// chains).
 func (kb *Knowledge) AddCapability(c Capability) {
 	kb.mu.Lock()
 	defer kb.mu.Unlock()
@@ -166,7 +172,7 @@ func (kb *Knowledge) AddCapability(c Capability) {
 		}
 	}
 	if c.Origin == "" {
-		c.Origin = OriginVerified
+		c.Origin = OriginObserved
 	}
 	kb.capabilities = append(kb.capabilities, c)
 }
@@ -195,9 +201,13 @@ func (kb *Knowledge) AddJWT(j JWTToken) {
 	defer kb.mu.Unlock()
 	kb.jwts = append(kb.jwts, j)
 	if !kb.hasCapability("has_jwt") {
+		// A token observed in transit or captured from the target's own
+		// content proves the token exists, not that the scanner's forged
+		// variants are accepted: below verified until an executed
+		// acceptance test exists.
 		kb.capabilities = append(kb.capabilities, Capability{
 			Name:   "has_jwt",
-			Origin: OriginVerified,
+			Origin: OriginObserved,
 			Target: kb.target,
 		})
 	}
@@ -230,7 +240,10 @@ func (kb *Knowledge) AddSecret(s string) {
 		kb.secrets = append(kb.secrets, s)
 		if !kb.hasCapability("has_secret") {
 			kb.capabilities = append(kb.capabilities, Capability{
-				Name:   "has_secret",
+				Name: "has_secret",
+				// Only executed reads (LFI dump with actual content bytes)
+				// call this — executed-read provenance keeps has_secret
+				// verified.
 				Origin: OriginVerified,
 				Target: kb.target,
 			})

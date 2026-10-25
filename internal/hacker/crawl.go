@@ -74,24 +74,36 @@ func (a *CrawlAction) Execute(ctx context.Context, target string, kb *Knowledge,
 		kb.AddPage(page)
 
 		if forms > 0 {
-			formTypes := detectFormTypes(body)
-			for _, ft := range formTypes {
-				// A form classified on a page the crawler itself fetched
-				// from the target host is an executed observation: mark the
-				// capability verified before the finding text routes through
-				// deriveCapabilities (which can only ever yield hints).
+			// Provenance rules for crawl-derived capabilities (review P0-2):
+			// a page the crawler fetched from the target is an EXECUTED
+			// fetch, but the capability semantics usually rest on words
+			// inside remote-controlled markup. Structural markers (a real
+			// password-type input, a real file input) are wire-grounded and
+			// verified; word matches ("dashboard", "/api", "graphql") are
+			// observed — real page, unproven semantics — and can no longer
+			// unlock destructive chains the report sells as executed.
+			kb.AddCapability(Capability{
+				Name:   "has_forms",
+				Origin: OriginVerified,
+				Target: kb.target,
+				Details: map[string]string{
+					"evidence":  u + " (form elements present in fetched markup)",
+					"derivedBy": "crawler structural detection (executed fetch, same host)",
+				},
+			})
+			for _, fc := range crawlFormEvidence(body) {
 				kb.AddCapability(Capability{
-					Name:   ft,
-					Origin: OriginVerified,
+					Name:   fc.name,
+					Origin: fc.origin,
 					Target: kb.target,
 					Details: map[string]string{
-						"evidence":  u + " (form segment observed on fetched page)",
-						"derivedBy": "crawler form detection (executed fetch, same host)",
+						"evidence":  u + ": " + fc.detail,
+						"derivedBy": "crawler form detection (" + fc.origin + ")",
 					},
 				})
 				kb.AddFinding(Finding{
-					Type:        ft,
-					Name:        ft + " form detected",
+					Type:        fc.name,
+					Name:        fc.name + " form detected",
 					Severity:    SevMedium,
 					Description: "Form found on " + u,
 					Evidence:    u,
@@ -263,6 +275,109 @@ func extractTitle(body string) string {
 // plain prose) used to fabricate "X form detected" findings; restricting the
 // scan to actual form segments keeps the classification to what the crawler
 // really observed.
+// crawlFormCap is one crawl-derived capability with its provenance class
+// and the concrete marker that produced it.
+type crawlFormCap struct {
+	name   string
+	origin string
+	detail string
+}
+
+// crawlFormEvidence classifies fetched form markup. Hygiene split:
+//
+//   - VERIFIED (structural markers in real markup): a password-type input
+//     (a login form exists and takes credentials), a file-type input (an
+//     upload surface exists). These are wire-grounded element semantics,
+//     not prose.
+//   - OBSERVED (remote-controlled words): register/signup/reset, graphql,
+//     /api, admin/dashboard, and the word-only login/upload matches. The
+//     page is real; the capability is a guess the report must label.
+func crawlFormEvidence(body string) []crawlFormCap {
+	lowBody := strings.ToLower(body)
+	var out []crawlFormCap
+	seen := func(name string) bool {
+		for _, c := range out {
+			if c.name == name {
+				return true
+			}
+		}
+		return false
+	}
+	add := func(name, origin, detail string) {
+		if !seen(name) {
+			out = append(out, crawlFormCap{name: name, origin: origin, detail: detail})
+		}
+	}
+
+	segments := formSegments(lowBody)
+	for _, seg := range segments {
+		hasPasswordInput := strings.Contains(seg, `type="password"`) ||
+			strings.Contains(seg, "type=password") ||
+			strings.Contains(seg, `type='password'`)
+		hasFileInput := strings.Contains(seg, `type="file"`) ||
+			strings.Contains(seg, "type=file") ||
+			strings.Contains(seg, `type='file'`)
+
+		switch {
+		case hasPasswordInput:
+			add("has_login", OriginVerified, "password-type input present in fetched form")
+		case strings.Contains(seg, "login") || strings.Contains(seg, "signin"):
+			add("has_login", OriginObserved, "word 'login/signin' inside form markup")
+		}
+
+		switch {
+		case hasFileInput:
+			add("has_upload", OriginVerified, "file-type input present in fetched form")
+		case strings.Contains(seg, "upload") || strings.Contains(seg, "file"):
+			add("has_upload", OriginObserved, "word 'upload/file' inside form markup")
+		}
+
+		switch {
+		case strings.Contains(seg, "register") || strings.Contains(seg, "signup"):
+			add("has_register", OriginObserved, "registration marker inside form markup")
+		}
+		switch {
+		case strings.Contains(seg, "reset") || strings.Contains(seg, "forgot"):
+			add("has_reset", OriginObserved, "reset-flow marker inside form markup")
+		}
+		switch {
+		case strings.Contains(seg, "graphql"):
+			add("has_graphql", OriginObserved, "word 'graphql' inside form markup")
+		}
+		switch {
+		case strings.Contains(seg, "/api") || strings.Contains(seg, "api/"):
+			add("has_api", OriginObserved, "api path reference inside form markup")
+		}
+		switch {
+		case strings.Contains(seg, "admin") || strings.Contains(seg, "dashboard"):
+			add("has_admin", OriginObserved, "word 'admin/dashboard' inside form markup")
+		}
+	}
+	return out
+}
+
+// formSegments slices lowercased markup into <form …>…</form> segments
+// (shared by the evidence classifier).
+func formSegments(lowBody string) []string {
+	var segs []string
+	rest := lowBody
+	for {
+		start := strings.Index(rest, "<form")
+		if start < 0 {
+			break
+		}
+		end := strings.Index(rest[start:], "</form>")
+		if end >= 0 {
+			segs = append(segs, rest[start:start+end])
+			rest = rest[start+end+len("</form>"):]
+		} else {
+			segs = append(segs, rest[start:])
+			break
+		}
+	}
+	return segs
+}
+
 func detectFormTypes(body string) []string {
 	var types []string
 
