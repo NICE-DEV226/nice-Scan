@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 
@@ -33,7 +34,30 @@ var (
 	showVersion bool
 )
 
+// version is the ldflags stamp set by the release workflow; source
+// builds fall back to the Go toolchain's own module version record
+// (go install @vX.Y.Z stamps it) and finally to "dev" for plain
+// working-tree builds. displayV prefixes the "v" exactly once — the
+// module record arrives already prefixed ("v0.2.1").
 var version = "dev"
+
+func displayVersion() string {
+	if version != "" && version != "dev" {
+		return version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return strings.TrimPrefix(bi.Main.Version, "v")
+	}
+	return version
+}
+
+func displayV() string {
+	return "v" + displayVersion()
+}
+
+func init() {
+	version = displayVersion()
+}
 
 var clCyan = lipgloss.Color("#7DCFFF")
 var clMuted = lipgloss.Color("#565F89")

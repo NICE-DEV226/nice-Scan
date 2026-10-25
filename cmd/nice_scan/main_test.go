@@ -103,3 +103,15 @@ func TestTruncateStrSanitizesAndBounds(t *testing.T) {
 		t.Errorf("partial-rune corruption: %q", uni)
 	}
 }
+
+// The banner and --version print "v" + version; the BuildInfo fallback
+// (go install @vX.Y.Z) arrives already prefixed, so no "vv0.2.1".
+func TestDisplayVersionSaysVExactlyOnce(t *testing.T) {
+	out := displayV()
+	if !strings.HasPrefix(out, "v") {
+		t.Fatalf("version output must be v-prefixed, got %q", out)
+	}
+	if strings.HasPrefix(out[1:], "v") {
+		t.Errorf("double v prefix leaked into the version output: %q", out)
+	}
+}
