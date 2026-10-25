@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
@@ -21,9 +22,9 @@ func cookieOf(name, value string) *http.Cookie {
 // newLoginFlow is the canonical test target: POST /login sets a session
 // cookie and 302s to /dash; /dash answers 200 AUTH only with the session
 // cookie, 401 otherwise.
-func newLoginFlowServer(t *testing.T) (*httptest.Server, *int) {
+func newLoginFlowServer(t *testing.T) (*httptest.Server, *atomic.Int64) {
 	t.Helper()
-	dashHitsWithSession := 0
+	var dashHitsWithSession atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/login":
@@ -36,7 +37,7 @@ func newLoginFlowServer(t *testing.T) (*httptest.Server, *int) {
 			w.WriteHeader(http.StatusFound)
 		case "/dash":
 			if c, err := r.Cookie("sid"); err == nil && c.Value == "S1" {
-				dashHitsWithSession++
+				dashHitsWithSession.Add(1)
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write([]byte("AUTH DASHBOARD"))
 				return
@@ -79,7 +80,7 @@ func TestSessionCookiesCapturedOnInterimHopAndAttached(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("session not attached: /dash answered %d", resp.StatusCode)
 	}
-	if *dashAuth < 1 {
+	if dashAuth.Load() < 1 {
 		t.Errorf("server never saw the session cookie")
 	}
 }
@@ -101,7 +102,7 @@ func TestSessionCookiesOffByDefault(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("mode off must stay unauthenticated: /dash answered %d", resp.StatusCode)
 	}
-	if *dashAuth != 0 {
+	if dashAuth.Load() != 0 {
 		t.Errorf("server saw a session cookie with capture disabled")
 	}
 }
@@ -125,7 +126,7 @@ func TestSessionCookiesRespectCredScope(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("session cookie attached to an out-of-scope host: /dash answered %d", resp.StatusCode)
 	}
-	if *dashAuth != 0 {
+	if dashAuth.Load() != 0 {
 		t.Errorf("out-of-scope host received the captured session")
 	}
 }

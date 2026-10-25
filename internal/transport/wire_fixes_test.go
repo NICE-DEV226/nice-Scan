@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -74,13 +75,13 @@ func TestGzipBodyNeverDeliveredRaw(t *testing.T) {
 // submits credentials or state. Server-side hiccups (500/429) on
 // idempotent GETs keep the retry.
 func TestRepostDisabledForStateChangingMethods(t *testing.T) {
-	postHits, getHits := 0, 0
+	var postHits, getHits atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "POST":
-			postHits++
+			postHits.Add(1)
 		case "GET":
-			getHits++
+			getHits.Add(1)
 		}
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -96,8 +97,8 @@ func TestRepostDisabledForStateChangingMethods(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST failed: %v", err)
 	}
-	if postHits != 1 {
-		t.Fatalf("POST resubmitted on server error: %d attempts (must be exactly 1)", postHits)
+	if postHits.Load() != 1 {
+		t.Fatalf("POST resubmitted on server error: %d attempts (must be exactly 1)", postHits.Load())
 	}
 	if respPost.StatusCode != http.StatusInternalServerError {
 		t.Errorf("single-attempt response lost: got %d", respPost.StatusCode)
@@ -108,8 +109,8 @@ func TestRepostDisabledForStateChangingMethods(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET failed: %v", err)
 	}
-	if getHits != 3 { // initial + 2 retries
-		t.Errorf("GET retry policy broken: got %d attempts, want 3", getHits)
+	if getHits.Load() != 3 { // initial + 2 retries
+		t.Errorf("GET retry policy broken: got %d attempts, want %d", getHits.Load(), 3)
 	}
 	if respGet.StatusCode != http.StatusInternalServerError {
 		t.Errorf("final GET response lost through retries: got %d", respGet.StatusCode)
@@ -119,9 +120,9 @@ func TestRepostDisabledForStateChangingMethods(t *testing.T) {
 // Mid-response timeouts are the other double-submit vector: the server may
 // fully process the request after the client gave up.
 func TestPostTimeoutSendsExactlyOneAttempt(t *testing.T) {
-	postHits := 0
+	var postHits atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		postHits++
+		postHits.Add(1)
 		time.Sleep(700 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -134,8 +135,21 @@ func TestPostTimeoutSendsExactlyOneAttempt(t *testing.T) {
 	defer cancel()
 	_, _ = client.Do(ctx, &types.Request{Method: "POST", URL: srv.URL + "/login"})
 
-	if postHits != 1 {
-		t.Fatalf("POST resubmitted on timeout: %d attempts (must be exactly 1)", postHits)
+	// The counted attempt must exist. dispatch can lag Do's deadline
+	// return (slow runners, first seen under -race in CI): wait for it.
+	waitUntil := time.Now().Add(2 * time.Second)
+	for postHits.Load() == 0 && time.Now().Before(waitUntil) {
+		time.Sleep(2 * time.Millisecond)
+	}
+	// Then a grace window: a bug that re-sends the POST would fire on
+	// its retry backoff (10-20ms here) within dispatch time. Cheap but
+	// covers the regression the test exists for.
+	grace := time.Now().Add(300 * time.Millisecond)
+	for time.Now().Before(grace) && postHits.Load() <= 1 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if postHits.Load() != 1 {
+		t.Fatalf("POST resubmitted on timeout: %d attempts (must be exactly 1)", postHits.Load())
 	}
 }
 
