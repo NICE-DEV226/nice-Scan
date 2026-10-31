@@ -406,32 +406,117 @@ func ReplaceSelf(newBin string) (installed, backup string, err error) {
 	return replaceAt(self, newBin)
 }
 
+// replaceAt installs newBin over self.
+//
+// The staged copy deliberately lands in self's own directory: os.Rename is
+// atomic only within one filesystem, and the download/extract directory is
+// /tmp — frequently tmpfs — so renaming from there failed outright with
+// "invalid cross-device link" on a normal Linux layout. The previous
+// fallback then copied over the running executable, which Linux refuses
+// (ETXTBSY "text file busy") and Windows locks: update could never install
+// anything, on either platform, from any release.
 func replaceAt(self, newBin string) (installed, backup string, err error) {
-	if fi, err := os.Stat(newBin); err != nil || fi.IsDir() {
-		return "", "", fmt.Errorf("new binary missing: %s", newBin)
+	stagedPath, err := stageNewBinary(filepath.Dir(self), newBin)
+	if err != nil {
+		return "", "", err
 	}
+	// The staged file survives only a completed install.
+	swapped := false
+	defer func() {
+		if !swapped {
+			_ = os.Remove(stagedPath)
+		}
+	}()
 
 	backup = self + ".old"
-	// Preserve the CURRENT binary before overwriting it — not the
-	// downloaded one (the operator rolls back to what ran until now).
+	// Preserve the CURRENT binary before replacing it — not the downloaded
+	// one (the operator rolls back to what ran until now). Copying a
+	// running executable is allowed; writing over it is not.
 	if err := copyFile(self, backup); err != nil {
 		return "", "", fmt.Errorf("backup failed: %w", err)
 	}
 
-	if err := os.Rename(newBin, self); err != nil {
-		if err2 := copyFile(newBin, self); err2 != nil {
-			return "", "", fmt.Errorf("install failed: %w (copy fallback: %w)", err, err2)
+	if err := os.Rename(stagedPath, self); err != nil {
+		// Windows cannot replace a running image, but renaming it aside is
+		// permitted: swap through the backup name and undo on failure.
+		if swapErr := swapThroughBackup(self, stagedPath, backup); swapErr != nil {
+			return "", "", fmt.Errorf("install failed: %w (swap fallback: %w)", err, swapErr)
 		}
 	}
+	swapped = true
 	return self, backup, nil
 }
 
+// stageNewBinary copies src into a temp file inside dir and marks it
+// executable, so the final rename is same-directory and atomic.
+func stageNewBinary(dir, src string) (string, error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return "", fmt.Errorf("new binary missing: %s", src)
+	}
+	defer func() { _ = in.Close() }()
+	if fi, err := in.Stat(); err != nil || fi.IsDir() {
+		return "", fmt.Errorf("new binary missing: %s", src)
+	}
+
+	out, err := os.CreateTemp(dir, ".nice_scan-new-*")
+	if err != nil {
+		return "", fmt.Errorf("staging failed: %w", err)
+	}
+	path := out.Name()
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		_ = os.Remove(path)
+		return "", fmt.Errorf("staging failed: %w", err)
+	}
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		_ = os.Remove(path)
+		return "", fmt.Errorf("staging failed: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", fmt.Errorf("staging failed: %w", err)
+	}
+	if err := os.Chmod(path, 0o755); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	return path, nil
+}
+
+// swapThroughBackup is the Windows path: move the running binary to the
+// backup name, rename the staged file into place, and put the original back
+// if that second rename fails so the operator is never left without a
+// working binary.
+func swapThroughBackup(self, stagedPath, backup string) error {
+	_ = os.Remove(backup)
+	if err := os.Rename(self, backup); err != nil {
+		return err
+	}
+	if err := os.Rename(stagedPath, self); err != nil {
+		_ = os.Rename(backup, self)
+		return err
+	}
+	return nil
+}
+
 func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
+	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, data, 0o755)
+	defer func() { _ = in.Close() }()
+
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // --- version comparison & check cache ---

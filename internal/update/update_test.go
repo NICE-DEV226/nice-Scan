@@ -289,8 +289,59 @@ func TestReplaceSelfKeepsBackup(t *testing.T) {
 	if string(old) != "OLD" {
 		t.Fatalf("backup content = %q, want OLD", old)
 	}
-	if _, err := os.Stat(downloaded); !os.IsNotExist(err) {
-		t.Fatal("downloaded file must have been consumed by the rename")
+	// The source is copied, not moved: it may live on another filesystem
+	// (/tmp), and the caller owns its temporary directory.
+	if _, err := os.Stat(downloaded); err != nil {
+		t.Fatalf("downloaded file must be left for the caller to clean: %v", err)
+	}
+	assertNoStagedLeftovers(t, dir)
+}
+
+// The real-world layout: the release is extracted under /tmp while the
+// binary lives in the operator's home. A rename straight from /tmp fails
+// with EXDEV, and writing over the running image fails with ETXTBSY — the
+// install has to stage next to the target.
+func TestReplaceAtStagesBesideTarget(t *testing.T) {
+	srcDir := t.TempDir()
+	targetDir := t.TempDir()
+	self := filepath.Join(targetDir, "nice_scan")
+	downloaded := filepath.Join(srcDir, "nice_scan")
+
+	if err := os.WriteFile(self, []byte("OLD"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(downloaded, []byte("NEW-BINARY"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := replaceAt(self, downloaded); err != nil {
+		t.Fatalf("replaceAt: %v", err)
+	}
+
+	got, _ := os.ReadFile(self)
+	if string(got) != "NEW-BINARY" {
+		t.Fatalf("installed content = %q", got)
+	}
+	fi, err := os.Stat(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("installed binary must keep an executable bit, mode = %v", fi.Mode())
+	}
+	assertNoStagedLeftovers(t, targetDir)
+}
+
+func assertNoStagedLeftovers(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".nice_scan-new-") {
+			t.Fatalf("staged temp file left behind: %s", e.Name())
+		}
 	}
 }
 
