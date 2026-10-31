@@ -398,25 +398,6 @@ func (b *Brain) RenderReport(report *Report) {
 		fmt.Println()
 	}
 
-	if len(report.Capabilities) > 0 {
-		fmt.Println(styleHeader.Render("  Capabilities Acquired"))
-		fmt.Println()
-		for _, c := range report.Capabilities {
-			label := c.Name
-			style := styleGreen
-			switch c.Origin {
-			case OriginHint:
-				label = "?" + c.Name
-				style = styleYellow
-			case OriginObserved:
-				label = "≈" + c.Name
-				style = styleCyan
-			}
-			fmt.Printf("  %s %s\n", style.Render("✓"), styleCyan.Render(types.Sanitize(label)))
-		}
-		fmt.Println()
-	}
-
 	if len(report.Credentials) > 0 {
 		fmt.Println(styleHeader.Render("  Credentials Obtained"))
 		fmt.Println()
@@ -463,6 +444,29 @@ func (b *Brain) RenderReport(report *Report) {
 				styleCyan.Render(types.Sanitize(p.URL)),
 				styleMuted.Render(detail),
 			)
+		}
+		fmt.Println()
+	}
+
+	// The capability board is engine bookkeeping, not evidence: it now
+	// sits after the observed surface (pages/endpoints) so the report
+	// leads with what was actually seen. The origin markers stay visible
+	// because the whole point is that a hint is not an observation.
+	if len(report.Capabilities) > 0 {
+		fmt.Println(styleHeader.Render("  Engine Knowledge (✓ verified · ≈ observed · ? hint)"))
+		fmt.Println()
+		for _, c := range report.Capabilities {
+			label := c.Name
+			style := styleGreen
+			switch c.Origin {
+			case OriginHint:
+				label = "?" + c.Name
+				style = styleYellow
+			case OriginObserved:
+				label = "≈" + c.Name
+				style = styleCyan
+			}
+			fmt.Printf("  %s %s\n", style.Render("●"), styleCyan.Render(types.Sanitize(label)))
 		}
 		fmt.Println()
 	}

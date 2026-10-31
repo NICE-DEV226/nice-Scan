@@ -505,14 +505,15 @@ func auditCmd() *cobra.Command {
 
 func exploitCmd() *cobra.Command {
 	var (
-		loginBrute  bool
-		idorRange   string
-		roleTamper  bool
-		tokenReuse  bool
-		registerAcc bool
-		resetPass   bool
-		sessionFix  bool
-		allModules  bool
+		loginBrute   bool
+		idorRange    string
+		roleTamper   bool
+		tokenReuse   bool
+		registerAcc  bool
+		resetPass    bool
+		sessionFix   bool
+		accessVerify bool
+		allModules   bool
 	)
 
 	cmd := &cobra.Command{
@@ -531,6 +532,7 @@ func exploitCmd() *cobra.Command {
     --register    Attempt account registration with various privilege levels
     --reset       Test password reset for user enumeration + token leaks
     --session     Test session fixation and session hijacking
+    --access      Replay admin paths with vs without the session (differential access verification)
     --all         Run all exploitation modules
 `),
 		Args: cobra.ExactArgs(1),
@@ -549,6 +551,13 @@ func exploitCmd() *cobra.Command {
 				Verbose: cfg.Verbose,
 			}
 			exp := exploit.New(client, opts)
+
+			// A session the operator already holds (from their own browser,
+			// burp, previous run) makes every authenticated differential in this
+			// command real instead of unauthenticated guessing.
+			if cfg.Cookie != "" {
+				exp.SetAuthCookie(cfg.Cookie, "operator --cookie")
+			}
 
 			renderer := output.NewTerminal()
 			renderer.RenderBanner()
@@ -598,6 +607,19 @@ func exploitCmd() *cobra.Command {
 				}
 				if len(results) == 0 {
 					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render("  — No login forms found or all failed"))
+				}
+				// A differential-verified credential is worth its session:
+				// the harvested cookie feeds the access modules so they
+				// compare real, authenticated rounds.
+				for _, r := range results {
+					if r.Success && r.SetCookie != "" {
+						if exp.AttachHarvestedSession(r.SetCookie, "login "+r.Username) {
+							fmt.Println(lipgloss.NewStyle().Foreground(lipgloss.Color("#F7768E")).Padding(0, 4).Render(
+								fmt.Sprintf("  ✓ valid credential — session captured (cookie %s), re-run --access to verify admin access with it", types.Sanitize(exploit.ShortCookie(r.SetCookie))),
+							))
+						}
+						break
+					}
 				}
 				fmt.Println()
 			}
@@ -732,6 +754,14 @@ func exploitCmd() *cobra.Command {
 				if len(results) == 0 {
 					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render("  — No registration forms found"))
 				}
+				// A created account is logged in automatically (same
+				// differential verdict as the bruteforce) and its session
+				// feeds --access. Say what happened, never silently.
+				if cookie, source := exp.AuthCookie(); cookie != "" && strings.HasPrefix(source, "login ") {
+					fmt.Println(lipgloss.NewStyle().Foreground(lipgloss.Color("#F7768E")).Padding(0, 4).Render(
+						fmt.Sprintf("  ✓ registered account logged in — session captured (cookie %s)", types.Sanitize(exploit.ShortCookie(cookie))),
+					))
+				}
 				fmt.Println()
 			}
 
@@ -775,17 +805,59 @@ func exploitCmd() *cobra.Command {
 				fmt.Println()
 			}
 
+			// ── Verified access chain ────────────────────────────────
+			// Every module above only makes sense if access actually
+			// changes with a session. This module replays admin paths
+			// anonymously vs with the session and reports REAL gains —
+			// or states plainly that nothing was verified.
+			runAccess := accessVerify || allModules
+			if runAccess {
+				fmt.Println(lipgloss.NewStyle().Foreground(clPrimary).Padding(0, 2).Render("  🔓 Admin Access Verification (differential)"))
+				results := exp.VerifiedAdminAccess(ctx, target)
+				if len(results) == 1 && results[0].Path == "(no session)" {
+					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render("  — No session available: " + results[0].Evidence))
+				}
+				verified := 0
+				for _, r := range results {
+					if r.Path == "(no session)" {
+						continue
+					}
+					cl := lipgloss.Color("#565F89")
+					status := "○"
+					if r.Success {
+						cl = lipgloss.Color("#F7768E")
+						status = "✓"
+						verified++
+					}
+					fmt.Println(lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
+						fmt.Sprintf("  %s %s → anon %d / session %d (%s)", status, r.Path, r.Anonymous, r.WithSess, truncateStr(r.Evidence, 72)),
+					))
+				}
+				if cookie, source := exp.AuthCookie(); cookie != "" {
+					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render(
+						fmt.Sprintf("  session in use: %s (source: %s)", types.Sanitize(exploit.ShortCookie(cookie)), types.Sanitize(source)),
+					))
+				}
+				if verified == 0 {
+					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render(
+						"  — No admin path answered differently with the session: no verified access gain",
+					))
+				}
+				fmt.Println()
+			}
+
 			return nil
 		},
 	}
 
 	cmd.Flags().BoolVar(&loginBrute, "login", false, "Bruteforce common credentials against login forms")
 	cmd.Flags().StringVar(&idorRange, "idor", "", "IDOR enumeration range (e.g. 1-100)")
-	cmd.Flags().BoolVar(&roleTamper, "role", false, "Test role/privilege escalation via params + headers")
+	cmd.Flags().BoolVar(&roleTamper, "role", false, "Test role/privilege escalation via params + headers (differential vs control)")
 	cmd.Flags().BoolVar(&tokenReuse, "token", false, "Reuse JWT/session tokens on protected endpoints")
-	cmd.Flags().BoolVar(&registerAcc, "register", false, "Attempt account registration with various payloads")
+	cmd.Flags().BoolVar(&registerAcc, "register", false, "Attempt account registration with various payloads (--destructive required; successful accounts are logged in to harvest a session)")
 	cmd.Flags().BoolVar(&resetPass, "reset", false, "Test password reset for user enumeration + token leaks")
 	cmd.Flags().BoolVar(&sessionFix, "session", false, "Test session fixation and cookie security")
+	cmd.Flags().BoolVar(&accessVerify, "access", false, "Replay admin paths anonymously vs with the session — differential access verification")
 	cmd.Flags().BoolVar(&allModules, "all", false, "Run all exploitation modules")
 
 	return cmd
@@ -896,6 +968,8 @@ func defaultHackActions(cfg *types.Config) []hacker.Action {
 		&hacker.CrawlAction{},
 		&hacker.FuzzAction{},
 		&hacker.SmartHeadersAction{},
+		&hacker.TLSInspectorAction{},
+		&hacker.FormIntegrityAction{},
 		&hacker.PortScanAction{},
 		&hacker.LoginBruteAction{},
 		&hacker.JSSecretsAction{},

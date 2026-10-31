@@ -166,21 +166,6 @@ func RenderHTMLReport(r *Report) string {
 		buf.WriteString("  </section>\n")
 	}
 
-	if len(r.Capabilities) > 0 {
-		buf.WriteString(`  <section>
-    <h2>Capabilities Acquired</h2>
-    <div class="cap-grid">
-`)
-		for _, c := range r.Capabilities {
-			fmt.Fprintf(&buf,
-				`      <span class="cap-badge">%s</span>
-`,
-				html.EscapeString(c.Name),
-			)
-		}
-		buf.WriteString("    </div>\n  </section>\n")
-	}
-
 	if len(r.Credentials) > 0 {
 		buf.WriteString(`  <section>
     <h2>Credentials Obtained</h2>
@@ -230,6 +215,30 @@ func RenderHTMLReport(r *Report) string {
 			)
 		}
 		buf.WriteString("  </section>\n")
+	}
+
+	// Engine bookkeeping last: pages are the observed surface, the
+	// capability board carries the ? / ≈ provenance markers.
+	if len(r.Capabilities) > 0 {
+		buf.WriteString(`  <section>
+    <h2>Engine Knowledge (verified · observed · hint)</h2>
+    <div class="cap-grid">
+`)
+		for _, c := range r.Capabilities {
+			label := c.Name
+			switch c.Origin {
+			case OriginHint:
+				label = "?" + c.Name
+			case OriginObserved:
+				label = "≈" + c.Name
+			}
+			fmt.Fprintf(&buf,
+				`      <span class="cap-badge">%s</span>
+`,
+				html.EscapeString(label),
+			)
+		}
+		buf.WriteString("    </div>\n  </section>\n")
 	}
 
 	fmt.Fprintf(&buf, `  <div class="footer">
