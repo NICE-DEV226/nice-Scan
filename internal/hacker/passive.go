@@ -47,10 +47,6 @@ type reconSource struct {
 	Detail string
 }
 
-func (s reconSource) ran() bool {
-	return !s.Failed
-}
-
 func (s reconSource) empty() bool {
 	return !s.Failed && len(s.Data) == 0
 }

@@ -297,19 +297,6 @@ func countInternalPaths(sources []string) int {
 	return n
 }
 
-// resolveMapURL turns a (possibly relative) script reference into the
-// absolute URL of its conventional source map (`<script>.map`). Empty string
-// means "not in scope" (third-party vendor scripts stay outside the
-// authorized audit). Kept as the single-candidate helper it always was;
-// Execute uses sourceMapCandidates, which also honours the declared map.
-func resolveMapURL(target, ref string) string {
-	cands := sourceMapCandidates(target, ref, "")
-	if len(cands) == 0 {
-		return ""
-	}
-	return cands[0]
-}
-
 func sanitizeTargetForResolve(target string) string {
 	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
 		target = "https://" + target
