@@ -773,7 +773,8 @@ func exploitCmd() *cobra.Command {
 					))
 				}
 				if len(results) == 0 {
-					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render("  — No registration forms found"))
+					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render(
+						"  — " + exp.RegisterProbeReport()))
 				}
 				// A created account is logged in automatically (same
 				// differential verdict as the bruteforce) and its session
@@ -801,7 +802,8 @@ func exploitCmd() *cobra.Command {
 					))
 				}
 				if len(results) == 0 {
-					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render("  — No reset forms found"))
+					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render(
+						"  — " + exp.ResetProbeReport()))
 				}
 				fmt.Println()
 			}
