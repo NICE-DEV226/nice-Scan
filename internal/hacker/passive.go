@@ -29,6 +29,32 @@ func (a *PassiveReconAction) Metadata() ActionMetadata {
 	}
 }
 
+// Test seam: source bases are overridable so unit tests can exercise
+// the full failed/empty/hit matrix without third-party traffic.
+var (
+	crtShBase   = "https://crt.sh"
+	waybackBase = "https://web.archive.org"
+)
+
+// reconSource carries one third-party recon source's state. Failed
+// exists because a failed source can never justify "no public recon
+// data" — the only honest phrase for unreachable sources is
+// "inconclusive".
+type reconSource struct {
+	Name   string
+	Data   []string
+	Failed bool
+	Detail string
+}
+
+func (s reconSource) ran() bool {
+	return !s.Failed
+}
+
+func (s reconSource) empty() bool {
+	return !s.Failed && len(s.Data) == 0
+}
+
 type crtShEntry struct {
 	IssuerCaID     int    `json:"issuer_ca_id"`
 	IssuerName     string `json:"issuer_name"`
@@ -66,35 +92,31 @@ func (a *PassiveReconAction) Execute(ctx context.Context, target string, kb *Kno
 	reconClient := transport.NewClient(reconOpts...)
 	defer func() { _ = reconClient.Close() }()
 
-	type crtResult struct {
-		subs []string
-	}
-	type wbResult struct {
-		urls []string
-	}
-
-	crtCh := make(chan crtResult, 1)
-	wbCh := make(chan wbResult, 1)
+	crtCh := make(chan reconSource, 1)
+	wbCh := make(chan reconSource, 1)
 
 	go func() {
-		subs := queryCRTSh(reconCtx, reconClient, domain)
-		crtCh <- crtResult{subs: subs}
+		crtCh <- queryCRTSh(reconCtx, reconClient, domain)
 	}()
 	go func() {
-		urls := queryWayback(reconCtx, reconClient, domain)
-		wbCh <- wbResult{urls: urls}
+		wbCh <- queryWayback(reconCtx, reconClient, domain)
 	}()
 
 	var subdomains []string
 	var waybackURLs []string
+	var crtState, wbState reconSource
+	crtState.Name = "crt.sh"
+	wbState.Name = "Wayback"
 
 collect:
 	for i := 0; i < 2; i++ {
 		select {
 		case r := <-crtCh:
-			subdomains = r.subs
+			crtState = r
+			subdomains = r.Data
 		case r := <-wbCh:
-			waybackURLs = r.urls
+			wbState = r
+			waybackURLs = r.Data
 		case <-reconCtx.Done():
 			// Cancellation: keep whatever arrived, stop waiting for
 			// the rest. A bare `break` would only exit the select and
@@ -175,17 +197,48 @@ collect:
 	}
 
 	if len(subdomains) == 0 && len(waybackURLs) == 0 {
-		findings = append(findings, Finding{
-			Type:        "recon_complete",
-			Name:        "No public recon data found",
-			Severity:    SevInfo,
-			Description: "No subdomains or historical URLs discovered for " + domain,
-		})
+		// Honest verdict matrix: a failed source can never justify
+		// "no data". Both sources failed → inconclusive; one failed
+		// → partial verification only; both ran and returned nothing
+		// → the plain "no public recon data" claim.
+		var failed []reconSource
+		if crtState.Failed {
+			failed = append(failed, crtState)
+		}
+		if wbState.Failed {
+			failed = append(failed, wbState)
+		}
+		switch {
+		case len(failed) == 2:
+			findings = append(findings, Finding{
+				Type:     "recon_inconclusive",
+				Name:     "Recon inconclusive: all public sources unreachable",
+				Severity: SevInfo,
+				Description: fmt.Sprintf("%s and %s could not be queried — the ABSENCE of subdomains/historical URLs is NOT verified",
+					crtState.Name, wbState.Name),
+				Evidence: fmt.Sprintf("%s (%s), %s (%s)", crtState.Name, crtState.Detail, wbState.Name, wbState.Detail),
+			})
+		case len(failed) == 1 && (crtState.empty() || wbState.empty()):
+			findings = append(findings, Finding{
+				Type:     "recon_partial",
+				Name:     "Recon partially verified — one source unreachable",
+				Severity: SevInfo,
+				Description: fmt.Sprintf("The reachable source returned no data. %s failed (%s) — its absence claim is NOT verified",
+					failed[0].Name, failed[0].Detail),
+				Evidence: fmt.Sprintf("%s: %s", failed[0].Name, failed[0].Detail),
+			})
+		default:
+			findings = append(findings, Finding{
+				Type:        "recon_complete",
+				Name:        "No public recon data found",
+				Severity:    SevInfo,
+				Description: "No subdomains or historical URLs discovered for " + domain,
+			})
+		}
 	}
 
 	return ActionResult{Findings: findings}
 }
-
 func extractDomain(target string) string {
 	target = strings.TrimPrefix(target, "https://")
 	target = strings.TrimPrefix(target, "http://")
@@ -199,25 +252,25 @@ func extractDomain(target string) string {
 	return target
 }
 
-func queryCRTSh(ctx context.Context, client *transport.Client, domain string) []string {
-	u := fmt.Sprintf("https://crt.sh/?q=%%.%s&output=json", domain)
+func queryCRTSh(ctx context.Context, client *transport.Client, domain string) reconSource {
+	u := fmt.Sprintf("%s/?q=%%.%s&output=json", crtShBase, domain)
 	resp, err := client.Do(ctx, &types.Request{
 		Method: "GET",
 		URL:    u,
 	})
 	if err != nil {
-		return nil
+		return reconSource{Name: "crt.sh", Failed: true, Detail: fmt.Sprintf("request failed: %v", err)}
 	}
-
 	if resp.StatusCode != 200 {
-		return nil
+		return reconSource{Name: "crt.sh", Failed: true, Detail: fmt.Sprintf("HTTP %d", resp.StatusCode)}
 	}
-
 	var entries []crtShEntry
 	if err := json.Unmarshal(resp.Body, &entries); err != nil {
-		return nil
+		// crt.sh answers errors as HTML rate-limit/queue pages; the
+		// non-JSON payload is a source failure, not "no certificates".
+		return reconSource{Name: "crt.sh", Failed: true, Detail: "non-JSON response (rate-limit or error page)"}
 	}
-	return filterCrtShNames(entries, domain)
+	return reconSource{Name: "crt.sh", Data: filterCrtShNames(entries, domain)}
 }
 
 // filterCrtShNames reduces crt.sh certificate-transparency results to hosts
@@ -269,22 +322,22 @@ func isDomainScopedURL(raw, domain string) bool {
 	return host == domain || strings.HasSuffix(host, "."+domain)
 }
 
-func queryWayback(ctx context.Context, client *transport.Client, domain string) []string {
-	u := fmt.Sprintf("https://web.archive.org/cdx/search/cdx?url=%s/*&output=json&fl=original&limit=200", domain)
+func queryWayback(ctx context.Context, client *transport.Client, domain string) reconSource {
+	u := fmt.Sprintf("%s/cdx/search/cdx?url=%s/*&output=json&fl=original&limit=200", waybackBase, domain)
 	resp, err := client.Do(ctx, &types.Request{
 		Method: "GET",
 		URL:    u,
 	})
 	if err != nil {
-		return nil
+		return reconSource{Name: "Wayback", Failed: true, Detail: fmt.Sprintf("request failed: %v", err)}
 	}
 	if resp.StatusCode != 200 {
-		return nil
+		return reconSource{Name: "Wayback", Failed: true, Detail: fmt.Sprintf("HTTP %d", resp.StatusCode)}
 	}
 
 	var raw []json.RawMessage
 	if err := json.Unmarshal(resp.Body, &raw); err != nil {
-		return nil
+		return reconSource{Name: "Wayback", Failed: true, Detail: "non-JSON response"}
 	}
 
 	var urls []string
@@ -313,7 +366,7 @@ func queryWayback(ctx context.Context, client *transport.Client, domain string) 
 			break
 		}
 	}
-	return urls
+	return reconSource{Name: "Wayback", Data: urls}
 }
 
 func min(a, b int) int {
