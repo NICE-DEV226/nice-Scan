@@ -3,6 +3,7 @@ package hacker
 import (
 	"context"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/NICE-DEV226/nice-Scan/internal/transport"
@@ -72,6 +73,23 @@ func (a *CrawlAction) Execute(ctx context.Context, target string, kb *Knowledge,
 			Status:  resp.StatusCode,
 		}
 		kb.AddPage(page)
+
+		// has_pages was declared in Metadata.Provides but never recorded, so
+		// every action gated on it (the Fuzzer, and through it has_api →
+		// LFI/CMD) was silently unreachable: the run stopped after the
+		// crawl no matter what the target served. One fetched page is
+		// executed evidence that pages exist, so record it verified.
+		if resp.StatusCode > 0 {
+			kb.AddCapability(Capability{
+				Name:   "has_pages",
+				Origin: OriginVerified,
+				Target: kb.target,
+				Details: map[string]string{
+					"evidence":  u + " (page fetched, HTTP " + strconv.Itoa(resp.StatusCode) + ")",
+					"derivedBy": "crawler executed fetch",
+				},
+			})
+		}
 
 		if forms > 0 {
 			// Provenance rules for crawl-derived capabilities (review P0-2):

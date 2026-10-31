@@ -23,17 +23,24 @@ type Knowledge struct {
 	chainSteps   []ChainStep
 	parentURLs   map[string]string
 	checkedPaths map[string]bool
-	Session      *SessionManager
-	ReportDir    *ReportDir
+	// sourceMapRefs maps a crawler-discovered script reference to the map
+	// URL that script declares via `//# sourceMappingURL=`. Populated by
+	// the JS secret scan (which already has the body in memory) and read
+	// by Source Map Discovery, so the map action fetches the map the build
+	// actually shipped instead of guessing a filename.
+	sourceMapRefs map[string]string
+	Session       *SessionManager
+	ReportDir     *ReportDir
 }
 
 func NewKnowledge(target string) *Knowledge {
 	return &Knowledge{
-		target:       target,
-		parentURLs:   make(map[string]string),
-		checkedPaths: make(map[string]bool),
-		Session:      NewSessionManager(),
-		ReportDir:    NewReportDir(target),
+		target:        target,
+		parentURLs:    make(map[string]string),
+		checkedPaths:  make(map[string]bool),
+		sourceMapRefs: make(map[string]string),
+		Session:       NewSessionManager(),
+		ReportDir:     NewReportDir(target),
 	}
 }
 
@@ -340,6 +347,27 @@ func (kb *Knowledge) GetPages() []Page {
 	out := make([]Page, len(kb.pages))
 	copy(out, kb.pages)
 	return out
+}
+
+// SetSourceMapRef records the sourceMappingURL a script declared. The
+// reference is remote-controlled text: readers must resolve it against the
+// script URL and re-check scope before fetching (SourceMapAction does).
+func (kb *Knowledge) SetSourceMapRef(script, mapRef string) {
+	if script == "" || mapRef == "" {
+		return
+	}
+	kb.mu.Lock()
+	defer kb.mu.Unlock()
+	if kb.sourceMapRefs == nil {
+		kb.sourceMapRefs = make(map[string]string)
+	}
+	kb.sourceMapRefs[script] = mapRef
+}
+
+func (kb *Knowledge) GetSourceMapRef(script string) string {
+	kb.mu.RLock()
+	defer kb.mu.RUnlock()
+	return kb.sourceMapRefs[script]
 }
 
 func (kb *Knowledge) GetJSScripts() []string {

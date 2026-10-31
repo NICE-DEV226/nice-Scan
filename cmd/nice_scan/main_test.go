@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
 
 // Phase 5 — regressions for the operator-facing input gates in main.go.
@@ -113,5 +115,32 @@ func TestDisplayVersionSaysVExactlyOnce(t *testing.T) {
 	}
 	if strings.HasPrefix(out[1:], "v") {
 		t.Errorf("double v prefix leaked into the version output: %q", out)
+	}
+}
+
+// Three read-only modules (security headers, JS secrets, source maps) had
+// complete implementations and were registered in no action list, so they
+// never ran in any scan. The registry is the only thing that makes a module
+// real, and a missing entry is silent — hence this assertion.
+func TestDefaultHackActionsIncludePassiveModules(t *testing.T) {
+	actions := defaultHackActions(types.DefaultConfig())
+
+	got := make(map[string]bool, len(actions))
+	for _, a := range actions {
+		got[a.Metadata().Name] = true
+	}
+
+	for _, want := range []string{"Security Headers", "JS Secret Scan", "Source Map Discovery", "Web Crawler", "Fuzzer"} {
+		if !got[want] {
+			t.Errorf("%q is not registered — it can never run (registered: %v)", want, got)
+		}
+	}
+
+	// State-modifying actions must stay out of the default registry; they
+	// are appended only under --destructive consent.
+	for _, forbidden := range []string{"CMD Shell", "Web Shell Deploy", "Upload Exploitation", "CMD Injection"} {
+		if got[forbidden] {
+			t.Errorf("%q must not ship in the default action list", forbidden)
+		}
 	}
 }

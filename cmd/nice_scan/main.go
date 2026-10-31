@@ -849,21 +849,7 @@ func hackCmd() *cobra.Command {
 				))
 			}
 
-			brain := hacker.NewBrain(target, client,
-				&hacker.PassiveReconAction{Proxy: cfg.Proxy},
-				&hacker.CrawlAction{},
-				&hacker.FuzzAction{},
-				&hacker.PortScanAction{},
-				&hacker.LoginBruteAction{},
-				&hacker.XSSAction{},
-				&hacker.SQLiAction{},
-				&hacker.JWTForgeAction{},
-				&hacker.LFIAction{},
-				// State-modifying actions ship only under explicit
-				// --destructive consent: default runs must never write or
-				// spawn anything to the target (CMDShell/WebShell engage
-				// only through these two parents).
-			)
+			brain := hacker.NewBrain(target, client, defaultHackActions(cfg)...)
 			if cfg.Destructive {
 				brain.AppendAction(&hacker.CMDInjectAction{})
 				brain.AppendAction(&hacker.UploadAction{})
@@ -892,6 +878,32 @@ func hackCmd() *cobra.Command {
 
 			return nil
 		},
+	}
+}
+
+// defaultHackActions is the registry every `hack` run loads. It is a
+// separate function so a test can assert the modules are actually wired:
+// three read-only modules (headers, JS secrets, source maps) existed with
+// full implementations and were registered nowhere, so they never ran. A
+// registry that silently omits an action is indistinguishable from one that
+// works — hence the assertion in TestDefaultHackActionsIncludePassiveModules.
+//
+// State-modifying actions are deliberately absent: they ship only under
+// explicit --destructive consent (see hackCmd), never from this list.
+func defaultHackActions(cfg *types.Config) []hacker.Action {
+	return []hacker.Action{
+		&hacker.PassiveReconAction{Proxy: cfg.Proxy},
+		&hacker.CrawlAction{},
+		&hacker.FuzzAction{},
+		&hacker.SmartHeadersAction{},
+		&hacker.PortScanAction{},
+		&hacker.LoginBruteAction{},
+		&hacker.JSSecretsAction{},
+		&hacker.SourceMapAction{},
+		&hacker.XSSAction{},
+		&hacker.SQLiAction{},
+		&hacker.JWTForgeAction{},
+		&hacker.LFIAction{},
 	}
 }
 
