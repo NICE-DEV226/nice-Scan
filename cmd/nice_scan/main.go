@@ -520,27 +520,48 @@ func exploitCmd() *cobra.Command {
 		Use:   "exploit [target]",
 		Short: "Active exploitation: login brute, IDOR, privesc, token, register, reset, session",
 		Long: lipgloss.NewStyle().Foreground(clMuted).Render(`
-  Active exploitation module — tests credentials, enumerates IDs, escalates privileges,
-  reuses tokens, registers accounts, exploits password reset, and tests session fixation.
-  Only use on authorized targets.
+  Active exploitation. With NO module flag, the full read-only chain runs,
+  in the order a real attack would:
 
-  Modules:
-    --login       Bruteforce common credentials against login forms
-    --idor 1-100  Numeric ID enumeration range (query + path-based)
-    --role        Role/privilege tampering (params, headers, cookies)
-    --token       Reuse discovered JWT/session tokens on protected endpoints
-    --register    Attempt account registration with various privilege levels
-    --reset       Test password reset for user enumeration + token leaks
-    --session     Test session fixation and session hijacking
-    --access      Replay admin paths with vs without the session (differential access verification)
-    --all         Run all exploitation modules
+    login (40 common credentials) → token/session reuse on protected
+    endpoints → role/privilege tampering (differential) → admin access
+    verification (anonymous vs session).
+
+  Verification rule everywhere: differential evidence or nothing — a row
+  with ✓ means the server actually served something the anonymous round
+  did not. No session captured? The access block says so and tells you
+  the one action that would produce one.
+
+  Extras (opt-in, the default chain already covers the common run):
+    --register         create an account, log in with it, harvest the session
+                       (state-modifying: requires --destructive consent)
+    --idor 1-100       numeric ID enumeration (query + path)
+    --reset            password-reset probing (user enumeration / token leaks)
+    --session          session fixation checks
+    --login/--role/--token/--access
+                                       force a single module alone
+    --all              everything (read-only parts; --register stays
+                       behind --destructive)
+    --cookie "n=v"     feed your own session instead of finding one
+
+  Only use on authorized targets.
 `),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := normalizeTarget(args[0])
 
-			if !loginBrute && !roleTamper && !tokenReuse && !registerAcc && !resetPass && !sessionFix && idorRange == "" && !allModules {
-				return cmd.Help()
+			// No module flag selected: run the default chain (the plain
+			// "tell me everything honest" run) instead of dumping help.
+			selected := cmd.Flags().Changed("login") || cmd.Flags().Changed("role") ||
+				cmd.Flags().Changed("token") || cmd.Flags().Changed("idor") ||
+				cmd.Flags().Changed("register") || cmd.Flags().Changed("reset") ||
+				cmd.Flags().Changed("session") || cmd.Flags().Changed("access") ||
+				cmd.Flags().Changed("all")
+			if !selected {
+				loginBrute = true
+				roleTamper = true
+				tokenReuse = true
+				accessVerify = true
 			}
 
 			client := buildClientForTarget(target)
@@ -814,12 +835,16 @@ func exploitCmd() *cobra.Command {
 			if runAccess {
 				fmt.Println(lipgloss.NewStyle().Foreground(clPrimary).Padding(0, 2).Render("  🔓 Admin Access Verification (differential)"))
 				results := exp.VerifiedAdminAccess(ctx, target)
-				if len(results) == 1 && results[0].Path == "(no session)" {
-					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render("  — No session available: " + results[0].Evidence))
-				}
 				verified := 0
+				sawNoSession := false
 				for _, r := range results {
 					if r.Path == "(no session)" {
+						sawNoSession = true
+						// The one honest verdict available without a
+						// session: say what would fix it, once.
+						fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render(
+							fmt.Sprintf("  ○ %s", truncateStr(r.Evidence, 96)),
+						))
 						continue
 					}
 					cl := lipgloss.Color("#565F89")
@@ -838,7 +863,7 @@ func exploitCmd() *cobra.Command {
 						fmt.Sprintf("  session in use: %s (source: %s)", types.Sanitize(exploit.ShortCookie(cookie)), types.Sanitize(source)),
 					))
 				}
-				if verified == 0 {
+				if verified == 0 && !sawNoSession {
 					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render(
 						"  — No admin path answered differently with the session: no verified access gain",
 					))
