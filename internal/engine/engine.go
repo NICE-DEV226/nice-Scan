@@ -128,6 +128,7 @@ func (s *Scanner) buildProbes(target string) []*types.Request {
 		"/.well-known/security.txt",
 		"/config.json",
 		"/backup",
+		"/backup.zip",
 		"/phpinfo.php",
 		"/info.php",
 		"/debug",

@@ -84,15 +84,56 @@ func TestHeaderAnalyzerDisclosesTechnologies(t *testing.T) {
 	}
 }
 
-func TestCORSAnalyzerWildcardWithCredentials(t *testing.T) {
+func TestCORSAnalyzerWildcardWithCredentialsIsNotCritical(t *testing.T) {
+	// Browsers reject ACAO:* together with ACAC:true (Fetch spec), so no
+	// origin can read anything. The pair is a configuration error and was
+	// previously reported Critical on ordinary CDN/gateway setups.
 	c := NewCORSAnalyzer()
 	resp := respWithHeaders(map[string]string{
 		"Access-Control-Allow-Origin":      "*",
 		"Access-Control-Allow-Credentials": "true",
 	})
 	fs := c.Analyze(context.Background(), resp)
-	if len(fs) != 1 || fs[0].Severity != types.SeverityCritical {
-		t.Fatalf("wildcard CORS + credentials must be critical, got %+v", fs)
+	if len(fs) != 1 {
+		t.Fatalf("expected exactly one finding, got %+v", fs)
+	}
+	if fs[0].Severity != types.SeverityInfo {
+		t.Fatalf("wildcard + credentials is not exploitable: severity %q, want %q", fs[0].Severity, types.SeverityInfo)
+	}
+}
+
+func TestCORSAnalyzerWildcardAloneIsQuiet(t *testing.T) {
+	// Access-Control-Allow-Origin: * is the default for public resources and
+	// grants nothing a plain cross-origin fetch does not already grant.
+	c := NewCORSAnalyzer()
+	if fs := c.Analyze(context.Background(), respWithHeaders(map[string]string{
+		"Access-Control-Allow-Origin": "*",
+	})); len(fs) != 0 {
+		t.Fatalf("wildcard without credentials must not be flagged, got %+v", fs)
+	}
+}
+
+func TestCORSAnalyzerStarHostPatternIsNotReflection(t *testing.T) {
+	// "https://*.example.com" contains a star but reflects no origin.
+	c := NewCORSAnalyzer()
+	fs := c.Analyze(context.Background(), respWithHeaders(map[string]string{
+		"Access-Control-Allow-Origin":      "https://*.example.com",
+		"Access-Control-Allow-Credentials": "true",
+	}))
+	if len(fs) != 0 {
+		t.Fatalf("a star inside a host pattern must not be read as reflection: %+v", fs)
+	}
+}
+
+func TestCORSAnalyzerDuplicateOriginHeaderIsRejectedByBrowsers(t *testing.T) {
+	c := NewCORSAnalyzer()
+	hdr := http.Header{}
+	hdr.Add("Access-Control-Allow-Origin", corsProbeOrigin)
+	hdr.Add("Access-Control-Allow-Origin", corsProbeOrigin)
+	hdr.Set("Access-Control-Allow-Credentials", "true")
+	resp := &types.Response{StatusCode: 200, Headers: hdr, Body: []byte("ok")}
+	if fs := c.Analyze(context.Background(), resp); len(fs) != 0 {
+		t.Fatalf("duplicated ACAO is rejected by the browser, so no finding may be claimed: %+v", fs)
 	}
 }
 
@@ -114,8 +155,13 @@ func TestCORSAnalyzerReflectionWithoutCredentials(t *testing.T) {
 		"Access-Control-Allow-Origin": corsProbeOrigin,
 	})
 	fs := c.Analyze(context.Background(), resp)
-	if len(fs) == 0 || fs[0].Name != "CORS Arbitrary Origin Reflection" || fs[0].Severity != types.SeverityMedium {
-		t.Fatalf("reflection without credentials must be flagged Medium, got %+v", fs)
+	if len(fs) == 0 || fs[0].Name != "CORS Arbitrary Origin Reflection" {
+		t.Fatalf("expected an origin-reflection finding, got %+v", fs)
+	}
+	// Without credentials the browser sends no cookies, so the impact is
+	// conditional on cookie-less authentication: Low, not Medium.
+	if fs[0].Severity != types.SeverityLow {
+		t.Fatalf("reflection without credentials severity %q, want %q", fs[0].Severity, types.SeverityLow)
 	}
 }
 
@@ -135,21 +181,36 @@ func TestCORSAnalyzerNoSubstringFalsePositive(t *testing.T) {
 	}
 }
 
-func TestCORSAnalyzerWildcardAloneAndNullOrigin(t *testing.T) {
+func TestCORSAnalyzerNullOriginSeverityFollowsCredentials(t *testing.T) {
 	c := NewCORSAnalyzer()
 
+	// A sandboxed iframe sends Origin: null; with credentials that is a real
+	// read primitive.
 	fs := c.Analyze(context.Background(), respWithHeaders(map[string]string{
-		"Access-Control-Allow-Origin": "*",
+		"Access-Control-Allow-Origin":      "null",
+		"Access-Control-Allow-Credentials": "true",
 	}))
-	if !hasFinding(fs, "Wildcard CORS Origin") {
-		t.Errorf("expected wildcard-origin Medium finding, got %+v", fs)
+	if len(fs) != 1 || fs[0].Severity != types.SeverityHigh {
+		t.Fatalf("null origin with credentials must be High, got %+v", fs)
 	}
 
+	// Without credentials the same header is a low-severity observation.
 	fs = c.Analyze(context.Background(), respWithHeaders(map[string]string{
 		"Access-Control-Allow-Origin": "null",
 	}))
-	if !hasFinding(fs, "CORS Null Origin Allowed") {
-		t.Errorf("expected null-origin High finding, got %+v", fs)
+	if len(fs) != 1 || fs[0].Severity != types.SeverityLow {
+		t.Fatalf("null origin without credentials must be Low, got %+v", fs)
+	}
+}
+
+func TestCORSAnalyzerCredentialsValueIsCaseInsensitive(t *testing.T) {
+	c := NewCORSAnalyzer()
+	fs := c.Analyze(context.Background(), respWithHeaders(map[string]string{
+		"Access-Control-Allow-Origin":      corsProbeOrigin,
+		"Access-Control-Allow-Credentials": " True ",
+	}))
+	if !hasFinding(fs, "CORS Origin Reflection with Credentials") {
+		t.Fatalf("ACAC: "+"\" True \""+" is honoured by browsers, got %+v", fs)
 	}
 }
 

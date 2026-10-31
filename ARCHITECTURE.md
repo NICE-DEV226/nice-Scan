@@ -117,8 +117,8 @@ Scanner
 - **Certificat** : Extraction SAN (Subject Alternative Names)
 
 #### d) Exposures — Fichiers sensibles exposés
-- **Chemins sondés** : /.env, /.git/config, source maps, listage de répertoires, robots.txt, sitemap.xml, backup.zip, .gitignore
-- **Détection** : Statut HTTP + motifs dans le corps
+- **Chemins sondés** : /.env, /.git/config, source maps, listage de répertoires, robots.txt, sitemap.xml, backup.zip
+- **Détection** : Statut HTTP **et preuve dans le corps** — signature de contenu (ou nombre magique, ex. `PK\x03\x04` pour backup.zip) ; une page HTML de fallback (soft-404) ne vaut jamais preuve, et un motif sans preuve ne ship pas
 
 #### e) SQLi — Injection SQL
 - **Méthode** : Détection basée sur les erreurs
