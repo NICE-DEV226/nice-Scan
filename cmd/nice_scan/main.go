@@ -1138,18 +1138,6 @@ func defaultHackActions(cfg *types.Config) []hacker.Action {
 	}
 }
 
-func extractIDORParam(urlStr string) string {
-	idx := strings.LastIndexByte(urlStr, '=')
-	if idx > 0 && idx < len(urlStr)-1 {
-		return urlStr[strings.LastIndexByte(urlStr[:idx], '?')+1 : idx]
-	}
-	parts := strings.Split(urlStr, "/")
-	if len(parts) > 0 {
-		return parts[len(parts)-2]
-	}
-	return "id"
-}
-
 func techCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "tech [target]",
