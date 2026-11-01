@@ -2,8 +2,11 @@ package shell
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/url"
+	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -57,10 +60,12 @@ var (
 	}{
 		{"scan", "Full security scan (passive + active)", "<url>"},
 		{"audit", "Deep audit with ALL checks + verbose", "<url>"},
-		{"exploit", "Active exploitation (state-writing modules need consent)", "<url>"},
+		{"exploit", "Active exploitation chain (login, privesc, IDOR, token, discovered creds, access)", "<url> [--creds u:p] [--all]"},
 		{"tech", "Technology detection (165 signatures)", "<url>"},
 		{"tls", "TLS/SSL configuration analysis", "<url>"},
 		{"consent", "Grant/revoke state-modifying consent", "[on|off]"},
+		{"copy", "Copy last command output to clipboard (OSC 52)", "[all]"},
+		{"history", "Show entered commands", ""},
 		{"clear", "Clear output", ""},
 		{"list", "Show session targets and findings", ""},
 		{"help", "Show available commands", ""},
@@ -122,6 +127,9 @@ type Model struct {
 	// whole shell session: the fingerprint is read once, then every later
 	// scan/fuzz command conditions on it without re-fetching the homepage.
 	stacks       map[string]fingerprint.Stack
+	history      []string
+	histIdx      int
+	lastOutput   []string
 	ready        bool
 	quitting     bool
 	width        int
@@ -167,12 +175,12 @@ func NewModel(cfg *types.Config) (*Model, error) {
 		"",
 		lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render("  scan <url>   Full security scan (all modules)"),
 		lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render("  audit <url>  Deep audit, verbose, HTML report"),
-		lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render("  exploit <url>  Active exploitation modules"),
+		lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render("  exploit <url>  Login · privesc · IDOR · token · discovered creds · access"),
 		lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render("  tech <url>   Technology fingerprinting"),
 		lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render("  tls <url>    TLS/SSL configuration analysis"),
 		lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render("  help         Full command list  ·  exit  Quit"),
 		"",
-		lipgloss.NewStyle().Foreground(clDim).Padding(0, 2).Render("  Tab: autocomplete  ·  PgUp/PgDn: scroll  ·  Ctrl+C: quit"),
+		lipgloss.NewStyle().Foreground(clDim).Padding(0, 2).Render("  ↑/↓: command history  ·  Tab: autocomplete  ·  PgUp/PgDn: scroll  ·  Ctrl+Y / copy: clipboard  ·  Ctrl+C: quit"),
 		"",
 	}
 	m := &Model{
@@ -181,6 +189,7 @@ func NewModel(cfg *types.Config) (*Model, error) {
 		client:       client,
 		stacks:       map[string]fingerprint.Stack{},
 		output:       welcome,
+		histIdx:      0,
 		scrollOffset: 0,
 	}
 
@@ -195,6 +204,11 @@ func (m *Model) Init() tea.Cmd {
 }
 
 type cmdResultMsg []string
+
+// cmdNoticeMsg appends lines to the scrollback WITHOUT replacing the copy
+// buffer: a `copy` confirmation must not become the thing the next Ctrl+Y
+// copies over the command output the operator actually wanted.
+type cmdNoticeMsg []string
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -231,6 +245,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.autocomplete()
 			return m, nil
 
+		case "up":
+			m.recallHistory(-1)
+			return m, nil
+
+		case "down":
+			m.recallHistory(1)
+			return m, nil
+
+		case "ctrl+y":
+			return m, m.copyOutput(m.lastOutput, "last output")
+
 		case "shift+up", "pgup":
 			m.scrollOffset += 3
 			m.clampScroll()
@@ -256,9 +281,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			m.output = append(m.output, promptStyle.Render("❯ "+line))
+			m.pushHistory(line)
 			m.input.Reset()
 			m.scrollOffset = 0
+
+			m.output = append(m.output, promptStyle.Render("❯ "+line))
 
 			cmd, args := parseLine(line)
 			switch cmd {
@@ -269,10 +296,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.output = nil
 				return m, nil
 			case "help", "?":
-				m.output = append(m.output, m.helpText()...)
+				lines := m.helpText()
+				m.output = append(m.output, lines...)
+				m.lastOutput = lines
 				return m, nil
 			case "list", "ls":
-				m.output = append(m.output, m.listSession()...)
+				lines := m.listSession()
+				m.output = append(m.output, lines...)
+				m.lastOutput = lines
 				return m, nil
 			case "consent":
 				state := "off"
@@ -302,12 +333,30 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					)
 				}
 				return m, nil
-			case "scan", "audit", "exploit", "tech", "tls":
-				if len(args) == 0 {
+			case "copy":
+				scope, src := "last output", m.lastOutput
+				if len(args) > 0 && strings.EqualFold(args[0], "all") {
+					scope, src = "full scrollback", m.output
+				}
+				return m, m.copyOutput(src, scope)
+			case "history":
+				lines := m.historyText()
+				m.output = append(m.output, lines...)
+				m.lastOutput = lines
+				return m, nil
+			case "scan", "audit", "tech", "tls":
+				if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 					m.output = append(m.output, lipgloss.NewStyle().Foreground(clCoral).Render("  Missing URL. Usage: "+cmd+" <url>"))
 					return m, nil
 				}
-				return m, m.exec(cmd, args[0])
+				return m, m.exec(cmd, args[0], runOpts{})
+			case "exploit":
+				target, o := parseRunArgs(args)
+				if target == "" {
+					m.output = append(m.output, lipgloss.NewStyle().Foreground(clCoral).Render("  Missing URL. Usage: exploit <url> [--creds u:p] [--cookie n=v] [--idor 1-50] [--all]"))
+					return m, nil
+				}
+				return m, m.exec("exploit", target, o)
 			default:
 				m.output = append(m.output, lipgloss.NewStyle().Foreground(clCoral).Render("  Unknown command: "+cmd))
 				m.output = append(m.output, lipgloss.NewStyle().Foreground(clMuted).Render("  Type 'help' for available commands."))
@@ -316,6 +365,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case cmdResultMsg:
+		m.output = append(m.output, msg...)
+		m.lastOutput = []string(msg)
+		m.scrollOffset = 0
+		return m, nil
+
+	case cmdNoticeMsg:
 		m.output = append(m.output, msg...)
 		m.scrollOffset = 0
 		return m, nil
@@ -400,7 +455,7 @@ func shellTargetScope(target string) (normalized, scope string) {
 	return normalized, scope
 }
 
-func (m *Model) exec(cmd string, target string) tea.Cmd {
+func (m *Model) exec(cmd string, target string, o runOpts) tea.Cmd {
 	return func() tea.Msg {
 		// Interactive targets are user-typed. Bind operator credentials to
 		// that host for this command: the shared shell client must not send
@@ -484,49 +539,88 @@ func (m *Model) exec(cmd string, target string) tea.Cmd {
 			lines = append(m.renderStacks(result.Stacks), m.renderFindings(result.Findings, result.Stats)...)
 
 		case "exploit":
-			opts := exploit.Options{
-				Target:  target,
-				Verbose: m.cfg.Verbose,
+			exp := exploit.New(m.client, exploit.Options{Target: target, Verbose: m.cfg.Verbose})
+			if o.cookie != "" {
+				exp.SetAuthCookie(o.cookie, "shell --cookie")
 			}
-			exp := exploit.New(m.client, opts)
 
 			var expLines []string
 			expLines = append(expLines, "")
+			reqs := 0
 
-			// Same consent model as the CLI: credential spraying and
-			// tampered role POSTs write to the target. Grant it in-session
-			// with "consent on" (or start the shell with --destructive).
-			var sprayReqs int
+			// Login: --creds is one explicit operator-owned attempt; otherwise
+			// the 40-pair spray. Both POST to the target, so they need
+			// in-session consent ("consent on" or start with --destructive).
 			if m.cfg.Destructive {
 				expLines = append(expLines, output.Section("Login Bruteforce"))
-				loginResults := exp.BruteforceLogin(ctx, target, exploit.CommonCredentials)
-				sprayReqs += len(loginResults)
-				for _, r := range loginResults[:min(len(loginResults), 5)] {
-					cl := clMuted
-					sym := "✗"
-					if r.Success {
-						cl = clCoral
-						sym = "✓"
+				switch {
+				case o.creds != "":
+					user, pass, ok := strings.Cut(o.creds, ":")
+					if !ok || user == "" || pass == "" {
+						expLines = append(expLines, output.MutedStyle.Render("  --creds wants user:pass — login skipped"))
+					} else {
+						a := exp.TryLogin(ctx, target, exploit.Credential{User: user, Pass: pass, Desc: "operator-supplied"})
+						if a != nil {
+							reqs++
+							expLines = append(expLines, loginRow(*a))
+							if a.Success && a.SetCookie != "" && exp.AttachHarvestedSession(a.SetCookie, "login "+a.Username) {
+								expLines = append(expLines, output.MutedStyle.Render("  ✓ valid credential — session captured, --access will use it"))
+							}
+						}
 					}
-					// The password NEVER rides the terminal in plaintext, not
-					// even on a verified hit — a working credential is what
-					// most needs keeping out of scrollback and logs. The
-					// operator uses the captured session (--access) to act
-					// on it; the mask proves which pair the differential
-					// accepted without disclosing the secret itself.
-					shown := r.Username
-					if r.Success {
-						shown = r.Username + ":" + types.MaskSecret(r.Password)
+				default:
+					loginResults := exp.BruteforceLogin(ctx, target, exploit.CommonCredentials)
+					reqs += len(loginResults)
+					valid := 0
+					for _, r := range loginResults {
+						if r.Success {
+							valid++
+							expLines = append(expLines, loginRow(r))
+							if r.SetCookie != "" && exp.AttachHarvestedSession(r.SetCookie, "login "+r.Username) {
+								expLines = append(expLines, output.MutedStyle.Render("  ✓ valid credential — session captured (cookie "+exploit.ShortCookie(r.SetCookie)+"), --access will use it"))
+							}
+						}
 					}
-					expLines = append(expLines, lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
-						fmt.Sprintf("  %s %s → %d", sym, shown, r.StatusCode),
-					))
+					expLines = append(expLines, output.MutedStyle.Render(fmt.Sprintf("  %d credential pair(s) tested — %d valid", len(loginResults), valid)))
 				}
-
 				expLines = append(expLines, "")
+			} else {
+				expLines = append(expLines, output.MutedStyle.Render(
+					`  login withheld — state-modifying. Type "consent on" to grant it (then retry, or pass --creds u:p).`,
+				))
+				expLines = append(expLines, "")
+			}
+
+			// Discovered Credential Access: a pair the target itself leaked
+			// (JSON / form / base64 Basic on its login + admin pages), aimed at
+			// its own form through the same differential verdict. Consent-gated.
+			if m.cfg.Destructive {
+				disc := exp.DiscoverCredentialPairs(ctx, target)
+				if len(disc) > 0 {
+					expLines = append(expLines, output.Section("Discovered Credential Access"))
+					proven := 0
+					for _, c := range disc {
+						a := exp.TryLogin(ctx, target, c)
+						shown := types.Sanitize(c.User) + " " + types.MaskSecret(c.Pass)
+						if a != nil && a.Success {
+							proven++
+							expLines = append(expLines, output.MutedStyle.Render(fmt.Sprintf("  ✓ leaked pair VERIFIED (%s → %d): session captured — --access shows what it reaches", shown, a.StatusCode)))
+						} else {
+							expLines = append(expLines, output.MutedStyle.Render(fmt.Sprintf("  ! leaked pair (%s) exposed but not accepted on login — still a reportable leak", shown)))
+						}
+					}
+					if proven == 0 {
+						expLines = append(expLines, output.MutedStyle.Render(fmt.Sprintf("  %d pair(s) discovered; none verified as login-capable", len(disc))))
+					}
+					expLines = append(expLines, "")
+				}
+			}
+
+			// Role / Privilege Escalation (differential, consent-gated).
+			if m.cfg.Destructive {
 				expLines = append(expLines, output.Section("Role / Privilege Escalation"))
 				roleResults := exp.RoleTampering(ctx, target)
-				sprayReqs += len(roleResults)
+				reqs += len(roleResults)
 				found := false
 				for _, r := range roleResults {
 					if !r.Success {
@@ -534,45 +628,51 @@ func (m *Model) exec(cmd string, target string) tea.Cmd {
 					}
 					found = true
 					expLines = append(expLines, lipgloss.NewStyle().Foreground(clCoral).Padding(0, 4).Render(
-						fmt.Sprintf("  ✓ %s=%s %s → %d", r.Parameter, r.Value, r.Method, r.StatusCode),
+						fmt.Sprintf("  ✓ %s=%s %s → %d", types.Sanitize(r.Parameter), types.Sanitize(r.Value), r.Method, r.StatusCode),
 					))
 					if len(expLines) > 20 {
 						break
 					}
 				}
 				if !found {
-					expLines = append(expLines, lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render("  — No privilege escalation found"))
+					expLines = append(expLines, output.MutedStyle.Render("  — no role parameter affected privilege over the control round"))
 				}
-			} else {
-				expLines = append(expLines, output.MutedStyle.Render(
-					`  Login bruteforce and role tampering withheld — state-modifying. Type "consent on" to grant them for this session.`,
-				))
+				expLines = append(expLines, "")
 			}
 
-			expLines = append(expLines, "")
-			expLines = append(expLines, output.Section("IDOR Enumeration"))
-			idorResults := exp.IDOREnumeration(ctx, target, "", 1, 5)
-			// Per-surface modal baseline (mirrors the exploit command): an
-			// absolute "BodySize > 500" heuristic painted ordinary pages coral
-			// as if they were hits. A referent is interesting only when it
-			// differs from the OTHER ids of the SAME endpoint.
+			// IDOR Enumeration (read-only): per-endpoint modal baseline, same
+			// as the exploit command — an absolute size heuristic painted
+			// ordinary pages as hits; a referent matters only vs its OWN endpoint.
+			idorStart, idorEnd := 1, 5
+			if o.all && o.idor == "" {
+				idorEnd = 20
+			}
+			if o.idor != "" {
+				if _, err := fmt.Sscanf(o.idor, "%d-%d", &idorStart, &idorEnd); err != nil {
+					idorStart, idorEnd = 1, 5
+				}
+			}
+			if idorStart <= 0 || idorEnd < idorStart {
+				idorStart, idorEnd = 1, 5
+			}
+			if idorEnd-idorStart+1 > exploit.MaxIDORSpan {
+				idorEnd = idorStart + exploit.MaxIDORSpan - 1
+			}
+			expLines = append(expLines, output.Section(fmt.Sprintf("IDOR Enumeration (%d-%d)", idorStart, idorEnd)))
+			idorResults := exp.IDOREnumeration(ctx, target, "", idorStart, idorEnd)
+			reqs += len(idorResults)
 			surfaceMode := map[string]int{}
 			{
-				type hist struct {
-					counts map[int]int
-				}
-				hists := map[string]*hist{}
+				hists := map[string]map[int]int{}
 				for _, r := range idorResults {
-					h := hists[r.Surface]
-					if h == nil {
-						h = &hist{counts: map[int]int{}}
-						hists[r.Surface] = h
+					if hists[r.Surface] == nil {
+						hists[r.Surface] = map[int]int{}
 					}
-					h.counts[r.BodySize]++
+					hists[r.Surface][r.BodySize]++
 				}
-				for surf, h := range hists {
+				for surf, counts := range hists {
 					best, mode := -1, 0
-					for size, c := range h.counts {
+					for size, c := range counts {
 						if c > best {
 							mode, best = size, c
 						}
@@ -597,8 +697,80 @@ func (m *Model) exec(cmd string, target string) tea.Cmd {
 				))
 			}
 			expLines = append(expLines, "")
+
+			// Token / Session Reuse (read-only): harvest real JWTs and session
+			// cookies, replay them on protected endpoints. An empty harvest is
+			// an honest skip — no placeholder is ever probed.
+			expLines = append(expLines, output.Section("Token / Session Reuse"))
+			tokens, discoveredCookies := exp.DiscoverTokens(ctx, target)
+			if o.cookie != "" {
+				discoveredCookies = append(discoveredCookies, o.cookie)
+			}
+			reuseShown := 0
+			reuseHits := 0
+			for _, r := range exp.TryTokenReuse(ctx, tokens, target) {
+				if reuseShown >= 4 {
+					break
+				}
+				if r.Success {
+					reuseHits++
+				}
+				reuseShown++
+				expLines = append(expLines, renderReuseRow(r))
+			}
+			for _, r := range exp.TrySessionReuse(ctx, discoveredCookies, target) {
+				if reuseShown >= 4 {
+					break
+				}
+				if r.Success {
+					reuseHits++
+				}
+				reuseShown++
+				expLines = append(expLines, renderReuseRow(r))
+			}
+			if reuseShown == 0 {
+				expLines = append(expLines, output.MutedStyle.Render("  — no reusable token or session discovered: nothing to test"))
+			} else {
+				expLines = append(expLines, output.MutedStyle.Render(fmt.Sprintf("  %d token/session replay(s) tested — %d granted access", reuseShown, reuseHits)))
+			}
+			expLines = append(expLines, "")
+
+			// Admin Access Verification (differential): the module that actually
+			// answers "what does this session reach" — replays admin paths anon
+			// vs with the harvested session and reports only REAL gains.
+			expLines = append(expLines, output.Section("Admin Access Verification (differential)"))
+			accessResults := exp.VerifiedAdminAccess(ctx, target)
+			verified := 0
+			sawNoSession := false
+			for _, r := range accessResults {
+				if r.Path == "(no session)" {
+					sawNoSession = true
+					expLines = append(expLines, output.MutedStyle.Render("  ○ "+truncate(r.Evidence, 92)))
+					continue
+				}
+				cl := clMuted
+				status := "○"
+				if r.Success {
+					cl = clCoral
+					status = "✓"
+					verified++
+				}
+				expLines = append(expLines, lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
+					fmt.Sprintf("  %s %s → anon %d / session %d (%s)", status, r.Path, r.Anonymous, r.WithSess, truncate(r.Evidence, 64)),
+				))
+			}
+			if cookie, source := exp.AuthCookie(); cookie != "" {
+				expLines = append(expLines, output.MutedStyle.Render(
+					fmt.Sprintf("  session in use: %s (source: %s)", exploit.ShortCookie(cookie), types.Sanitize(source)),
+				))
+			}
+			if verified == 0 && !sawNoSession {
+				expLines = append(expLines, output.MutedStyle.Render("  — no admin path answered differently with the session: no verified access gain"))
+			}
+
+			expLines = append(expLines, "")
 			expLines = append(expLines, lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render(
-				fmt.Sprintf("  Exploit completed — %d total requests", sprayReqs+len(idorResults)),
+				fmt.Sprintf("  Exploit completed — %d request(s)", reqs),
 			))
 
 			lines = expLines
@@ -806,7 +978,7 @@ func (m *Model) helpText() []string {
 		lines = append(lines, line)
 	}
 	lines = append(lines, "")
-	lines = append(lines, lipgloss.NewStyle().Foreground(clDim).Padding(0, 2).Render("  Navigation:  ↑↓ history  ·  Tab complete  ·  PgUp/PgDn scroll  ·  Ctrl+C quit"))
+	lines = append(lines, lipgloss.NewStyle().Foreground(clDim).Padding(0, 2).Render("  Navigation:  ↑↓ history  ·  Tab complete  ·  PgUp/PgDn scroll  ·  Ctrl+Y / copy: clipboard  ·  Ctrl+C quit"))
 	lines = append(lines, "")
 	return lines
 }
@@ -832,4 +1004,186 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n-1] + "…"
+}
+
+// ── Command history ───────────────────────────────────────────────────────
+
+const maxHistory = 200
+
+// pushHistory records an entered command (deduping an immediate repeat) and
+// parks the recall pointer at the fresh line, so the first ↑ yields the
+// command just run.
+func (m *Model) pushHistory(line string) {
+	if line == "" {
+		return
+	}
+	if n := len(m.history); n > 0 && m.history[n-1] == line {
+		m.histIdx = n
+		return
+	}
+	m.history = append(m.history, line)
+	if len(m.history) > maxHistory {
+		m.history = m.history[len(m.history)-maxHistory:]
+	}
+	m.histIdx = len(m.history)
+}
+
+// recallHistory walks the buffer: dir<0 → older (↑), dir>0 → newer (↓).
+// histIdx==len(history) is the fresh, empty line.
+func (m *Model) recallHistory(dir int) {
+	n := len(m.history)
+	if n == 0 {
+		return
+	}
+	if m.histIdx > n {
+		m.histIdx = n
+	}
+	ni := m.histIdx + dir
+	if ni < 0 {
+		ni = 0
+	}
+	if ni > n {
+		ni = n
+	}
+	m.histIdx = ni
+	if m.histIdx == n {
+		m.input.SetValue("")
+		m.input.SetCursor(0)
+		return
+	}
+	v := m.history[m.histIdx]
+	m.input.SetValue(v)
+	m.input.SetCursor(len(v))
+}
+
+func (m *Model) historyText() []string {
+	if len(m.history) == 0 {
+		return []string{output.MutedStyle.Render("  No commands entered yet.")}
+	}
+	lines := []string{
+		"",
+		lipgloss.NewStyle().Foreground(clName).Bold(true).Padding(0, 2).Render("  Command history (oldest first)"),
+	}
+	for i, h := range m.history {
+		lines = append(lines, lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render(
+			fmt.Sprintf("  %3d  %s", i+1, types.Sanitize(h)),
+		))
+	}
+	lines = append(lines, "")
+	return lines
+}
+
+// ── Clipboard (OSC 52) ────────────────────────────────────────────────────
+
+var rxANSI = regexp.MustCompile("\x1b\\[[0-9;]*[a-zA-Z]|\x1b\\][^\x07]*\x07")
+
+func stripANSI(s string) string { return rxANSI.ReplaceAllString(s, "") }
+
+// writeClipboard emits an OSC 52 copy sequence. The payload is base64 of the
+// text, so no ESC/BEL from the content can break out of the sequence — this is
+// an operator-initiated copy, not remote-influenced text smuggled to the
+// terminal (the attack types Sanitize defends against).
+func writeClipboard(s string) {
+	enc := base64.StdEncoding.EncodeToString([]byte(s))
+	_, _ = os.Stdout.WriteString("\x1b]52;c;" + enc + "\x07")
+}
+
+// copyOutput strips styling from the given block and copies the plain text,
+// reporting how much landed (a terminal without OSC 52 support simply no-ops,
+// so the line count is the honest signal).
+func (m *Model) copyOutput(lines []string, scope string) tea.Cmd {
+	plain := make([]string, 0, len(lines))
+	for _, l := range lines {
+		plain = append(plain, stripANSI(l))
+	}
+	text := strings.TrimRight(strings.Join(plain, "\n"), "\n ")
+	return func() tea.Msg {
+		if strings.TrimSpace(text) == "" {
+			return cmdNoticeMsg([]string{output.MutedStyle.Render("  Nothing to copy yet.")})
+		}
+		writeClipboard(text)
+		return cmdNoticeMsg([]string{output.MutedStyle.Render(
+			fmt.Sprintf("  Copied %s to clipboard (%d line(s), %d bytes).", scope, len(plain), len(text)),
+		)})
+	}
+}
+
+// ── Inline flags + exploit row renderers ──────────────────────────────────
+
+// runOpts carries per-command options parsed from a typed command line so the
+// shell matches the CLI instead of silently dropping everything after the URL.
+type runOpts struct {
+	creds  string
+	cookie string
+	idor   string
+	all    bool
+}
+
+func parseRunArgs(args []string) (string, runOpts) {
+	var target string
+	var o runOpts
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		next := func() (string, bool) {
+			if i+1 < len(args) {
+				v := args[i+1]
+				i++
+				return v, true
+			}
+			return "", false
+		}
+		switch {
+		case a == "--creds":
+			if v, ok := next(); ok {
+				o.creds = v
+			}
+		case strings.HasPrefix(a, "--creds="):
+			o.creds = strings.TrimPrefix(a, "--creds=")
+		case a == "--cookie":
+			if v, ok := next(); ok {
+				o.cookie = v
+			}
+		case strings.HasPrefix(a, "--cookie="):
+			o.cookie = strings.TrimPrefix(a, "--cookie=")
+		case a == "--idor":
+			if v, ok := next(); ok {
+				o.idor = v
+			}
+		case strings.HasPrefix(a, "--idor="):
+			o.idor = strings.TrimPrefix(a, "--idor=")
+		case a == "--all":
+			o.all = true
+		case strings.HasPrefix(a, "-"):
+			// Unknown flag: ignore it rather than mistake it for the target.
+		default:
+			if target == "" {
+				target = a
+			}
+		}
+	}
+	return target, o
+}
+
+func loginRow(r exploit.LoginAttempt) string {
+	cl, sym := clMuted, "✗"
+	if r.Success {
+		cl, sym = clCoral, "✓"
+	}
+	shown := types.Sanitize(r.Username)
+	if r.Success {
+		shown += ":" + types.MaskSecret(r.Password)
+	}
+	return lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
+		fmt.Sprintf("  %s %s → %d", sym, shown, r.StatusCode),
+	)
+}
+
+func renderReuseRow(r exploit.TokenReuseAttempt) string {
+	cl := clMuted
+	if r.Success {
+		cl = clCoral
+	}
+	return lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
+		fmt.Sprintf("  %s %s → %d", types.Sanitize(truncate(r.Token, 40)), types.Sanitize(r.Endpoint), r.StatusCode),
+	)
 }
