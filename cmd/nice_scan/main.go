@@ -669,7 +669,7 @@ func exploitCmd() *cobra.Command {
 
 				for _, r := range valid {
 					fmt.Println(lipgloss.NewStyle().Foreground(clFail).Padding(0, 4).Render(
-						fmt.Sprintf("  ✓ %s:%s → %d (%s)", types.Sanitize(r.Username), types.Sanitize(r.Password), r.StatusCode, truncateStr(r.Evidence, 60)),
+						fmt.Sprintf("  ✓ %s (%s) → %d (%s)", types.Sanitize(r.Username), types.MaskSecret(r.Password), r.StatusCode, truncateStr(r.Evidence, 60)),
 					))
 				}
 				for _, r := range notable {
@@ -706,6 +706,45 @@ func exploitCmd() *cobra.Command {
 					}
 				}
 				fmt.Println()
+			}
+
+			// A credential the TARGET itself leaked is the highest-value login
+			// lead: where a response disclosed a whole user+pass pair, aim it at
+			// the login form through the existing verified path (a couple of real
+			// candidates, never a spray). A proven hit captures a session the
+			// --access differential then uses to show what the credential reaches.
+			// Stateful, so it requires --destructive.
+			if cfg.Destructive {
+				disc := exp.DiscoverCredentialPairs(ctx, target)
+				if len(disc) > 0 {
+					fmt.Println(output.Section("Discovered Credential Access"))
+					proven := 0
+					for _, c := range disc {
+						select {
+						case <-ctx.Done():
+							break
+						default:
+						}
+						shown := types.Sanitize(c.User) + " " + types.MaskSecret(c.Pass)
+						a := exp.TryLogin(ctx, target, c)
+						if a != nil && a.Success {
+							proven++
+							fmt.Println(lipgloss.NewStyle().Foreground(clFail).Padding(0, 4).Render(
+								fmt.Sprintf("  ✓ leaked pair VERIFIED (%s → %d): session captured — re-run --access to see what it reaches", shown, a.StatusCode),
+							))
+						} else {
+							fmt.Println(lipgloss.NewStyle().Foreground(clWarn).Padding(0, 4).Render(
+								fmt.Sprintf("  ! leaked pair (%s) exposed in the target but not accepted on login — still a reportable credential leak", shown),
+							))
+						}
+					}
+					if proven == 0 {
+						fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render(
+							fmt.Sprintf("  %d credential pair(s) discovered; none verified as login-capable", len(disc)),
+						))
+					}
+					fmt.Println()
+				}
 			}
 
 			if runRole {

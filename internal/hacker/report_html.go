@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"html"
 	"time"
+
+	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
 
 func RenderHTMLReport(r *Report) string {
@@ -181,7 +183,7 @@ func RenderHTMLReport(r *Report) string {
       <div class="desc">Source: %s</div>
     </div>
 `,
-				html.EscapeString(c.Username), html.EscapeString(c.Password), valid,
+				html.EscapeString(c.Username), html.EscapeString(types.MaskSecret(c.Password)), valid,
 				html.EscapeString(c.Source),
 			)
 		}

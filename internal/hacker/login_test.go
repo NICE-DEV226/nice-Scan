@@ -209,8 +209,14 @@ func TestLoginSprayFindsRealCredential(t *testing.T) {
 	for _, f := range res.Findings {
 		if f.Type == "login_valid" {
 			found++
-			if !strings.Contains(f.Name, "admin:admin") {
-				t.Fatalf("credential '%s' claimed valid — admin:admin is the only configured pair", f.Name)
+			// The finding must identify WHICH pair the differential
+			// accepted (the username) while masking the secret: a report
+			// artefact must never carry the plaintext password.
+			if !strings.Contains(f.Name, "admin:") {
+				t.Fatalf("credential finding must name the accepted user, got %q", f.Name)
+			}
+			if strings.Contains(f.Name, "admin:admin") || strings.Contains(f.Evidence, "admin:admin") {
+				t.Fatalf("plaintext password leaked into the report finding: name=%q evidence=%q", f.Name, f.Evidence)
 			}
 		}
 	}

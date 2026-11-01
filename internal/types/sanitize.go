@@ -1,6 +1,9 @@
 package types
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // Sanitize is the terminal-safety filter for any remote-influenced text
 // rendered to the operator (finding names, evidence, URLs extracted from
@@ -30,4 +33,16 @@ func Sanitize(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// MaskSecret destroys a credential's value while keeping its length (useful to
+// class it) so a discovered or verified password is never written to the
+// terminal, JSON, or HTML report in plaintext. Only the username is safe to
+// display; pair it with MaskSecret for the value.
+func MaskSecret(v string) string {
+	n := len(strings.TrimSpace(v))
+	if n == 0 {
+		return "<empty>"
+	}
+	return fmt.Sprintf("<masked len=%d>", n)
 }
