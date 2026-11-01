@@ -56,7 +56,7 @@ func NewModel(scanner *engine.Scanner, targets []string) *Model {
 	s.Spinner = spinner.Dot
 
 	p := progress.New(
-		progress.WithDefaultGradient(),
+		progress.WithSolidFill("#7AA6DC"),
 		progress.WithWidth(40),
 		progress.WithoutPercentage(),
 	)
@@ -238,7 +238,7 @@ func (m *Model) renderRunning() string {
 
 func (m *Model) renderHeader() string {
 	logo := output.RenderLogoOneLine()
-	title := titleStyle.Render(logo)
+	name := titleStyle.Render("nice-scan")
 	spinner := m.spinner.View()
 	target := mutedStyle.Render(m.targets[0])
 
@@ -251,7 +251,8 @@ func (m *Model) renderHeader() string {
 	duration := dimStyle.Render(elapsed)
 
 	return lipgloss.JoinHorizontal(lipgloss.Left,
-		title, " ",
+		logo, " ",
+		name, "  ",
 		spinner, " ",
 		target, "  ",
 		duration,
@@ -320,7 +321,7 @@ func (m *Model) renderProgress() string {
 	pctStr := dimStyle.Render(fmt.Sprintf("%3.0f%%", pct*100))
 
 	return lipgloss.JoinHorizontal(lipgloss.Center,
-		progressFull.Render("Progress"),
+		mutedStyle.Render("Progress"),
 		"  ",
 		bar,
 		"  ",

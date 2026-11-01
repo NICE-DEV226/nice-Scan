@@ -1,53 +1,27 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"github.com/NICE-DEV226/nice-Scan/internal/output"
+	"github.com/charmbracelet/lipgloss"
+)
 
+// All surfaces draw from the shared design system (internal/output);
+// this file only wires the few styles the dashboard adds on top.
 var (
-	surfaceBorder = lipgloss.Color("#2F3346")
+	textPrimary = output.Ink
+	textMuted   = output.Muted
+	accentCyan  = output.Accent
 
-	textPrimary = lipgloss.Color("#C0CAF5")
-	textMuted   = lipgloss.Color("#565F89")
-	textDim     = lipgloss.Color("#3B4261")
+	panelStyle = output.PanelStyle
 
-	accentCyan  = lipgloss.Color("#7DCFFF")
-	accentAmber = lipgloss.Color("#FFB347")
-	accentCoral = lipgloss.Color("#F7768E")
+	labelStyle = output.LabelStyle
+	valueStyle = output.ValueStyle
+	mutedStyle = output.MutedStyle
+	dimStyle   = output.FaintStyle
 
-	panelStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(surfaceBorder).
-			Padding(0, 1)
-
-	labelStyle = lipgloss.NewStyle().
-			Foreground(textMuted).
-			Width(10)
-
-	valueStyle = lipgloss.NewStyle().
-			Foreground(textPrimary)
-
-	titleStyle = lipgloss.NewStyle().
-			Foreground(accentCyan).
-			Bold(true)
-
-	mutedStyle = lipgloss.NewStyle().
-			Foreground(textMuted)
-
-	dimStyle = lipgloss.NewStyle().
-			Foreground(textDim)
-
-	progressFull = lipgloss.NewStyle().
-			Foreground(accentCyan)
+	titleStyle = lipgloss.NewStyle().Foreground(textPrimary).Bold(true)
 )
 
 func severityColor(severity string) lipgloss.Color {
-	switch severity {
-	case "critical", "high":
-		return accentCoral
-	case "medium":
-		return accentAmber
-	case "low":
-		return accentCyan
-	default:
-		return textMuted
-	}
+	return output.SeverityColor(severity)
 }

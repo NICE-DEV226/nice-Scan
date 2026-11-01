@@ -91,6 +91,37 @@ func NewExposureAnalyzer() *ExposureAnalyzer {
 				NoHTML:  true,
 				MinSize: 100,
 			},
+			// CRA's /static/js/ path is only ONE of many bundle layouts; a Vue/
+			// Vite/Webpack app serves maps at the root or under /dist and
+			// /assets. Probing only the CRA path missed essentially every
+			// non-React app, so the same proof-gated map pattern is repeated
+			// for the other common locations.
+			{
+				Name:        "Exposed Source Map",
+				Severity:    types.SeverityHigh,
+				Description: "Source map file is accessible, exposing application source code",
+				Path:        "/main.js.map",
+				StatusCodes: []int{200},
+				BodyPattern: []*regexp.Regexp{
+					regexp.MustCompile(`"version"`),
+					regexp.MustCompile(`"sources"`),
+				},
+				NoHTML:  true,
+				MinSize: 100,
+			},
+			{
+				Name:        "Exposed Source Map",
+				Severity:    types.SeverityHigh,
+				Description: "Source map file is accessible, exposing application source code",
+				Path:        "/assets/index.js.map",
+				StatusCodes: []int{200},
+				BodyPattern: []*regexp.Regexp{
+					regexp.MustCompile(`"version"`),
+					regexp.MustCompile(`"sources"`),
+				},
+				NoHTML:  true,
+				MinSize: 100,
+			},
 			{
 				Name:        "Directory Listing Enabled",
 				Severity:    types.SeverityMedium,

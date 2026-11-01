@@ -61,22 +61,24 @@ func displayV() string {
 
 func init() {
 	version = displayVersion()
+	output.Version = version
 }
 
-var clCyan = lipgloss.Color("#7DCFFF")
-var clMuted = lipgloss.Color("#565F89")
-var clPrimary = lipgloss.Color("#C0CAF5")
+// Chrome styles are the shared design system (internal/output); these
+// aliases keep the local call sites readable.
+var (
+	clMuted = output.Muted
+	clFail  = output.Fail
+	clWarn  = output.Warn
+)
 
 func main() {
 	root := &cobra.Command{
 		Use:   "nice_scan",
 		Short: "Fast. Precise. Intelligent. — Modern Security Reconnaissance Engine",
-		Long: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Render(`
-  ╭──────────────────────────────────────────────╮
-  │              NICE_SCAN v` + version + `               │
-  │      Fast. Precise. Intelligent.            │
-  │      Modern Security Reconnaissance Engine   │
-  ╰──────────────────────────────────────────────╯`),
+		Long: `
+  nice-scan ` + version + `
+  Fast. Precise. Intelligent. — Modern Security Reconnaissance Engine`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
@@ -105,27 +107,20 @@ func main() {
 				return nil
 			}
 			fmt.Println()
-			fmt.Println(lipgloss.NewStyle().Foreground(clCyan).Bold(true).Render("  NICE_SCAN v" + version))
-			fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Render("  Fast. Precise. Intelligent."))
+			fmt.Println(output.RenderLogoCompact())
+			fmt.Println("  " + output.Rule(52))
 			fmt.Println()
-			fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Render("  Quick Start:"))
+			fmt.Println(output.Section("Quick start"))
 			fmt.Println()
-			fmt.Printf("  %s  %s\n",
-				lipgloss.NewStyle().Foreground(clPrimary).Render("nice_scan hack example.com"),
-				lipgloss.NewStyle().Foreground(clMuted).Render("— Autonomous hack agent (try this first!)"),
-			)
-			fmt.Printf("  %s  %s\n",
-				lipgloss.NewStyle().Foreground(clPrimary).Render("nice_scan scan example.com --json"),
-				lipgloss.NewStyle().Foreground(clMuted).Render("— Full recon scan with JSON output"),
-			)
-			fmt.Printf("  %s  %s\n",
-				lipgloss.NewStyle().Foreground(clPrimary).Render("nice_scan hack example.com -R report.html"),
-				lipgloss.NewStyle().Foreground(clMuted).Render("— Hack + HTML report"),
-			)
-			fmt.Printf("  %s  %s\n",
-				lipgloss.NewStyle().Foreground(clPrimary).Render("nice_scan --help"),
-				lipgloss.NewStyle().Foreground(clMuted).Render("— All commands and flags"),
-			)
+			quickStart := [][2]string{
+				{"nice_scan hack example.com", "autonomous recon + exploitation agent"},
+				{"nice_scan scan example.com --json", "full scan, JSON for pipelines"},
+				{"nice_scan hack example.com -R report.html", "agent + HTML report"},
+				{"nice_scan --help", "all commands and flags"},
+			}
+			for _, q := range quickStart {
+				fmt.Printf("  %s\n      %s\n", output.ValueStyle.Render(q[0]), output.MutedStyle.Render(q[1]))
+			}
 			fmt.Println()
 			return cmd.Help()
 		},
@@ -285,7 +280,7 @@ checksum-verified only, and says so.`,
 			fmt.Printf("  Updated nice_scan → %s\n", rel.TagName)
 			fmt.Printf("  Installed at %s (previous binary kept as %s for rollback)\n", installed, backup)
 			fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Render("  Verified: sha256 against the release's published checksums. The GPG-signed chain (pinned fingerprint) remains on the installer path."))
-			fmt.Println(lipgloss.NewStyle().Foreground(clCyan).Render("  Restart nice_scan to run the new version."))
+			fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Render("  Restart nice_scan to run the new version."))
 			return nil
 		},
 	}
@@ -369,7 +364,7 @@ func scanCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "scan [target]",
 		Short: "Full reconnaissance scan (passive + active checks)",
-		Long:  "Complete scan: fingerprinting, header analysis, TLS, exposures, SQLi, XSS, CORS, HTTP methods, token extraction, auth detection, privilege escalation, data extraction. Generates ~50 requests. Use -R for HTML report.",
+		Long:  "Complete scan: reads the target stack from its homepage FIRST, then fires only probes that stack makes sense for (a Python server never gets /phpinfo.php or /wp-login.php), plus header analysis, TLS, exposures, SQLi, XSS, CORS, HTTP methods, token extraction, auth detection, privilege escalation, data extraction. Generates ~50 requests. Use -R for HTML report.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := normalizeTarget(args[0])
@@ -434,7 +429,7 @@ func scanCmd() *cobra.Command {
 					return fmt.Errorf("failed to write report: %w", err)
 				}
 				fmt.Println()
-				fmt.Println(lipgloss.NewStyle().Foreground(clCyan).Render("  Report saved: " + reportFile))
+				fmt.Println(output.MutedStyle.Render("  Report saved: ") + output.ValueStyle.Render(reportFile))
 			}
 
 			return nil
@@ -495,7 +490,7 @@ func auditCmd() *cobra.Command {
 					return fmt.Errorf("failed to write report: %w", err)
 				}
 				fmt.Println()
-				fmt.Println(lipgloss.NewStyle().Foreground(clCyan).Render("  Full audit report: " + reportFile))
+				fmt.Println(output.MutedStyle.Render("  Full audit report: ") + output.ValueStyle.Render(reportFile))
 			}
 
 			return nil
@@ -513,19 +508,24 @@ func exploitCmd() *cobra.Command {
 		resetPass    bool
 		sessionFix   bool
 		accessVerify bool
+		credsFeed    string
 		allModules   bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "exploit [target]",
 		Short: "Active exploitation: login brute, IDOR, privesc, token, register, reset, session",
-		Long: lipgloss.NewStyle().Foreground(clMuted).Render(`
-  Active exploitation. With NO module flag, the full read-only chain runs,
+		Long: `
+  Active exploitation. With NO module flag, the safe chain runs,
   in the order a real attack would:
 
-    login (40 common credentials) → token/session reuse on protected
-    endpoints → role/privilege tampering (differential) → admin access
+    token/session reuse on protected endpoints → admin access
     verification (anonymous vs session).
+
+  State-writing modules are consent-gated: the 40-pair login spray and
+  differential role tampering POST to the target (a spray can lock real
+  accounts) and run only under --destructive — or, for the login, with
+  --creds user:pass as one explicit operator-owned attempt.
 
   Verification rule everywhere: differential evidence or nothing — a row
   with ✓ means the server actually served something the anonymous round
@@ -533,19 +533,23 @@ func exploitCmd() *cobra.Command {
   the one action that would produce one.
 
   Extras (opt-in, the default chain already covers the common run):
+    --login            40-pair credential spray (requires --destructive)
+    --role             differential role tampering (requires --destructive)
     --register         create an account, log in with it, harvest the session
                        (state-modifying: requires --destructive consent)
     --idor 1-100       numeric ID enumeration (query + path)
     --reset            password-reset probing (user enumeration / token leaks)
     --session          session fixation checks
-    --login/--role/--token/--access
-                                       force a single module alone
-    --all              everything (read-only parts; --register stays
-                       behind --destructive)
+    --token/--access   force a single read-only module alone
+    --all              every module this command can run safely
+                       (--login/--role/--register still need --destructive)
     --cookie "n=v"     feed your own session instead of finding one
+    --creds "u:p"      feed your own credential: one login attempt, one
+                       differential verdict, then the session feeds the
+                       access verification automatically
 
   Only use on authorized targets.
-`),
+`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := normalizeTarget(args[0])
@@ -586,48 +590,107 @@ func exploitCmd() *cobra.Command {
 			ctx, cancel := signalContext()
 			defer cancel()
 
-			fmt.Println(lipgloss.NewStyle().Foreground(clCyan).Bold(true).Padding(0, 2).Render("  Exploitation Results"))
+			fmt.Println(output.Section("Exploitation"))
 			fmt.Println()
 
 			runLogin := loginBrute || allModules
 			runRole := roleTamper || allModules
 			runToken := tokenReuse || allModules
 			runIdor := idorRange != "" || allModules
+			// Credential spraying and role tampering POST state to the
+			// target (a spray can lock real accounts; tampered rounds hit
+			// register/update forms as admin). The default chain no longer
+			// fires them silently — they require --destructive consent.
+			// An operator-fed --creds is explicit single-attempt consent.
+			if runLogin && !cfg.Destructive && credsFeed == "" {
+				fmt.Println(lipgloss.NewStyle().Foreground(clWarn).Render(
+					"  ⚠ login spray skipped: 40-pair brute force can lock real accounts. Re-run with --destructive, or --creds user:pass for one explicit attempt.",
+				))
+				runLogin = false
+			}
+			if runRole && !cfg.Destructive {
+				fmt.Println(lipgloss.NewStyle().Foreground(clWarn).Render(
+					"  ⚠ role tampering skipped: tampered POSTs write to the target. Re-run with --destructive to consent.",
+				))
+				runRole = false
+			}
 			// Account registration and password-reset testing write state
 			// to the target (accounts created, reset flows exercised).
 			// They ship ONLY under --destructive consent — --all does not
 			// silently include them.
 			runRegister := registerAcc && cfg.Destructive
 			if registerAcc && !cfg.Destructive {
-				fmt.Println(lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Render(
-					"  ⛔ --register refused: creating accounts is state-modifying. Re-run with --destructive to consent.",
+				fmt.Println(lipgloss.NewStyle().Foreground(clWarn).Render(
+					"  ⚠ --register refused: creating accounts is state-modifying. Re-run with --destructive to consent.",
 				))
 			}
-			runReset := resetPass || allModules
+			runReset := resetPass && cfg.Destructive
+			if resetPass && !cfg.Destructive {
+				fmt.Println(lipgloss.NewStyle().Foreground(clWarn).Render(
+					"  ⚠ --reset refused: password-reset flows send live emails and mint state on the target. Re-run with --destructive to consent.",
+				))
+			}
 			runSession := sessionFix || allModules
 
-			if runLogin {
-				fmt.Println(lipgloss.NewStyle().Foreground(clPrimary).Padding(0, 2).Render("  🔑 Login Bruteforce"))
-				results := exp.BruteforceLogin(ctx, target, exploit.CommonCredentials)
-				displayCount := 0
-				for _, r := range results {
-					if displayCount >= 15 {
-						fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render(fmt.Sprintf("  … and %d more", len(results)-displayCount)))
-						break
-					}
-					cl := lipgloss.Color("#565F89")
-					status := "✗"
-					if r.Success {
-						cl = lipgloss.Color("#F7768E")
-						status = "✓"
-					}
-					fmt.Println(lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
-						fmt.Sprintf("  %s %s:%s → %d (%s)", status, types.Sanitize(r.Username), types.Sanitize(r.Password), r.StatusCode, truncateStr(r.Evidence, 50)),
-					))
-					displayCount++
+			// Operator-supplied credential: when the operator already
+			// owns an account, the 40-pair spray is pure noise — one
+			// attempt, one differential verdict, one session.
+			var creds = exploit.CommonCredentials
+			if credsFeed != "" {
+				user, pass, _ := strings.Cut(credsFeed, ":")
+				if user != "" && pass != "" {
+					creds = []exploit.Credential{{User: user, Pass: pass, Desc: "operator-supplied"}}
+				} else {
+					return fmt.Errorf("--creds expects user:pass form, got %q", credsFeed)
 				}
-				if len(results) == 0 {
-					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render("  — No login forms found or all failed"))
+			}
+
+			if runLogin {
+				fmt.Println(output.Section("Login Bruteforce"))
+				results := exp.BruteforceLogin(ctx, target, creds)
+
+				var valid []exploit.LoginAttempt
+				var notable []exploit.LoginAttempt
+				for _, r := range results {
+					if r.Success {
+						valid = append(valid, r)
+						continue
+					}
+					// Operationally interesting failures: the spray never
+					// ran or no verdict was possible — the operator needs
+					// to see those; per-pair « invalid » rows add nothing.
+					if strings.Contains(r.Evidence, "skipped") ||
+						strings.Contains(r.Evidence, "baseline could not be established") ||
+						strings.Contains(r.Evidence, "verdict withheld") ||
+						strings.Contains(r.Evidence, "no failure baseline") {
+						notable = append(notable, r)
+					}
+				}
+
+				for _, r := range valid {
+					fmt.Println(lipgloss.NewStyle().Foreground(clFail).Padding(0, 4).Render(
+						fmt.Sprintf("  ✓ %s:%s → %d (%s)", types.Sanitize(r.Username), types.Sanitize(r.Password), r.StatusCode, truncateStr(r.Evidence, 60)),
+					))
+				}
+				for _, r := range notable {
+					fmt.Println(lipgloss.NewStyle().Foreground(clWarn).Padding(0, 4).Render(
+						fmt.Sprintf("  ! %s (%s)", truncateStr(r.Evidence, 78), truncateStr(r.FormURL, 40)),
+					))
+				}
+
+				switch {
+				case len(valid) > 0:
+					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render(
+						fmt.Sprintf("  %d credential pair(s) tested — %d valid", len(results), len(valid)),
+					))
+				case len(notable) > 0:
+					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render(
+						fmt.Sprintf("  %d pair(s) considered — none verified valid (details above)", len(results)),
+					))
+				default:
+					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render(
+						fmt.Sprintf("  %d invalid", len(results)),
+					))
 				}
 				// A differential-verified credential is worth its session:
 				// the harvested cookie feeds the access modules so they
@@ -635,7 +698,7 @@ func exploitCmd() *cobra.Command {
 				for _, r := range results {
 					if r.Success && r.SetCookie != "" {
 						if exp.AttachHarvestedSession(r.SetCookie, "login "+r.Username) {
-							fmt.Println(lipgloss.NewStyle().Foreground(lipgloss.Color("#F7768E")).Padding(0, 4).Render(
+							fmt.Println(lipgloss.NewStyle().Foreground(clFail).Padding(0, 4).Render(
 								fmt.Sprintf("  ✓ valid credential — session captured (cookie %s), re-run --access to verify admin access with it", types.Sanitize(exploit.ShortCookie(r.SetCookie))),
 							))
 						}
@@ -646,37 +709,36 @@ func exploitCmd() *cobra.Command {
 			}
 
 			if runRole {
-				fmt.Println(lipgloss.NewStyle().Foreground(clPrimary).Padding(0, 2).Render("  ⬆️  Role / Privilege Escalation"))
+				fmt.Println(output.Section("Role / Privilege Escalation"))
 				results := exp.RoleTampering(ctx, target)
-				found := false
-				displayCount := 0
+
+				var lifts []exploit.RoleResult
 				for _, r := range results {
-					if !r.Success && displayCount >= 10 {
-						continue
-					}
-					if displayCount >= 20 {
-						break
-					}
-					cl := lipgloss.Color("#565F89")
-					status := "✗"
 					if r.Success {
-						cl = lipgloss.Color("#F7768E")
-						status = "✓"
-						found = true
+						lifts = append(lifts, r)
 					}
-					fmt.Println(lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
-						fmt.Sprintf("  %s %s=%s %s → %d (%s)", status, types.Sanitize(r.Parameter), types.Sanitize(r.Value), r.Method, r.StatusCode, truncateStr(r.Evidence, 50)),
-					))
-					displayCount++
 				}
-				if !found {
-					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render("  — No privilege escalation found"))
+
+				for _, r := range lifts {
+					fmt.Println(lipgloss.NewStyle().Foreground(clFail).Padding(0, 4).Render(
+						fmt.Sprintf("  ✓ %s=%s %s → %d (%s)", types.Sanitize(r.Parameter), types.Sanitize(r.Value), r.Method, r.StatusCode, truncateStr(r.Evidence, 66)),
+					))
+				}
+
+				if len(lifts) > 0 {
+					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render(
+						fmt.Sprintf("  %d tamper round(s) — %d lifted privileges over the control round", len(results), len(lifts)),
+					))
+				} else {
+					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render(
+						fmt.Sprintf("  — %d tamper rounds tested against a control round: no response differed — no role parameter affected privilege on this target", len(results)),
+					))
 				}
 				fmt.Println()
 			}
 
 			if runToken {
-				fmt.Println(lipgloss.NewStyle().Foreground(clPrimary).Padding(0, 2).Render("  🎫 Token / Session Reuse"))
+				fmt.Println(output.Section("Token / Session Reuse"))
 
 				// Real discovery first: JWTs harvested from reachable
 				// pages and session cookies from Set-Cookie headers.
@@ -693,9 +755,9 @@ func exploitCmd() *cobra.Command {
 					if displayCount >= 8 {
 						break
 					}
-					cl := lipgloss.Color("#565F89")
+					cl := clMuted
 					if r.Success {
-						cl = lipgloss.Color("#F7768E")
+						cl = clFail
 					}
 					fmt.Println(lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
 						fmt.Sprintf("  %s %s → %d (%s)", types.Sanitize(r.Token), types.Sanitize(r.Endpoint), r.StatusCode, truncateStr(r.Evidence, 50)),
@@ -706,9 +768,9 @@ func exploitCmd() *cobra.Command {
 					if displayCount >= 8 {
 						break
 					}
-					cl := lipgloss.Color("#565F89")
+					cl := clMuted
 					if r.Success {
-						cl = lipgloss.Color("#F7768E")
+						cl = clFail
 					}
 					fmt.Println(lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
 						fmt.Sprintf("  %s %s → %d (%s)", types.Sanitize(r.Token), types.Sanitize(r.Endpoint), r.StatusCode, truncateStr(r.Evidence, 50)),
@@ -725,47 +787,106 @@ func exploitCmd() *cobra.Command {
 
 			if runIdor {
 				var startID, endID int
-				_, _ = fmt.Sscanf(idorRange, "%d-%d", &startID, &endID)
+				if _, err := fmt.Sscanf(idorRange, "%d-%d", &startID, &endID); err != nil {
+					// An empty range means IDOR ran as part of --all, not a
+					// malformed operator flag — say so instead of scolding
+					// about an "" the operator never typed.
+					if idorRange == "" {
+						startID, endID = 1, 10
+					} else {
+						fmt.Printf("  invalid --idor range %q (want N-M integers), using 1-10\n", idorRange)
+						startID, endID = 1, 10
+					}
+				}
 				if startID <= 0 || endID <= 0 {
 					startID, endID = 1, 10
 				}
-				fmt.Println(lipgloss.NewStyle().Foreground(clPrimary).Padding(0, 2).Render(fmt.Sprintf("  🔢 IDOR Enumeration (%d-%d)", startID, endID)))
+				if endID < startID {
+					startID, endID = endID, startID
+				}
+				if endID-startID+1 > exploit.MaxIDORSpan {
+					fmt.Printf("  range clamped to %d IDs (MaxIDORSpan): %d-%d\n",
+						exploit.MaxIDORSpan, startID, startID+exploit.MaxIDORSpan-1)
+					endID = startID + exploit.MaxIDORSpan - 1
+				}
+				fmt.Println(output.Section(fmt.Sprintf("IDOR Enumeration (%d-%d)", startID, endID)))
 				results := exp.IDOREnumeration(ctx, target, "", startID, endID)
-				baseline := 0
-				if len(results) > 0 {
-					baseline = results[0].BodySize
+
+				// Per-surface differential, not one global baseline. The old
+				// code compared every row — "/users/?id=2" AND "/order/?id=1"
+				// alike — against results[0], so two different endpoints with
+				// naturally different page sizes screamed "divergent". Group
+				// by Surface, take each surface's MOST COMMON size as its
+				// reference (an IDOR leak is a minority row, so the mode is
+				// the honest baseline), and flag only rows that differ from
+				// their OWN endpoint's mode.
+				type surfaceStat struct {
+					counts map[int]int
+					refs   []exploit.IDORResult
 				}
-				displayCount := 0
+				surfaces := map[string]*surfaceStat{}
+				var order []string
 				for _, r := range results {
-					if displayCount >= 25 {
-						fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render(fmt.Sprintf("  … and %d more", len(results)-displayCount)))
-						break
+					s := r.Surface
+					if s == "" {
+						s = r.ParamType + ":" + fmt.Sprintf("%d", r.ID)
 					}
-					cl := lipgloss.Color("#565F89")
-					diff := ""
-					if baseline > 0 && abs(r.BodySize-baseline) > 100 {
-						cl = lipgloss.Color("#F7768E")
-						diff = fmt.Sprintf(" ← DIFF: %d bytes", abs(r.BodySize-baseline))
+					st := surfaces[s]
+					if st == nil {
+						st = &surfaceStat{counts: map[int]int{}}
+						surfaces[s] = st
+						order = append(order, s)
 					}
-					fmt.Println(lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
-						fmt.Sprintf("  %s %s=%d → %d (%d bytes%s)", r.ParamType, extractIDORParam(r.URL), r.ID, r.StatusCode, r.BodySize, diff),
-					))
-					displayCount++
+					st.counts[r.BodySize]++
+					st.refs = append(st.refs, r)
 				}
-				if len(results) == 0 {
-					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render("  — No IDOR results"))
+
+				totalDivergent := 0
+				totalSurfaces := len(order)
+				for _, s := range order {
+					st := surfaces[s]
+					if len(st.refs) < 2 {
+						continue
+					}
+					baseline, best := 0, -1
+					for size, c := range st.counts {
+						if c > best {
+							baseline, best = size, c
+						}
+					}
+					for _, r := range st.refs {
+						if abs(r.BodySize-baseline) > 100 {
+							totalDivergent++
+							fmt.Println(lipgloss.NewStyle().Foreground(clFail).Padding(0, 4).Render(
+								fmt.Sprintf("  ? %s id=%d → %d (%d bytes, mode %d, diff %d) — this referent answers differently from its own endpoint; follow it",
+									types.Sanitize(r.Surface), r.ID, r.StatusCode, r.BodySize, baseline, abs(r.BodySize-baseline)),
+							))
+						}
+					}
+				}
+
+				if totalSurfaces == 0 || len(results) == 0 {
+					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render(
+						"  — enumeration produced no responses to compare (target unreachable for every probed referent)"))
+				} else if totalDivergent == 0 {
+					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render(
+						fmt.Sprintf("  — %d request(s) across %d endpoint(s): within every endpoint all referents returned the same size — the identifier is ignored or consistently authorized; no IDOR candidate",
+							len(results), totalSurfaces)))
+				} else {
+					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render(
+						fmt.Sprintf("  — %d referent(s) diverged from their own endpoint's modal size — listed above as candidates (compare the bodies before trusting a hit)", totalDivergent)))
 				}
 				fmt.Println()
 			}
 
 			if runRegister {
-				fmt.Println(lipgloss.NewStyle().Foreground(clPrimary).Padding(0, 2).Render("  📝 Account Registration"))
+				fmt.Println(output.Section("Account Registration"))
 				results := exp.RegisterAccount(ctx, target)
 				for _, r := range results {
-					cl := lipgloss.Color("#565F89")
+					cl := clMuted
 					status := "✗"
 					if r.Success {
-						cl = lipgloss.Color("#F7768E")
+						cl = clFail
 						status = "✓"
 					}
 					fmt.Println(lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
@@ -780,7 +901,7 @@ func exploitCmd() *cobra.Command {
 				// differential verdict as the bruteforce) and its session
 				// feeds --access. Say what happened, never silently.
 				if cookie, source := exp.AuthCookie(); cookie != "" && strings.HasPrefix(source, "login ") {
-					fmt.Println(lipgloss.NewStyle().Foreground(lipgloss.Color("#F7768E")).Padding(0, 4).Render(
+					fmt.Println(lipgloss.NewStyle().Foreground(clFail).Padding(0, 4).Render(
 						fmt.Sprintf("  ✓ registered account logged in — session captured (cookie %s)", types.Sanitize(exploit.ShortCookie(cookie))),
 					))
 				}
@@ -788,34 +909,40 @@ func exploitCmd() *cobra.Command {
 			}
 
 			if runReset {
-				fmt.Println(lipgloss.NewStyle().Foreground(clPrimary).Padding(0, 2).Render("  🔐 Password Reset"))
+				fmt.Println(output.Section("Password Reset"))
 				results := exp.ExploitPasswordReset(ctx, target)
+				vuln := 0
 				for _, r := range results {
-					cl := lipgloss.Color("#565F89")
-					status := "○"
-					if r.Vulnerable {
-						cl = lipgloss.Color("#F7768E")
-						status = "⚠"
+					if !r.Vulnerable {
+						continue
 					}
-					fmt.Println(lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
-						fmt.Sprintf("  %s %s → %d (%s)", status, types.Sanitize(r.Identifier), r.StatusCode, truncateStr(r.Evidence, 50)),
+					vuln++
+					fmt.Println(lipgloss.NewStyle().Foreground(clFail).Padding(0, 4).Render(
+						fmt.Sprintf("  ⚠ %s → %d (%s)", types.Sanitize(r.Identifier), r.StatusCode, truncateStr(r.Evidence, 66)),
 					))
 				}
-				if len(results) == 0 {
-					fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render(
-						"  — " + exp.ResetProbeReport()))
+				summary := clMuted
+				switch {
+				case len(results) == 0:
+					fmt.Println(lipgloss.NewStyle().Foreground(summary).Padding(0, 4).Render("  — " + exp.ResetProbeReport()))
+				case vuln > 0:
+					fmt.Println(lipgloss.NewStyle().Foreground(summary).Padding(0, 4).Render(
+						fmt.Sprintf("  — %d probe(s) sent — %d showed a reset-surface vulnerability (enumeration split or token leak)", len(results), vuln)))
+				default:
+					fmt.Println(lipgloss.NewStyle().Foreground(summary).Padding(0, 4).Render(
+						fmt.Sprintf("  — %d probe(s) sent — none showed an enumeration split, token leak or vulnerable response", len(results))))
 				}
 				fmt.Println()
 			}
 
 			if runSession {
-				fmt.Println(lipgloss.NewStyle().Foreground(clPrimary).Padding(0, 2).Render("  🍪 Session Fixation"))
-				results := exp.TestSessionFixation(ctx, target)
+				fmt.Println(output.Section("Session Hardening (fixation needs a credentialed login — not tested)"))
+				results := exp.TestSessionHardening(ctx, target)
 				for _, r := range results {
-					cl := lipgloss.Color("#565F89")
+					cl := clMuted
 					status := "○"
 					if r.Vulnerable {
-						cl = lipgloss.Color("#F7768E")
+						cl = clFail
 						status = "⚠"
 					}
 					fmt.Println(lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
@@ -835,7 +962,7 @@ func exploitCmd() *cobra.Command {
 			// or states plainly that nothing was verified.
 			runAccess := accessVerify || allModules
 			if runAccess {
-				fmt.Println(lipgloss.NewStyle().Foreground(clPrimary).Padding(0, 2).Render("  🔓 Admin Access Verification (differential)"))
+				fmt.Println(output.Section("Admin Access Verification (differential)"))
 				results := exp.VerifiedAdminAccess(ctx, target)
 				verified := 0
 				sawNoSession := false
@@ -849,10 +976,10 @@ func exploitCmd() *cobra.Command {
 						))
 						continue
 					}
-					cl := lipgloss.Color("#565F89")
+					cl := clMuted
 					status := "○"
 					if r.Success {
-						cl = lipgloss.Color("#F7768E")
+						cl = clFail
 						status = "✓"
 						verified++
 					}
@@ -877,14 +1004,15 @@ func exploitCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&loginBrute, "login", false, "Bruteforce common credentials against login forms")
+	cmd.Flags().BoolVar(&loginBrute, "login", false, "Bruteforce common credentials against login forms (--destructive required; spray can lock accounts)")
 	cmd.Flags().StringVar(&idorRange, "idor", "", "IDOR enumeration range (e.g. 1-100)")
-	cmd.Flags().BoolVar(&roleTamper, "role", false, "Test role/privilege escalation via params + headers (differential vs control)")
+	cmd.Flags().BoolVar(&roleTamper, "role", false, "Test role/privilege escalation via params + headers (--destructive required; tampered POSTs)")
 	cmd.Flags().BoolVar(&tokenReuse, "token", false, "Reuse JWT/session tokens on protected endpoints")
 	cmd.Flags().BoolVar(&registerAcc, "register", false, "Attempt account registration with various payloads (--destructive required; successful accounts are logged in to harvest a session)")
 	cmd.Flags().BoolVar(&resetPass, "reset", false, "Test password reset for user enumeration + token leaks")
-	cmd.Flags().BoolVar(&sessionFix, "session", false, "Test session fixation and cookie security")
+	cmd.Flags().BoolVar(&sessionFix, "session", false, "Inspect session cookie issuance on login surfaces (flags, ID entropy) — fixation itself needs --creds")
 	cmd.Flags().BoolVar(&accessVerify, "access", false, "Replay admin paths anonymously vs with the session — differential access verification")
+	cmd.Flags().StringVar(&credsFeed, "creds", "", "Log in with one known credential instead of the 40-pair spray (user:pass); its harvested session feeds --access")
 	cmd.Flags().BoolVar(&allModules, "all", false, "Run all exploitation modules")
 
 	return cmd
@@ -894,19 +1022,21 @@ func hackCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "hack [target]",
 		Short: "Autonomous hacker — Decision Engine chains attacks automatically",
-		Long: lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render(`
-  NICE HACKER — fully autonomous attack agent. The Decision Engine:
+		Long: `
+  Autonomous attack agent — the Decision Engine:
   1. Passive recon (crt.sh, Wayback) — discover subdomains
   2. Crawl — discover pages, forms, endpoints, JS files
   3. Fuzz — hidden endpoints and parameter discovery
   4. Port scan — TCP connect on top 100 ports
-  5. Attack modules — JWT forge, SQLi, XSS, LFI, CMD injection, upload
-  6. Login bruteforce — 40 common credentials against discovered forms
-  7. GraphQL introspection + mutation fuzzing
-  8. S3 bucket enumeration
-  9. OOB callback server for blind detection
-  10. Attack chain detection + execution
-  11. Complete attack report (terminal + HTML with -R)
+  5. Attack modules — JWT forge, SQLi, XSS, LFI detection
+  6. GraphQL introspection, S3 bucket enumeration, OOB callbacks
+  7. Attack chain detection + execution
+  8. Complete attack report (terminal + HTML with -R)
+
+  State-writing modules — login bruteforce, cmd injection, uploads,
+  webshell, SQLi/LFI/S3 data dumps, GraphQL mutation fuzzing — are
+  withheld unless you grant --destructive consent. The report lists
+  exactly what was withheld; nothing vanishes silently.
 
   This is an offensive tool — only use on authorized targets.
 
@@ -914,17 +1044,16 @@ func hackCmd() *cobra.Command {
     nice_scan hack example.com
     nice_scan hack https://example.com -R report.html
     nice_scan hack example.com --timeout 10s
-`),
+    nice_scan hack example.com --destructive   # consent to state-writing
+`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				fmt.Println()
-				fmt.Println(lipgloss.NewStyle().Foreground(clCyan).Bold(true).Render("  NICE HACKER"))
-				fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Render("  Autonomous attack agent — Decision Engine"))
+				fmt.Println(output.Section("Autonomous attack agent — Decision Engine"))
+				fmt.Println(output.MutedStyle.Render("  Usage:  nice_scan hack <target> [flags]"))
 				fmt.Println()
-				fmt.Println(lipgloss.NewStyle().Foreground(clMuted).Render("  Usage:  nice_scan hack <target> [flags]"))
-				fmt.Println()
-				fmt.Printf("  %s\n", lipgloss.NewStyle().Foreground(clPrimary).Render("  nice_scan hack example.com"))
-				fmt.Printf("  %s\n", lipgloss.NewStyle().Foreground(clPrimary).Render("  nice_scan hack https://example.com --timeout 10s -R report.html"))
+				fmt.Printf("  %s\n", output.ValueStyle.Render("nice_scan hack example.com"))
+				fmt.Printf("  %s\n", output.ValueStyle.Render("nice_scan hack https://example.com --timeout 10s -R report.html"))
 				fmt.Println()
 				return fmt.Errorf("target argument required")
 			}
@@ -943,16 +1072,16 @@ func hackCmd() *cobra.Command {
 			renderer.RenderBanner()
 
 			if cfg.Destructive {
-				fmt.Println(lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Bold(true).Render(
-					"  ⚠ DESTRUCTIVE MODE — state-modifying actions enabled (cmd injection, shell upload). Against the target.",
+				fmt.Println(lipgloss.NewStyle().Foreground(clFail).Render(
+					"  ⚠ destructive mode — state-modifying actions enabled (cmd injection, shell upload, credential spray, data dumps)",
 				))
 			}
 
 			brain := hacker.NewBrain(target, client, defaultHackActions(cfg)...)
-			if cfg.Destructive {
-				brain.AppendAction(&hacker.CMDInjectAction{})
-				brain.AppendAction(&hacker.UploadAction{})
-			}
+			// Destructive modules are always registered; consent is enforced
+			// at dispatch, so runtime-spawned ones are covered too.
+			brain.AppendAction(&hacker.CMDInjectAction{}, &hacker.UploadAction{})
+			brain.SetDestructive(cfg.Destructive)
 			brain.AppendAction(&hacker.GraphQLAction{},
 				&hacker.S3Action{Proxy: cfg.Proxy},
 				hacker.NewOOBAction(),
@@ -972,7 +1101,7 @@ func hackCmd() *cobra.Command {
 					return fmt.Errorf("failed to write HTML report: %w", err)
 				}
 				fmt.Println()
-				fmt.Println(lipgloss.NewStyle().Foreground(clCyan).Render("  HTML Report saved: " + reportFile))
+				fmt.Println(output.MutedStyle.Render("  HTML report saved: ") + output.ValueStyle.Render(reportFile))
 			}
 
 			return nil
@@ -987,8 +1116,9 @@ func hackCmd() *cobra.Command {
 // registry that silently omits an action is indistinguishable from one that
 // works — hence the assertion in TestDefaultHackActionsIncludePassiveModules.
 //
-// State-modifying actions are deliberately absent: they ship only under
-// explicit --destructive consent (see hackCmd), never from this list.
+// Consent is enforced at dispatch (planner), not here: actions flagged
+// Destructive — LoginBrute included — stay in the registry but are
+// withheld and reported unless the operator granted --destructive.
 func defaultHackActions(cfg *types.Config) []hacker.Action {
 	return []hacker.Action{
 		&hacker.PassiveReconAction{Proxy: cfg.Proxy},

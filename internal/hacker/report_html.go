@@ -123,13 +123,13 @@ func RenderHTMLReport(r *Report) string {
 
 	if len(r.AttackChains) > 0 {
 		buf.WriteString(`  <section>
-    <h2>Attack Chains Discovered</h2>
+    <h2>Attack Chain Hypotheses <span style="font-weight:400;font-size:13px">(compound attack not executed)</span></h2>
 `)
 		for _, chain := range r.AttackChains {
 			fmt.Fprintf(&buf,
 				`    <div class="chain">
       <div class="chain-name">⚡ %s</div>
-      <div class="chain-risk risk-%s">Risk: %.0f/10</div>
+      <div class="chain-risk risk-%s">Risk: %.0f/10 if executed</div>
       <div style="color:#9AA5CE;font-size:13px">→ %s</div>
     </div>
 `,
@@ -239,6 +239,22 @@ func RenderHTMLReport(r *Report) string {
 			)
 		}
 		buf.WriteString("    </div>\n  </section>\n")
+	}
+
+	// Same honesty as the terminal report: a module withheld for lack of
+	// --destructive consent is listed, never silently omitted.
+	if len(r.PendingDestructive) > 0 {
+		buf.WriteString(`  <section>
+    <h2>Withheld — consent required</h2>
+`)
+		for _, name := range r.PendingDestructive {
+			fmt.Fprintf(&buf,
+				`    <div class="page-item"><span class="url">%s</span> <span class="meta">run with --destructive to execute</span></div>
+`,
+				html.EscapeString(name),
+			)
+		}
+		buf.WriteString("  </section>\n")
 	}
 
 	fmt.Fprintf(&buf, `  <div class="footer">

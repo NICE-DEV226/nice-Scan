@@ -107,9 +107,17 @@ func ClassifyXss(body []byte, canary string) (XssReflex, bool) {
 	coreOff := strings.Index(s, core)
 	switch {
 	case coreOff >= 0:
-		if insideComment(s, coreOff) || insideMarkupBlackHole(s, coreOff) {
+		switch {
+		case insideComment(s, coreOff) || insideMarkupBlackHole(s, coreOff):
 			rx.Neutralized = true
-		} else {
+		case insideScriptBlock(s, coreOff):
+			// JS source context, not markup: `<svg onload=…>` cannot
+			// execute as a tag inside a <script> block. Whether the
+			// reflection is exploitable depends on the surrounding code
+			// (string literal? breakable?), so the executable claim stays
+			// withheld and InScript carries the honest state.
+			rx.InScript = true
+		default:
 			rx.Executable = true
 		}
 	case encodedCore:

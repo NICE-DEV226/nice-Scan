@@ -112,18 +112,25 @@ func (a *GraphQLMutateAction) Metadata() ActionMetadata {
 		Priority:    56,
 		Requires:    []string{},
 		Provides:    []string{},
+		// Mutation fuzzing writes server state.
+		Destructive: true,
 	}
 }
 
 func (a *GraphQLMutateAction) Execute(ctx context.Context, target string, kb *Knowledge, client *transport.Client) ActionResult {
+	// This action assembles the mutation list to fuzz; it has contacted
+	// nothing and written no state yet. Calling that "SevCritical" was the
+	// report lie the review flagged — a keyword-derived endpoint minting a
+	// headline with zero requests. It is a prepared plan, so SevInfo.
 	return ActionResult{
 		Findings: []Finding{
 			{
 				Type:        "graphql_mutation_poc",
-				Name:        "GraphQL mutation fuzzing ready",
-				Severity:    SevCritical,
-				Description: fmt.Sprintf("Mutations to test: %s", strings.Join(a.mutations, ", ")),
+				Name:        "GraphQL mutation targets identified (not executed)",
+				Severity:    SevInfo,
+				Description: fmt.Sprintf("Mutations available to test for privilege escalation / IDOR at %s — none were sent; run with --destructive to exercise them", a.endpoint),
 				Evidence:    a.endpoint,
+				Details:     map[string]string{"status": "hypothesis", "mutations": strings.Join(a.mutations, ", ")},
 			},
 		},
 	}

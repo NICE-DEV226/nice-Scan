@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/NICE-DEV226/nice-Scan/internal/detect"
@@ -23,7 +24,9 @@ func (a *LoginBruteAction) Metadata() ActionMetadata {
 		Provides:    []string{"has_credentials"},
 		// Credentialed spraying: only when a login form was actually
 		// observed on a fetched page (verified), never from text hints.
-		Sensitive: true,
+		// Also consent-gated — a password spray can lock real accounts.
+		Sensitive:   true,
+		Destructive: true,
 	}
 }
 
@@ -333,11 +336,11 @@ func formValueFor(f formField, username, password string) string {
 	switch {
 	case strings.Contains(flow, "user") || strings.Contains(flow, "email") ||
 		strings.Contains(flow, "login") || strings.Contains(flow, "name"):
-		return strings.ReplaceAll(username, " ", "+")
+		return username
 	case strings.Contains(flow, "pass") || strings.Contains(flow, "pwd"):
-		return strings.ReplaceAll(password, " ", "+")
+		return password
 	case f.ftype == "password":
-		return strings.ReplaceAll(password, " ", "+")
+		return password
 	case f.ftype == "hidden" || f.ftype == "token" || isTokenLikeField(f.name):
 		return f.value
 	}
@@ -348,7 +351,11 @@ func buildFormData(fields []formField, username, password string) string {
 	var parts []string
 	for _, f := range fields {
 		v := formValueFor(f, username, password)
-		parts = append(parts, f.name+"="+v)
+		// Percent-encode name AND value: hidden/CSRF token values frequently
+		// contain & = + / % — left raw they either split the body into forged
+		// fields or truncate the token, which is why many real login forms
+		// never authenticated under the old hand-built concatenation.
+		parts = append(parts, url.QueryEscape(f.name)+"="+url.QueryEscape(v))
 	}
 	return strings.Join(parts, "&")
 }

@@ -6,38 +6,36 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NICE-DEV226/nice-Scan/internal/output"
 	"github.com/NICE-DEV226/nice-Scan/internal/transport"
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
 	"github.com/charmbracelet/lipgloss"
 )
 
 var (
-	clCyan   = lipgloss.Color("#7DCFFF")
-	clMuted  = lipgloss.Color("#565F89")
-	clRed    = lipgloss.Color("#F7768E")
-	clGreen  = lipgloss.Color("#9ECE6A")
-	clYellow = lipgloss.Color("#E0AF68")
-	clOrange = lipgloss.Color("#FF9E64")
-	clDim    = lipgloss.Color("#3B4261")
+	clCyan   = output.Accent
+	clMuted  = output.Muted
+	clRed    = output.Fail
+	clGreen  = output.Good
+	clYellow = output.Warn
+	clDim    = output.Faint
 
-	styleHeader = lipgloss.NewStyle().Bold(true).Foreground(clCyan)
-	styleMuted  = lipgloss.NewStyle().Foreground(clMuted)
-	styleRed    = lipgloss.NewStyle().Foreground(clRed).Bold(true)
-	styleGreen  = lipgloss.NewStyle().Foreground(clGreen)
-	styleYellow = lipgloss.NewStyle().Foreground(clYellow)
-	styleLabel  = lipgloss.NewStyle().Foreground(clMuted).Width(12).Align(lipgloss.Right)
-	styleValue  = lipgloss.NewStyle().Foreground(clCyan)
-	styleCyan   = lipgloss.NewStyle().Foreground(clCyan)
+	styleMuted  = output.MutedStyle
+	styleRed    = lipgloss.NewStyle().Foreground(clRed)
+	styleYellow = output.WarnStyle
+	styleLabel  = lipgloss.NewStyle().Foreground(clMuted).Width(12)
+	styleValue  = output.ValueStyle
 )
 
 type Brain struct {
-	target  string
-	kb      *Knowledge
-	planner *Planner
-	chainer *Chainer
-	client  *transport.Client
-	actions []Action
-	startAt time.Time
+	target      string
+	kb          *Knowledge
+	planner     *Planner
+	chainer     *Chainer
+	client      *transport.Client
+	actions     []Action
+	startAt     time.Time
+	destructive bool
 }
 
 func NewBrain(target string, client *transport.Client, actions ...Action) *Brain {
@@ -51,9 +49,10 @@ func NewBrain(target string, client *transport.Client, actions ...Action) *Brain
 	}
 }
 
-// AppendAction registers additional actions before the run — the only
-// sanctioned way for the CLI to add destructive modules after NewBrain
-// (they stay absent entirely without operator consent).
+// AppendAction registers additional actions before the run. Destructive
+// actions may be registered freely — consent is enforced at dispatch time
+// (see SetDestructive), so a spawned or pre-registered module can never
+// execute on its own.
 func (b *Brain) AppendAction(as ...Action) {
 	for _, a := range as {
 		b.actions = append(b.actions, a)
@@ -61,27 +60,45 @@ func (b *Brain) AppendAction(as ...Action) {
 	}
 }
 
+// SetDestructive records the operator's --destructive consent for the run.
+// Without it, every action flagged Destructive — registered or spawned at
+// runtime — is withheld and listed in the report.
+func (b *Brain) SetDestructive(allowed bool) {
+	b.destructive = allowed
+	b.planner.AllowDestructive(allowed)
+}
+
 func (b *Brain) Run(ctx context.Context) *Report {
 	b.startAt = time.Now()
 	step := 0
 
-	fmt.Println(styleHeader.Render("  NICE HACKER — DECISION ENGINE"))
-	fmt.Println(styleMuted.Render(fmt.Sprintf("  Target: %s", b.target)))
-	fmt.Println(styleValue.Render(fmt.Sprintf("  Actions loaded: %d", len(b.actions))))
+	fmt.Println(output.Section("Decision Engine"))
+	fmt.Println(output.KV("Target", b.target, 9))
+	mode := "safe — destructive actions withheld"
+	if b.destructive {
+		mode = "destructive — operator consent granted"
+	}
+	fmt.Println(output.KV("Mode", mode, 9))
+	fmt.Println(output.KV("Actions", fmt.Sprintf("%d", len(b.actions)), 9))
 	fmt.Println()
-	fmt.Println(styleMuted.Render(fmt.Sprintf("  %s", strings.Repeat("─", 56))))
+	fmt.Println("  " + output.Rule(56))
 	fmt.Println()
 
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Println(styleYellow.Render("\n  Interrupted by user"))
+			fmt.Println(styleYellow.Render("\n  interrupted by operator"))
 			return b.buildReport(step)
 		default:
 		}
 
 		chainActions := b.chainer.DetectAndExecute(ctx, b.target, b.kb, b.client)
 		for _, ca := range chainActions {
+			// Chains execute outside the planner, so the consent gate has
+			// to be re-checked here — no dispatch path bypasses it.
+			if ca.Metadata().Destructive && !b.destructive {
+				continue
+			}
 			step++
 			meta := ca.Metadata()
 			b.renderProgress(step, meta.Name, meta.Description, 0)
@@ -122,9 +139,14 @@ func (b *Brain) Run(ctx context.Context) *Report {
 
 		for _, newAction := range result.Actions {
 			b.planner.AddAction(newAction)
-			fmt.Printf("  %s %s\n",
-				styleGreen.Render("◈"),
-				styleGreen.Render(fmt.Sprintf("Spawned: %s", newAction.Metadata().Name)),
+			note := ""
+			if newAction.Metadata().Destructive && !b.destructive {
+				note = " · withheld: run with --destructive"
+			}
+			fmt.Printf("  %s %s%s\n",
+				output.FaintStyle.Render("└"),
+				output.MutedStyle.Render("spawned: "+newAction.Metadata().Name),
+				output.FaintStyle.Render(note),
 			)
 		}
 
@@ -175,13 +197,14 @@ func (b *Brain) buildReport(steps int) *Report {
 	impact := "No significant vulnerabilities discovered"
 	riskScore := 0.0
 
-	// Executed findings drive the floor of the score. The previous version
-	// ignored Findings entirely — a run with a wire-confirmed XSS (and no
-	// chain pattern) reported risk 0/10 while a single keyword in a page
-	// minted verified-origin chains worth 10/10. Severity of a finding is
-	// itself established truth here: only actions with wire-verified
-	// verdicts emit the high severities (the raw keyword classes emit
-	// info/low-medium).
+	// A chain whose every required capability is verified is still a
+	// HYPOTHESIS: every chain action above emits PoC/hypothesis output and
+	// contacts nothing. Its score is therefore weighted as a lead and
+	// capped below the confirmed-high finding floor (7.5) — an unexecuted
+	// pattern can never outscore executed evidence. The per-chain
+	// "risk if executed" stays visible in the report.
+	const chainHypothesisCap = 7.0
+
 	maxRisk := 0.0
 	for _, c := range chains {
 		if c.RiskScore > maxRisk {
@@ -190,7 +213,10 @@ func (b *Brain) buildReport(steps int) *Report {
 	}
 	if maxRisk > 0 {
 		riskScore = maxRisk
-		impact = "Attack chains derived from verified capabilities"
+		if riskScore > chainHypothesisCap {
+			riskScore = chainHypothesisCap
+		}
+		impact = "Attack-chain hypotheses from verified capabilities (compound attack not executed)"
 		for _, c := range chains {
 			impact += fmt.Sprintf("; %s", c.Name)
 		}
@@ -248,17 +274,18 @@ func (b *Brain) buildReport(steps int) *Report {
 	}
 
 	return &Report{
-		Target:       b.target,
-		Duration:     dur,
-		Steps:        steps,
-		Impact:       impact,
-		RiskScore:    riskScore,
-		AttackChains: chains,
-		Findings:     b.kb.GetFindings(),
-		Capabilities: b.kb.GetCapabilities(),
-		Credentials:  b.kb.GetCredentials(),
-		Endpoints:    b.kb.GetEndpoints(),
-		Pages:        b.kb.GetPages(),
+		Target:             b.target,
+		Duration:           dur,
+		Steps:              steps,
+		Impact:             impact,
+		RiskScore:          riskScore,
+		AttackChains:       chains,
+		Findings:           b.kb.GetFindings(),
+		Capabilities:       b.kb.GetCapabilities(),
+		Credentials:        b.kb.GetCredentials(),
+		Endpoints:          b.kb.GetEndpoints(),
+		Pages:              b.kb.GetPages(),
+		PendingDestructive: b.planner.PendingDestructive(b.kb),
 	}
 }
 
@@ -281,82 +308,65 @@ func severityRiskFloor(s Severity) float64 {
 }
 
 func severityColor(s Severity) lipgloss.Color {
-	switch s {
-	case SevCritical:
-		return clRed
-	case SevHigh:
-		return clOrange
-	case SevMedium:
-		return clYellow
-	case SevLow:
-		return clCyan
-	default:
-		return clMuted
-	}
+	return output.SeverityColor(string(s))
 }
 
 func (b *Brain) renderProgress(step int, name, desc string, remaining int) {
 	elapsed := time.Since(b.startAt).Round(time.Second)
 
-	stepHeader := fmt.Sprintf("  Step %d/%d", step, step+remaining)
+	stepHeader := fmt.Sprintf("Step %d/%d", step, step+remaining)
 	if remaining == 0 {
-		stepHeader = fmt.Sprintf("  Step %d", step)
+		stepHeader = fmt.Sprintf("Step %d", step)
 	}
 
-	fmt.Println(styleMuted.Render(fmt.Sprintf("  %s  [%s]  %s",
-		stepHeader,
-		elapsed.String(),
-		lipgloss.NewStyle().Foreground(clDim).Render("─"),
-	)))
-
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(clDim).
-		Padding(0, 1)
-
-	content := fmt.Sprintf("  %s  %s",
-		styleCyan.Bold(true).Render(name),
-		styleMuted.Render(desc),
-	)
-
-	fmt.Println(box.Render(content))
+	// One line per step: position, elapsed, action, intent. No boxes —
+	// the action name carries the emphasis, the rest stays quiet.
+	line := "  " + styleMuted.Render(stepHeader) + "  " +
+		output.ValueStyle.Render(name)
+	if desc != "" {
+		line += "  " + output.MutedStyle.Render(desc)
+	}
+	line += "  " + output.FaintStyle.Render("· "+elapsed.String())
+	fmt.Println(line)
 }
 
 func (b *Brain) renderFinding(f Finding) {
-	sevStyle := lipgloss.NewStyle().Foreground(severityColor(f.Severity)).Bold(true)
-	sym := "•"
+	sym := "·"
 	switch f.Severity {
-	case SevCritical:
-		sym = "!!"
-	case SevHigh:
-		sym = "▸"
+	case SevCritical, SevHigh:
+		sym = "■"
 	case SevMedium:
-		sym = "›"
+		sym = "◆"
+	case SevLow:
+		sym = "◇"
 	}
 	label := strings.ToUpper(string(f.Severity))
 	if label == "" {
 		label = "INFO"
 	}
+	sev := output.SeverityStyle(string(f.Severity))
 	// Sanity at the render sink: finding text carries remote content.
 	fmt.Printf("  %s %s %s\n",
-		sevStyle.Render(sym),
+		sev.Render(sym),
 		lipgloss.NewStyle().Foreground(severityColor(f.Severity)).Width(8).Render(label),
-		lipgloss.NewStyle().Foreground(severityColor(f.Severity)).Render(types.Sanitize(f.Name)),
+		output.ValueStyle.Render(types.Sanitize(f.Name)),
 	)
 	if f.Evidence != "" {
-		ev := f.Evidence
+		// Rune-safe truncation: evidence is remote unicode; byte slicing
+		// would emit a corrupted partial rune into the terminal.
+		ev := []rune(types.Sanitize(f.Evidence))
 		if len(ev) > 120 {
-			ev = ev[:117] + "..."
+			ev = append(ev[:117], []rune("…")...)
 		}
-		fmt.Println(styleMuted.Render(fmt.Sprintf("         %s", types.Sanitize(ev))))
+		fmt.Println(output.MutedStyle.Padding(0, 0, 0, 10).Render(string(ev)))
 	}
 }
 
 func (b *Brain) RenderReport(report *Report) {
 	fmt.Println()
-	fmt.Println(strings.Repeat("═", 56))
-	fmt.Println(styleHeader.Render("  NICE HACKER — ATTACK REPORT"))
-	fmt.Println(strings.Repeat("═", 56))
+	fmt.Println("  " + output.Rule(56))
+	fmt.Println(output.Section("Attack Report"))
+	fmt.Println("  " + output.Rule(56))
 	fmt.Println()
 
 	rows := [][2]string{
@@ -366,31 +376,30 @@ func (b *Brain) RenderReport(report *Report) {
 		{"Risk Score", fmt.Sprintf("%.1f/10", report.RiskScore)},
 	}
 	for _, r := range rows {
-		fmt.Printf("  %s %s\n", styleLabel.Render(r[0]+":"), styleValue.Render(r[1]))
+		fmt.Printf("  %s %s\n", styleLabel.Render(r[0]), styleValue.Render(r[1]))
 	}
 	fmt.Println()
 
-	fmt.Println(styleHeader.Render("  Impact Summary"))
-	fmt.Println(styleMuted.Render(fmt.Sprintf("  %s", types.Sanitize(report.Impact))))
+	fmt.Println(output.Section("Impact Summary"))
+	fmt.Println(output.MutedStyle.Render("  " + types.Sanitize(report.Impact)))
 	fmt.Println()
 
 	if len(report.AttackChains) > 0 {
-		fmt.Println(styleHeader.Render("  Attack Chains Discovered"))
+		fmt.Println(output.Section("Attack Chains  (hypotheses — compound attack not executed)"))
 		fmt.Println()
 		for _, chain := range report.AttackChains {
 			fmt.Printf("  %s %s\n",
-				styleRed.Render("⚡"),
-				styleRed.Bold(true).Render(types.Sanitize(chain.Name)),
+				styleRed.Render("■"),
+				output.ValueStyle.Render(types.Sanitize(chain.Name)),
 			)
-			fmt.Printf("  %s Risk: %.0f/10\n", styleMuted.Render("  "), chain.RiskScore)
-			fmt.Printf("  %s %s\n", styleMuted.Render("  →"), types.Sanitize(chain.Impact))
+			fmt.Printf("  %s\n", output.MutedStyle.Render(fmt.Sprintf("    risk %.0f/10 if executed  ·  %s", chain.RiskScore, types.Sanitize(chain.Impact))))
 			fmt.Println()
 		}
 	}
 
 	findings := report.Findings
 	if len(findings) > 0 {
-		fmt.Println(styleHeader.Render("  Findings"))
+		fmt.Println(output.Section("Findings"))
 		fmt.Println()
 		for _, f := range findings {
 			b.renderFinding(f)
@@ -399,34 +408,36 @@ func (b *Brain) RenderReport(report *Report) {
 	}
 
 	if len(report.Credentials) > 0 {
-		fmt.Println(styleHeader.Render("  Credentials Obtained"))
+		fmt.Println(output.Section("Credentials"))
 		fmt.Println()
 		for _, c := range report.Credentials {
 			if c.Valid {
-				fmt.Printf("  %s %s:%s %s\n", styleRed.Render("◈"), types.Sanitize(c.Username), types.Sanitize(c.Password), styleGreen.Render("✓ valid"))
+				fmt.Printf("  %s %s\n", styleRed.Render("■"),
+					output.ValueStyle.Render(types.Sanitize(c.Username)+":"+types.Sanitize(c.Password))+" "+styleRed.Render("valid"))
 			} else {
-				fmt.Printf("  %s %s:%s %s\n", styleMuted.Render("·"), types.Sanitize(c.Username), types.Sanitize(c.Password), styleMuted.Render("tested"))
+				fmt.Printf("  %s %s\n", output.FaintStyle.Render("·"),
+					output.MutedStyle.Render(types.Sanitize(c.Username)+":"+types.Sanitize(c.Password))+" "+output.FaintStyle.Render("tested"))
 			}
 		}
 		fmt.Println()
 	}
 
 	if len(report.Endpoints) > 0 {
-		fmt.Println(styleHeader.Render("  Endpoints Discovered"))
+		fmt.Println(output.Section("Endpoints Discovered"))
 		fmt.Println()
 		for _, e := range report.Endpoints {
-			method := styleYellow.Render(e.Method)
+			method := output.FaintStyle.Render(e.Method)
 			statusStr := ""
 			if e.Status > 0 {
 				statusStr = fmt.Sprintf(" [%d]", e.Status)
 			}
-			fmt.Printf("  %s %s%s\n", method, styleCyan.Render(types.Sanitize(e.Path)), styleMuted.Render(statusStr))
+			fmt.Printf("  %s %s%s\n", method, output.ValueStyle.Render(types.Sanitize(e.Path)), output.MutedStyle.Render(statusStr))
 		}
 		fmt.Println()
 	}
 
 	if len(report.Pages) > 0 {
-		fmt.Println(styleHeader.Render(fmt.Sprintf("  Pages Crawled (%d)", len(report.Pages))))
+		fmt.Println(output.Section(fmt.Sprintf("Pages Crawled (%d)", len(report.Pages))))
 		fmt.Println()
 		for _, p := range report.Pages {
 			detail := fmt.Sprintf("%d bytes", p.BodyLen)
@@ -439,10 +450,9 @@ func (b *Brain) RenderReport(report *Report) {
 			if len(p.JSFiles) > 0 {
 				detail += fmt.Sprintf(" · %d JS", len(p.JSFiles))
 			}
-			fmt.Printf("  %s %s %s\n",
-				styleGreen.Render("●"),
-				styleCyan.Render(types.Sanitize(p.URL)),
-				styleMuted.Render(detail),
+			fmt.Printf("  %s %s\n",
+				output.ValueStyle.Render(types.Sanitize(p.URL)),
+				output.MutedStyle.Render(detail),
 			)
 		}
 		fmt.Println()
@@ -453,29 +463,36 @@ func (b *Brain) RenderReport(report *Report) {
 	// leads with what was actually seen. The origin markers stay visible
 	// because the whole point is that a hint is not an observation.
 	if len(report.Capabilities) > 0 {
-		fmt.Println(styleHeader.Render("  Engine Knowledge (✓ verified · ≈ observed · ? hint)"))
+		fmt.Println(output.Section("Engine Knowledge  (✓ verified · ≈ observed · ? hint)"))
 		fmt.Println()
 		for _, c := range report.Capabilities {
-			label := c.Name
-			style := styleGreen
+			label := "✓ " + c.Name
+			style := output.GoodStyle
 			switch c.Origin {
 			case OriginHint:
-				label = "?" + c.Name
-				style = styleYellow
+				label = "? " + c.Name
+				style = output.FaintStyle
 			case OriginObserved:
-				label = "≈" + c.Name
-				style = styleCyan
+				label = "≈ " + c.Name
+				style = output.MutedStyle
 			}
-			fmt.Printf("  %s %s\n", style.Render("●"), styleCyan.Render(types.Sanitize(label)))
+			fmt.Printf("  %s\n", style.Render(types.Sanitize(label)))
 		}
 		fmt.Println()
 	}
 
 	summary := b.kb.ReportDir.GenerateSummary()
-	fmt.Println(styleHeader.Render("  Extracted Data"))
-	fmt.Println(styleMuted.Render(fmt.Sprintf("  %s", summary)))
+	fmt.Println(output.Section("Extracted Data"))
+	fmt.Println(output.MutedStyle.Render("  " + summary))
 	fmt.Println()
 
-	fmt.Println(strings.Repeat("─", 56))
-	fmt.Println(styleMuted.Render("  NICE HACKER — Attack Complete"))
+	if len(report.PendingDestructive) > 0 {
+		fmt.Println(output.Section("Withheld — consent required"))
+		fmt.Println(output.MutedStyle.Render("  " + strings.Join(report.PendingDestructive, ", ")))
+		fmt.Println(output.FaintStyle.Render("  These actions met their evidence requirements but write to or bulk-read the target; run with --destructive to execute them."))
+		fmt.Println()
+	}
+
+	fmt.Println("  " + output.Rule(56))
+	fmt.Println(output.MutedStyle.Render("  Attack complete."))
 }

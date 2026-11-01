@@ -21,15 +21,13 @@ import (
 )
 
 var (
-	// Surfaces
-	clBorder = lipgloss.Color("#2F3346")
-	clPrompt = lipgloss.Color("#7DCFFF")
-	clName   = lipgloss.Color("#C0CAF5")
-	clMuted  = lipgloss.Color("#565F89")
-	clDim    = lipgloss.Color("#3B4261")
-	clCoral  = lipgloss.Color("#F7768E")
-	clAmber  = lipgloss.Color("#FFB347")
-	clCyan   = lipgloss.Color("#7DCFFF")
+	// Surfaces — sourced from the shared design system.
+	clBorder = output.Line
+	clPrompt = output.Accent
+	clName   = output.Ink
+	clMuted  = output.Muted
+	clDim    = output.Faint
+	clCoral  = output.Fail
 
 	// Styles
 	promptStyle = lipgloss.NewStyle().Foreground(clPrompt).Bold(true)
@@ -44,18 +42,10 @@ var (
 		types.SeverityInfo:     "INFO",
 	}
 
-	severityColor = map[types.Severity]lipgloss.Color{
-		types.SeverityCritical: clCoral,
-		types.SeverityHigh:     clCoral,
-		types.SeverityMedium:   clAmber,
-		types.SeverityLow:      clCyan,
-		types.SeverityInfo:     clMuted,
-	}
-
 	severitySym = map[types.Severity]string{
 		types.SeverityCritical: "■",
 		types.SeverityHigh:     "■",
-		types.SeverityMedium:   "◧",
+		types.SeverityMedium:   "◆",
 		types.SeverityLow:      "◇",
 		types.SeverityInfo:     "○",
 	}
@@ -67,9 +57,10 @@ var (
 	}{
 		{"scan", "Full security scan (passive + active)", "<url>"},
 		{"audit", "Deep audit with ALL checks + verbose", "<url>"},
-		{"exploit", "Active exploitation (all modules)", "<url>"},
+		{"exploit", "Active exploitation (state-writing modules need consent)", "<url>"},
 		{"tech", "Technology detection (165 signatures)", "<url>"},
 		{"tls", "TLS/SSL configuration analysis", "<url>"},
+		{"consent", "Grant/revoke state-modifying consent", "[on|off]"},
 		{"clear", "Clear output", ""},
 		{"list", "Show session targets and findings", ""},
 		{"help", "Show available commands", ""},
@@ -83,6 +74,13 @@ type session struct {
 	requests int
 	duration time.Duration
 	mu       sync.Mutex
+}
+
+func absInt(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 func (s *session) add(target string, findings []types.Finding, reqs int, dur time.Duration) {
@@ -116,10 +114,14 @@ func (s *session) display() string {
 type Model struct {
 	input textinput.Model
 
-	output       []string
-	session      session
-	cfg          *types.Config
-	client       *transport.Client
+	output  []string
+	session session
+	cfg     *types.Config
+	client  *transport.Client
+	// stacks caches the classified server-side profile per target for the
+	// whole shell session: the fingerprint is read once, then every later
+	// scan/fuzz command conditions on it without re-fetching the homepage.
+	stacks       map[string]fingerprint.Stack
 	ready        bool
 	quitting     bool
 	width        int
@@ -161,25 +163,23 @@ func NewModel(cfg *types.Config) (*Model, error) {
 
 	welcome := []string{
 		"",
-		lipgloss.NewStyle().Foreground(clName).Bold(true).Padding(0, 2).Render("  Welcome to NICE_SCAN Interactive Shell"),
+		output.Section("nice-scan shell"),
 		"",
-		lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render("  Available commands:"),
-		lipgloss.NewStyle().Foreground(clCyan).Padding(0, 4).Render("  scan <url>   — Full reconnaissance scan (12+ modules)"),
-		lipgloss.NewStyle().Foreground(clCyan).Padding(0, 4).Render("  audit <url>  — Deep audit with verbose output"),
-		lipgloss.NewStyle().Foreground(clCyan).Padding(0, 4).Render("  tech <url>   — Technology detection (165 signatures)"),
-		lipgloss.NewStyle().Foreground(clCyan).Padding(0, 4).Render("  tls <url>    — TLS/SSL configuration analysis"),
-		lipgloss.NewStyle().Foreground(clCyan).Padding(0, 4).Render("  help         — Show detailed help"),
-		lipgloss.NewStyle().Foreground(clCyan).Padding(0, 4).Render("  clear        — Clear the output"),
-		lipgloss.NewStyle().Foreground(clCyan).Padding(0, 4).Render("  list         — Show session summary"),
-		lipgloss.NewStyle().Foreground(clCyan).Padding(0, 4).Render("  exit         — Quit the shell"),
+		lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render("  scan <url>   Full security scan (all modules)"),
+		lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render("  audit <url>  Deep audit, verbose, HTML report"),
+		lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render("  exploit <url>  Active exploitation modules"),
+		lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render("  tech <url>   Technology fingerprinting"),
+		lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render("  tls <url>    TLS/SSL configuration analysis"),
+		lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render("  help         Full command list  ·  exit  Quit"),
 		"",
-		lipgloss.NewStyle().Foreground(clDim).Padding(0, 2).Render("  Scroll: mouse wheel · PgUp/PgDown · Shift+↑/↓  |  Tab: autocomplete"),
+		lipgloss.NewStyle().Foreground(clDim).Padding(0, 2).Render("  Tab: autocomplete  ·  PgUp/PgDn: scroll  ·  Ctrl+C: quit"),
 		"",
 	}
 	m := &Model{
 		input:        ti,
 		cfg:          cfg,
 		client:       client,
+		stacks:       map[string]fingerprint.Stack{},
 		output:       welcome,
 		scrollOffset: 0,
 	}
@@ -273,6 +273,34 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "list", "ls":
 				m.output = append(m.output, m.listSession()...)
+				return m, nil
+			case "consent":
+				state := "off"
+				if m.cfg.Destructive {
+					state = "on"
+				}
+				arg := ""
+				if len(args) > 0 {
+					arg = strings.ToLower(args[0])
+				}
+				switch arg {
+				case "on":
+					m.cfg.Destructive = true
+					m.output = append(m.output,
+						output.WarnStyle.Render(`  ⚠ consent granted — state-modifying modules (login spray, role tampering) may now POST to targets.`),
+						output.FaintStyle.Render("  Revoke with 'consent off'. Authorized targets only."),
+					)
+				case "off":
+					m.cfg.Destructive = false
+					m.output = append(m.output,
+						output.MutedStyle.Render("  consent revoked — state-modifying modules withheld again."),
+					)
+				default:
+					m.output = append(m.output,
+						output.MutedStyle.Render("  destructive consent: "+state),
+						output.FaintStyle.Render("  usage: consent on | consent off"),
+					)
+				}
 				return m, nil
 			case "scan", "audit", "exploit", "tech", "tls":
 				if len(args) == 0 {
@@ -406,18 +434,22 @@ func (m *Model) exec(cmd string, target string) tea.Cmd {
 				engine.NewPrivilegeEscalationAnalyzer(),
 				engine.NewDataExtractionAnalyzer(),
 			)
+			m.seedStack(scanner, target)
 			result := scanner.Scan(ctx, []string{target})
+			m.cacheStacks(scanner)
 			findings = result.Findings
 			stats = result.Stats
-			lines = m.renderFindings(result.Findings, result.Stats)
+			lines = append(m.renderStacks(result.Stacks), m.renderFindings(result.Findings, result.Stats)...)
 
 		case "tech":
 			scanner := engine.NewScanner(m.cfg, m.client)
 			scanner.RegisterAnalyzer(fingerprint.New())
+			m.seedStack(scanner, target)
 			result := scanner.Scan(ctx, []string{target})
+			m.cacheStacks(scanner)
 			findings = result.Findings
 			stats = result.Stats
-			lines = m.renderFindings(result.Findings, result.Stats)
+			lines = append(m.renderStacks(result.Stacks), m.renderFindings(result.Findings, result.Stats)...)
 
 		case "tls":
 			scanner := engine.NewScanner(m.cfg, m.client)
@@ -444,10 +476,12 @@ func (m *Model) exec(cmd string, target string) tea.Cmd {
 				engine.NewPrivilegeEscalationAnalyzer(),
 				engine.NewDataExtractionAnalyzer(),
 			)
+			m.seedStack(scanner, target)
 			result := scanner.Scan(ctx, []string{target})
+			m.cacheStacks(scanner)
 			findings = result.Findings
 			stats = result.Stats
-			lines = m.renderFindings(result.Findings, result.Stats)
+			lines = append(m.renderStacks(result.Stacks), m.renderFindings(result.Findings, result.Stats)...)
 
 		case "exploit":
 			opts := exploit.Options{
@@ -459,56 +493,111 @@ func (m *Model) exec(cmd string, target string) tea.Cmd {
 			var expLines []string
 			expLines = append(expLines, "")
 
-			expLines = append(expLines, lipgloss.NewStyle().Foreground(clCyan).Bold(true).Padding(0, 2).Render("  🔑 Login Bruteforce"))
-			loginResults := exp.BruteforceLogin(ctx, target, exploit.CommonCredentials)
-			for _, r := range loginResults[:min(len(loginResults), 5)] {
-				cl := clMuted
-				sym := "✗"
-				if r.Success {
-					cl = clCoral
-					sym = "✓"
+			// Same consent model as the CLI: credential spraying and
+			// tampered role POSTs write to the target. Grant it in-session
+			// with "consent on" (or start the shell with --destructive).
+			var sprayReqs int
+			if m.cfg.Destructive {
+				expLines = append(expLines, output.Section("Login Bruteforce"))
+				loginResults := exp.BruteforceLogin(ctx, target, exploit.CommonCredentials)
+				sprayReqs += len(loginResults)
+				for _, r := range loginResults[:min(len(loginResults), 5)] {
+					cl := clMuted
+					sym := "✗"
+					if r.Success {
+						cl = clCoral
+						sym = "✓"
+					}
+					// Echo the password ONLY on a verified success — that is
+					// the credential the operator actually needs. Failed spray
+					// rows show the tried username and status, never the
+					// plaintext guess, so the credential list does not linger
+					// in terminal scrollback / logs for every miss.
+					shown := r.Username
+					if r.Success {
+						shown = r.Username + ":" + r.Password
+					}
+					expLines = append(expLines, lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
+						fmt.Sprintf("  %s %s → %d", sym, shown, r.StatusCode),
+					))
 				}
-				expLines = append(expLines, lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
-					fmt.Sprintf("  %s %s:%s → %d", sym, r.Username, r.Password, r.StatusCode),
+
+				expLines = append(expLines, "")
+				expLines = append(expLines, output.Section("Role / Privilege Escalation"))
+				roleResults := exp.RoleTampering(ctx, target)
+				sprayReqs += len(roleResults)
+				found := false
+				for _, r := range roleResults {
+					if !r.Success {
+						continue
+					}
+					found = true
+					expLines = append(expLines, lipgloss.NewStyle().Foreground(clCoral).Padding(0, 4).Render(
+						fmt.Sprintf("  ✓ %s=%s %s → %d", r.Parameter, r.Value, r.Method, r.StatusCode),
+					))
+					if len(expLines) > 20 {
+						break
+					}
+				}
+				if !found {
+					expLines = append(expLines, lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render("  — No privilege escalation found"))
+				}
+			} else {
+				expLines = append(expLines, output.MutedStyle.Render(
+					`  Login bruteforce and role tampering withheld — state-modifying. Type "consent on" to grant them for this session.`,
 				))
 			}
 
 			expLines = append(expLines, "")
-			expLines = append(expLines, lipgloss.NewStyle().Foreground(clCyan).Bold(true).Padding(0, 2).Render("  ⬆️  Role / Privilege Escalation"))
-			roleResults := exp.RoleTampering(ctx, target)
-			found := false
-			for _, r := range roleResults {
-				if !r.Success {
-					continue
-				}
-				found = true
-				expLines = append(expLines, lipgloss.NewStyle().Foreground(clCoral).Padding(0, 4).Render(
-					fmt.Sprintf("  ✓ %s=%s %s → %d", r.Parameter, r.Value, r.Method, r.StatusCode),
-				))
-				if len(expLines) > 20 {
-					break
-				}
-			}
-			if !found {
-				expLines = append(expLines, lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render("  — No privilege escalation found"))
-			}
-
-			expLines = append(expLines, "")
-			expLines = append(expLines, lipgloss.NewStyle().Foreground(clCyan).Bold(true).Padding(0, 2).Render("  🔢 IDOR Enumeration"))
+			expLines = append(expLines, output.Section("IDOR Enumeration"))
 			idorResults := exp.IDOREnumeration(ctx, target, "", 1, 5)
+			// Per-surface modal baseline (mirrors the exploit command): an
+			// absolute "BodySize > 500" heuristic painted ordinary pages coral
+			// as if they were hits. A referent is interesting only when it
+			// differs from the OTHER ids of the SAME endpoint.
+			surfaceMode := map[string]int{}
+			{
+				type hist struct {
+					counts map[int]int
+				}
+				hists := map[string]*hist{}
+				for _, r := range idorResults {
+					h := hists[r.Surface]
+					if h == nil {
+						h = &hist{counts: map[int]int{}}
+						hists[r.Surface] = h
+					}
+					h.counts[r.BodySize]++
+				}
+				for surf, h := range hists {
+					best, mode := -1, 0
+					for size, c := range h.counts {
+						if c > best {
+							mode, best = size, c
+						}
+					}
+					surfaceMode[surf] = mode
+				}
+			}
+			notable := 0
 			for _, r := range idorResults[:min(len(idorResults), 10)] {
 				cl := clMuted
-				if r.BodySize > 500 {
+				if base, ok := surfaceMode[r.Surface]; ok && absInt(r.BodySize-base) > 100 {
 					cl = clCoral
+					notable++
 				}
 				expLines = append(expLines, lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
 					fmt.Sprintf("  %s=%d → %d (%d bytes)", r.ParamType, r.ID, r.StatusCode, r.BodySize),
 				))
 			}
-
+			if notable == 0 {
+				expLines = append(expLines, output.MutedStyle.Render(
+					"  — every id within each endpoint returned the same size: identifier ignored or consistently authorized",
+				))
+			}
 			expLines = append(expLines, "")
 			expLines = append(expLines, lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2).Render(
-				fmt.Sprintf("  Exploit completed — %d total requests", len(loginResults)+len(roleResults)+len(idorResults)),
+				fmt.Sprintf("  Exploit completed — %d total requests", sprayReqs+len(idorResults)),
 			))
 
 			lines = expLines
@@ -518,6 +607,41 @@ func (m *Model) exec(cmd string, target string) tea.Cmd {
 
 		return cmdResultMsg(lines)
 	}
+}
+
+// seedStack hands the session-cached fingerprint to a fresh scanner (known
+// stacks skip phase-1 entirely), and cacheStacks stores what the scan just
+// classified — one stack read per target for the whole shell session.
+func (m *Model) seedStack(s *engine.Scanner, target string) {
+	if st, ok := m.stacks[target]; ok {
+		s.SeedStack(target, st)
+	}
+}
+
+func (m *Model) cacheStacks(s *engine.Scanner) {
+	for t, st := range s.Stacks() {
+		if st.Known() {
+			m.stacks[t] = st
+		}
+	}
+}
+
+// renderStacks puts the fingerprint-first detail on screen before the
+// findings: the stack read from the homepage, and whether family-specific
+// probes were conditioned on it.
+func (m *Model) renderStacks(stacks []engine.StackReport) []string {
+	var lines []string
+	muted := lipgloss.NewStyle().Foreground(clMuted).Padding(0, 2)
+	value := lipgloss.NewStyle().Foreground(output.Ink).Padding(0, 2)
+	for _, st := range stacks {
+		lines = append(lines, value.Render("  stack: "+st.Detail))
+		if st.Conditioned {
+			lines = append(lines, muted.Render("  probes: stack-conditioned (foreign-family paths skipped)"))
+		} else {
+			lines = append(lines, muted.Render("  probes: full set kept — no stack signal"))
+		}
+	}
+	return lines
 }
 
 func (m *Model) renderFindings(findings []types.Finding, stats engine.ScanStats) []string {
@@ -549,7 +673,7 @@ func (m *Model) renderFindings(findings []types.Finding, stats engine.ScanStats)
 
 		sym := severitySym[sev]
 		label := severityLabel[sev]
-		color := severityColor[sev]
+		color := output.SeverityColor(string(sev))
 
 		header := lipgloss.NewStyle().Foreground(color).Bold(true).Padding(0, 2).Render(fmt.Sprintf("  %s  %s  (%d)", sym, label, len(group)))
 		lines = append(lines, "", header)
@@ -559,7 +683,7 @@ func (m *Model) renderFindings(findings []types.Finding, stats engine.ScanStats)
 			lines = append(lines, name)
 			if f.Metadata != nil {
 				if v, ok := f.Metadata["version"]; ok && v != "" {
-					ver := lipgloss.NewStyle().Foreground(clCyan).Padding(0, 6).Render(v)
+					ver := lipgloss.NewStyle().Foreground(clDim).Padding(0, 6).Render(v)
 					lines = append(lines, ver)
 				}
 			}
@@ -611,7 +735,7 @@ func (m *Model) listSession() []string {
 	lines = append(lines, "")
 	lines = append(lines, lipgloss.NewStyle().Foreground(clDim).Padding(0, 2).Render("  Targets:"))
 	for _, t := range m.session.targets {
-		lines = append(lines, lipgloss.NewStyle().Foreground(clCyan).Padding(0, 4).Render("  ▸ "+t))
+		lines = append(lines, lipgloss.NewStyle().Foreground(clMuted).Padding(0, 4).Render("  · "+t))
 	}
 
 	if len(m.session.findings) > 0 {
@@ -629,7 +753,7 @@ func (m *Model) listSession() []string {
 			}
 			label := severityLabel[sev]
 			sym := severitySym[sev]
-			cl := severityColor[sev]
+			cl := output.SeverityColor(string(sev))
 			lines = append(lines, lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(fmt.Sprintf("  %s %s  (%d)", sym, label, len(items))))
 			for _, item := range items {
 				lines = append(lines, lipgloss.NewStyle().Foreground(clMuted).Padding(0, 6).Render("  · "+item))
@@ -674,7 +798,7 @@ func (m *Model) helpText() []string {
 	lines = append(lines, lipgloss.NewStyle().Foreground(clName).Bold(true).Padding(0, 2).Render("  Commands:"))
 	lines = append(lines, "")
 	for _, c := range commands {
-		name := lipgloss.NewStyle().Foreground(clPrompt).Bold(true).Render("    " + c.name)
+		name := lipgloss.NewStyle().Foreground(clName).Bold(true).Render("    " + c.name)
 		args := lipgloss.NewStyle().Foreground(clMuted).Render(c.args)
 		desc := lipgloss.NewStyle().Foreground(clMuted).Render(c.desc)
 		line := fmt.Sprintf("%s %s  %s", name, args, desc)

@@ -104,6 +104,24 @@ func TestClassifyXssScriptBlockContext(t *testing.T) {
 	}
 }
 
+func TestClassifyXssMarkupCoreInsideScriptIsNotExecutable(t *testing.T) {
+	// The FULL tag-break core reflected inside a script body: browsers
+	// parse JS source there, not markup, so `<svg onload=…>` is a string
+	// fragment — the old classifier claimed Executable on the raw core
+	// alone, without context.
+	body := []byte(`<script>var q = "'` + can + `><svg onload=alert('` + can + `')>";</script>`)
+	rx, ok := ClassifyXss(body, can)
+	if !ok {
+		t.Fatal("reflection must classify")
+	}
+	if rx.Executable {
+		t.Fatalf("markup core inside a <script> body cannot execute as a tag, got %+v", rx)
+	}
+	if !rx.InScript {
+		t.Fatalf("must report JS context instead, got %+v", rx)
+	}
+}
+
 func TestClassifyXssExternalScriptSrcNotABody(t *testing.T) {
 	// <script src=…> has no JS body; content following it is text again.
 	body := []byte(`<script src="/app.js"></script>` + `";` + can + `//`)

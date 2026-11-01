@@ -30,7 +30,11 @@ func hasFinding(fs []types.Finding, name string) bool {
 
 func TestHeaderAnalyzerFlagsMissingSecurityHeaders(t *testing.T) {
 	h := NewHeaderAnalyzer()
-	fs := h.Analyze(context.Background(), respWithHeaders(nil))
+	// An HTTPS response: every missing-header check is meaningful here,
+	// including HSTS.
+	resp := respWithHeaders(nil)
+	resp.FinalURL = "https://example.com/"
+	fs := h.Analyze(context.Background(), resp)
 
 	for _, name := range []string{
 		"Missing CSP Header",
@@ -42,6 +46,23 @@ func TestHeaderAnalyzerFlagsMissingSecurityHeaders(t *testing.T) {
 		if !hasFinding(fs, name) {
 			t.Errorf("expected finding %q, got %+v", name, fs)
 		}
+	}
+}
+
+// HSTS is a TLS-only header: the browser ignores it over http:// and there is
+// no downgrade attack to prevent, so a plain-HTTP target must NOT be nagged
+// for a missing HSTS header (every http:// scan used to emit it).
+func TestHeaderAnalyzerNoHSTSNoiseOnPlainHTTP(t *testing.T) {
+	h := NewHeaderAnalyzer()
+	resp := respWithHeaders(nil)
+	resp.FinalURL = "http://example.com/"
+	fs := h.Analyze(context.Background(), resp)
+	if hasFinding(fs, "Missing HSTS Header") {
+		t.Errorf("plain-HTTP response must not report missing HSTS, got %+v", fs)
+	}
+	// The TLS-independent headers still fire.
+	if !hasFinding(fs, "Missing CSP Header") {
+		t.Error("CSP check is scheme-independent and must still fire")
 	}
 }
 

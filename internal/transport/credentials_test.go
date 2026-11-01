@@ -186,3 +186,69 @@ func proxyShapeErr(proxy string) error {
 	}
 	return nil
 }
+
+// Scope names hosts, not channels: an in-scope redirect that changes the
+// port (a different service behind the same name) or the scheme (https →
+// http downgrade) must not receive operator credentials.
+func TestScopedCredsNotReplayedOnPortChangeRedirect(t *testing.T) {
+	cookieSeen := ""
+	targetB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if c, err := r.Cookie("sessionid"); err == nil {
+			cookieSeen = c.Value
+		}
+		w.WriteHeader(200)
+	}))
+	defer targetB.Close()
+
+	targetA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, targetB.URL+"/next", http.StatusFound)
+	}))
+	defer targetA.Close()
+
+	client := NewClient(WithCookie("sessionid=SECRET"), WithFollowRedirects(true))
+	defer func() { _ = client.Close() }()
+	// Both test servers live on 127.0.0.1: the hostname scope matches the
+	// redirect destination — only the channel rule may stop the replay.
+	client.SetCredScope("127.0.0.1")
+
+	if _, err := client.Do(context.Background(), &types.Request{Method: "GET", URL: targetA.URL + "/start"}); err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if cookieSeen != "" {
+		t.Errorf("operator cookie rode an in-scope redirect across ports: %q", cookieSeen)
+	}
+}
+
+func TestSameChannelRules(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"https://app.example.com", "http://app.example.com", false}, // downgrade
+		{"https://app.example.com", "https://app.example.com:8443", false},
+		{"https://app.example.com", "https://app.example.com:443", true}, // default port
+		{"https://app.example.com:443", "https://cdn.example.com", true}, // port+scheme ok, host checked by scope
+		{"http://app.example.com", "http://app.example.com", true},
+	}
+	for _, c := range cases {
+		u1, _ := url.Parse(c.a)
+		u2, _ := url.Parse(c.b)
+		if got := sameChannel(u1, u2); got != c.want {
+			t.Errorf("sameChannel(%s, %s) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+// The session store is origin-strict, not host-strict: a cookie captured
+// on :8443 must never replay to :443 behind the same name.
+func TestCookieStoreKeyedPerOriginPort(t *testing.T) {
+	cs := newCookieStore()
+	cs.capture("https://example.com:8443/login", []*http.Cookie{cookieOf("sid", "S1")})
+
+	if hdr := cs.cookieHeader("https://example.com/x"); strings.Contains(hdr, "sid") {
+		t.Error("cookie captured on :8443 replayed to default-https :443")
+	}
+	if hdr := cs.cookieHeader("https://example.com:8443/other"); hdr != "sid=S1" {
+		t.Errorf("same origin must replay, got %q", hdr)
+	}
+}

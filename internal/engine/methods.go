@@ -56,20 +56,27 @@ func (a *HTTPMethodsAnalyzer) Analyze(ctx context.Context, resp *types.Response)
 	}
 
 	if len(risky) > 0 {
-		sev := types.SeverityMedium
+		sev := types.SeverityLow
 		if containsAny(allowed, "TRACE", "TRACK") {
-			sev = types.SeverityHigh
+			sev = types.SeverityMedium
 		}
+		// An "Allow:" header only ADVERTISES methods — it is not proof any of
+		// them actually execute. Servers routinely list PUT/DELETE/TRACE while
+		// answering 405/501 to them. The old code asserted "Methods ENABLED"
+		// at HIGH from the header alone (a keyword claim); the honest framing is
+		// "advertised, execution untested", with a note to verify by issuing
+		// the method against an authorized test resource before trusting it.
 		findings = append(findings, types.Finding{
 			Type:        types.FindingMisconfig,
-			Name:        "Risky HTTP Methods Enabled",
+			Name:        "HTTP Methods Advertised in Allow Header (execution unverified)",
 			Severity:    sev,
-			Description: "Server allows potentially dangerous HTTP methods",
+			Description: "Server advertises potentially dangerous HTTP methods via the Allow/Public header. Advertising is NOT proof of execution — verify by issuing the method against an authorized test resource; TRACE/XST in particular must be confirmed with a live request, not a header",
 			Evidence:    fmt.Sprintf("Allow: %s", allow),
-			Confidence:  0.9,
+			Confidence:  0.5,
 			Metadata: map[string]string{
-				"allowed": allow,
-				"risky":   strings.Join(risky, ", "),
+				"allowed":      allow,
+				"risky":        strings.Join(risky, ", "),
+				"verification": "untested — header-derived only",
 			},
 		})
 	}

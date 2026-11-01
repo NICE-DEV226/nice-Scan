@@ -183,15 +183,35 @@ func (kb *Knowledge) AddSession(s SessionToken) {
 func (kb *Knowledge) AddCapability(c Capability) {
 	kb.mu.Lock()
 	defer kb.mu.Unlock()
-	for _, existing := range kb.capabilities {
-		if existing.Name == c.Name {
-			return
-		}
-	}
 	if c.Origin == "" {
 		c.Origin = OriginObserved
 	}
+	for i, existing := range kb.capabilities {
+		if existing.Name != c.Name {
+			continue
+		}
+		// Evidence grades are one-way: harder evidence may UPGRADE an
+		// origin (hint → observed → verified), never downgrade it. The old
+		// first-writer-wins rule let an early hint freeze the entry and
+		// block the verified upgrade forever — permanently hiding modules
+		// that real execution had legitimately unlocked.
+		if originRank(c.Origin) > originRank(existing.Origin) {
+			kb.capabilities[i].Origin = c.Origin
+		}
+		return
+	}
 	kb.capabilities = append(kb.capabilities, c)
+}
+
+func originRank(origin string) int {
+	switch origin {
+	case OriginVerified:
+		return 2
+	case OriginObserved:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // HasVerifiedCapability reports whether a capability claimed by an action's
@@ -228,7 +248,11 @@ func (kb *Knowledge) AddJWT(j JWTToken) {
 			Target: kb.target,
 		})
 	}
-	if j.Algorithm == "none" || len(j.Raw) > 0 {
+	// Only a token the target itself accepted may ride as the run's
+	// attached identity. A harvested-but-unvalidated or forged token must
+	// never become the Authorization on every later request — it skews
+	// every subsequent differential against a fake identity.
+	if j.Valid {
 		kb.Session.AddToken(j.Raw)
 	}
 }

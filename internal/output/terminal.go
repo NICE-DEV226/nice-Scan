@@ -13,107 +13,30 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-var (
-	surfaceBorder = lipgloss.Color("#2F3346")
-
-	textPrimary = lipgloss.Color("#C0CAF5")
-	textMuted   = lipgloss.Color("#565F89")
-	textDim     = lipgloss.Color("#3B4261")
-
-	accentCyan  = lipgloss.Color("#7DCFFF")
-	accentAmber = lipgloss.Color("#FFB347")
-	accentCoral = lipgloss.Color("#F7768E")
-
-	// Severity - subtle, no neon
-	severityColors = map[types.Severity]lipgloss.Color{
-		types.SeverityCritical: accentCoral,
-		types.SeverityHigh:     accentCoral,
-		types.SeverityMedium:   accentAmber,
-		types.SeverityLow:      accentCyan,
-		types.SeverityInfo:     textMuted,
-	}
-
-	severitySymbols = map[types.Severity]string{
-		types.SeverityCritical: "■",
-		types.SeverityHigh:     "■",
-		types.SeverityMedium:   "◧",
-		types.SeverityLow:      "◇",
-		types.SeverityInfo:     "○",
-	}
-
-	severityLabels = map[types.Severity]string{
-		types.SeverityCritical: "CRITICAL",
-		types.SeverityHigh:     "HIGH",
-		types.SeverityMedium:   "MEDIUM",
-		types.SeverityLow:      "LOW",
-		types.SeverityInfo:     "INFO",
-	}
-)
-
-type TerminalRenderer struct {
-	width  int
-	styles *Styles
+// Severity presentation is keyed off the shared SeverityColor mapping;
+// glyphs give color-free redundancy for terminals without color.
+var severitySymbols = map[types.Severity]string{
+	types.SeverityCritical: "■",
+	types.SeverityHigh:     "■",
+	types.SeverityMedium:   "◆",
+	types.SeverityLow:      "◇",
+	types.SeverityInfo:     "○",
 }
 
-type Styles struct {
-	header   lipgloss.Style
-	panel    lipgloss.Style
-	title    lipgloss.Style
-	label    lipgloss.Style
-	value    lipgloss.Style
-	muted    lipgloss.Style
-	divider  lipgloss.Style
-	severity func(types.Severity) lipgloss.Style
+var severityLabels = map[types.Severity]string{
+	types.SeverityCritical: "CRITICAL",
+	types.SeverityHigh:     "HIGH",
+	types.SeverityMedium:   "MEDIUM",
+	types.SeverityLow:      "LOW",
+	types.SeverityInfo:     "INFO",
+}
+
+type TerminalRenderer struct {
+	width int
 }
 
 func NewTerminal() *TerminalRenderer {
-	r := &TerminalRenderer{
-		width: 78,
-	}
-
-	r.styles = &Styles{
-		header: lipgloss.NewStyle().
-			Foreground(accentCyan).
-			Bold(true).
-			Padding(0, 0, 0, 0),
-
-		panel: lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(surfaceBorder).
-			Padding(1, 2).
-			Width(r.width - 4),
-
-		title: lipgloss.NewStyle().
-			Foreground(textPrimary).
-			Bold(true),
-
-		label: lipgloss.NewStyle().
-			Foreground(textMuted).
-			Width(11),
-
-		value: lipgloss.NewStyle().
-			Foreground(textPrimary),
-
-		muted: lipgloss.NewStyle().
-			Foreground(textMuted),
-
-		divider: lipgloss.NewStyle().
-			Foreground(surfaceBorder),
-
-		severity: func(sev types.Severity) lipgloss.Style {
-			c := severityColors[sev]
-			if c == "" {
-				c = textMuted
-			}
-			return lipgloss.NewStyle().
-				Foreground(c).
-				Bold(true).
-				Width(8).
-				Align(lipgloss.Right)
-		},
-	}
-
-	return r
+	return &TerminalRenderer{width: 78}
 }
 
 func (r *TerminalRenderer) RenderBanner() {
@@ -121,6 +44,7 @@ func (r *TerminalRenderer) RenderBanner() {
 
 	_, _ = fmt.Fprintln(os.Stdout)
 	_, _ = fmt.Fprintln(os.Stdout, RenderLogoCompact())
+	_, _ = fmt.Fprintln(os.Stdout, "  "+Rule(r.width-4))
 	_, _ = fmt.Fprintln(os.Stdout)
 }
 
@@ -128,13 +52,40 @@ func (r *TerminalRenderer) RenderResult(res *engine.ScanResult) {
 	r.renderDashboard(res.Stats)
 	_, _ = fmt.Fprintln(os.Stdout)
 
+	r.renderStacks(res.Stacks)
+
 	r.renderCheckGrid(res)
 	_, _ = fmt.Fprintln(os.Stdout)
 
 	r.renderFindingsOverview(res.Findings)
-	_, _ = fmt.Fprintln(os.Stdout)
 
 	r.renderEmptyState(res.Findings)
+}
+
+// renderStacks shows what the target said it runs — the fingerprint-first
+// detail the probes were conditioned on. Honest fallback: when no signal
+// came back, it says the full probe set was kept instead of pretending a
+// stack was read.
+func (r *TerminalRenderer) renderStacks(stacks []engine.StackReport) {
+	if len(stacks) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintln(os.Stdout, Section("Stack"))
+	for _, st := range stacks {
+		line := "  " + LabelStyle.Width(10).Render("Server") + ValueStyle.Render(st.Detail)
+		_, _ = fmt.Fprintln(os.Stdout, line)
+		note := "  " + LabelStyle.Width(10).Render("Probes")
+		if st.Conditioned {
+			note += MutedStyle.Render("stack-conditioned — family-specific paths limited to the detected stack")
+		} else {
+			note += MutedStyle.Render("full set kept — no stack signal to condition on")
+		}
+		_, _ = fmt.Fprintln(os.Stdout, note)
+		if len(stacks) > 1 {
+			_, _ = fmt.Fprintln(os.Stdout, "  "+MutedStyle.Render(st.Target))
+		}
+	}
+	_, _ = fmt.Fprintln(os.Stdout)
 }
 
 func (r *TerminalRenderer) renderCheckGrid(res *engine.ScanResult) {
@@ -142,10 +93,11 @@ func (r *TerminalRenderer) renderCheckGrid(res *engine.ScanResult) {
 		return
 	}
 
+	_, _ = fmt.Fprintln(os.Stdout, Section("Modules"))
+
 	colCount := 2
 	perCol := (len(res.AnalyzerNames) + colCount - 1) / colCount
 
-	var rows []string
 	for row := 0; row < perCol; row++ {
 		var cells []string
 		for col := 0; col < colCount; col++ {
@@ -153,23 +105,11 @@ func (r *TerminalRenderer) renderCheckGrid(res *engine.ScanResult) {
 			if idx >= len(res.AnalyzerNames) {
 				break
 			}
-			name := res.AnalyzerNames[idx]
-			cell := lipgloss.NewStyle().Foreground(textPrimary).Width(20).Render(name) +
-				lipgloss.NewStyle().Foreground(textMuted).Render("●")
+			cell := MutedStyle.Width(22).Render("· " + res.AnalyzerNames[idx])
 			cells = append(cells, cell)
 		}
-		rows = append(rows, strings.Join(cells, "  "))
+		_, _ = fmt.Fprintln(os.Stdout, "  "+strings.Join(cells, ""))
 	}
-
-	content := lipgloss.JoinVertical(lipgloss.Left, rows...)
-	panel := r.styles.panel.Render(
-		lipgloss.JoinVertical(lipgloss.Left,
-			lipgloss.NewStyle().Foreground(textPrimary).Bold(true).Padding(0, 2).Render("Analysis Modules"),
-			"",
-			content,
-		),
-	)
-	_, _ = fmt.Fprintln(os.Stdout, panel)
 }
 
 func (r *TerminalRenderer) RenderTransportStats(s transport.RequestStats) {
@@ -177,69 +117,28 @@ func (r *TerminalRenderer) RenderTransportStats(s transport.RequestStats) {
 }
 
 func (r *TerminalRenderer) renderDashboard(stats engine.ScanStats) {
-	rows := []string{}
+	_, _ = fmt.Fprintln(os.Stdout, Section("Scan"))
 
-	rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Left,
-		r.styles.label.Render("Target"),
-		r.styles.value.Render(stats.Target),
-	))
+	_, _ = fmt.Fprintln(os.Stdout, KV("Target", stats.Target, 10))
 
-	rows = append(rows, "")
-
-	requestsLabel := r.styles.label.Render("Requests")
-	requestsVal := r.styles.value.Render(fmt.Sprintf("%d/%d", stats.Completed, stats.Total))
-
-	latency := stats.Duration
-	var rate float64
-	if latency > 0 {
-		rate = float64(stats.Total) / latency.Seconds()
+	requests := fmt.Sprintf("%d/%d", stats.Completed, stats.Total)
+	var rate string
+	if stats.Duration > 0 {
+		rate = fmt.Sprintf("  ·  %.0f req/s", float64(stats.Total)/stats.Duration.Seconds())
 	}
+	_, _ = fmt.Fprintln(os.Stdout, KV("Requests", fmt.Sprintf("%s  ·  %d workers%s", requests, stats.Workers, rate), 10))
 
-	rateLabel := r.styles.label.Render("Rate")
-	rateVal := r.styles.value.Render(fmt.Sprintf("%.0f/s", rate))
-
-	rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Left,
-		requestsLabel, requestsVal,
-	))
-
-	rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Left,
-		rateLabel, rateVal,
-	))
-
-	workersLabel := r.styles.label.Render("Workers")
-	workersVal := r.styles.value.Render(fmt.Sprintf("%d", stats.Workers))
-	failedLabel := r.styles.label.Render("Failed")
-	failedVal := r.styles.value.Render(fmt.Sprintf("%d", stats.Failed))
+	failedLine := "  " + LabelStyle.Width(10).Render("Failed")
 	if stats.Failed > 0 {
-		failedVal = lipgloss.NewStyle().Foreground(accentCoral).Render(fmt.Sprintf("%d", stats.Failed))
+		failedLine += FailStyle.Render(fmt.Sprintf("%d", stats.Failed))
+	} else {
+		failedLine += ValueStyle.Render("0")
 	}
+	_, _ = fmt.Fprintln(os.Stdout, failedLine)
 
-	duration := stats.Duration.Round(time.Millisecond).String()
-	durationLabel := r.styles.label.Render("Duration")
-	durationVal := r.styles.value.Render(duration)
-
-	panel := r.styles.panel.Render(
-		lipgloss.JoinVertical(lipgloss.Left,
-			rows[0],
-			rows[1],
-			rows[2],
-			rows[3],
-			"",
-			lipgloss.JoinHorizontal(lipgloss.Left,
-				workersLabel, workersVal,
-			),
-			lipgloss.JoinHorizontal(lipgloss.Left,
-				failedLabel, failedVal,
-			),
-			lipgloss.JoinHorizontal(lipgloss.Left,
-				durationLabel, durationVal,
-			),
-			"",
-			r.progressBar(stats.Completed, stats.Total),
-		),
-	)
-
-	_, _ = fmt.Fprintln(os.Stdout, panel)
+	_, _ = fmt.Fprintln(os.Stdout, KV("Duration", stats.Duration.Round(time.Millisecond).String(), 10))
+	_, _ = fmt.Fprintln(os.Stdout)
+	_, _ = fmt.Fprintln(os.Stdout, "  "+r.progressBar(stats.Completed, stats.Total))
 }
 
 func (r *TerminalRenderer) renderFindingsOverview(findings []types.Finding) {
@@ -269,23 +168,19 @@ func (r *TerminalRenderer) renderFindingsOverview(findings []types.Finding) {
 		if count == 0 {
 			continue
 		}
-		color := severityColors[sev]
-		if color == "" {
-			color = textMuted
+		countStyle := SeverityStyle(string(sev))
+		if sev == types.SeverityCritical || sev == types.SeverityHigh || sev == types.SeverityMedium {
+			countStyle = countStyle.Bold(true)
 		}
-		style := lipgloss.NewStyle().Foreground(color).Bold(true)
-		label := lipgloss.NewStyle().Foreground(textMuted).Render(strings.ToLower(string(sev)))
-		countParts = append(countParts, fmt.Sprintf("%s %s %d", style.Render(severitySymbols[sev]), label, count))
+		countParts = append(countParts, fmt.Sprintf("%s %s",
+			countStyle.Render(fmt.Sprintf("%d", count)),
+			MutedStyle.Render(severityLabels[sev]),
+		))
 	}
 
-	summary := strings.Join(countParts, "  ·  ")
-
-	header := lipgloss.NewStyle().Foreground(textMuted).Padding(0, 2).Render("Findings")
-
-	_, _ = fmt.Fprintln(os.Stdout, lipgloss.JoinVertical(lipgloss.Left,
-		header,
-		lipgloss.NewStyle().Padding(0, 2, 1, 2).Render(summary),
-	))
+	_, _ = fmt.Fprintln(os.Stdout, Section("Findings"))
+	_, _ = fmt.Fprintln(os.Stdout, "  "+strings.Join(countParts, "   "))
+	_, _ = fmt.Fprintln(os.Stdout)
 
 	for _, sev := range order {
 		count := severityCounts[sev]
@@ -298,19 +193,15 @@ func (r *TerminalRenderer) renderFindingsOverview(findings []types.Finding) {
 
 func (r *TerminalRenderer) renderSeverityGroup(sev types.Severity, findings []types.Finding) {
 	sym := severitySymbols[sev]
-	color := severityColors[sev]
+	color := SeverityColor(string(sev))
 	label := severityLabels[sev]
 
-	header := lipgloss.NewStyle().
-		Foreground(color).
-		Bold(true).
-		Padding(0, 2, 0, 2).
-		Render(fmt.Sprintf("%s  %s", sym, label))
-
-	_, _ = fmt.Fprintln(os.Stdout, header)
+	_, _ = fmt.Fprintln(os.Stdout, "  "+lipgloss.NewStyle().Foreground(color).Render(
+		fmt.Sprintf("%s %s", sym, label),
+	))
 
 	for _, f := range findings {
-		// A finding renders with its OWN severity color: grouping is by
+		// A finding renders under its OWN severity marker: grouping is by
 		// header, and a mis-stamped severity must not inherit the group
 		// hue (a Critical row in the Medium block reads as Medium).
 		if f.Severity != sev {
@@ -323,52 +214,24 @@ func (r *TerminalRenderer) renderSeverityGroup(sev types.Severity, findings []ty
 }
 
 func (r *TerminalRenderer) renderFinding(f types.Finding) {
-	color := severityColors[f.Severity]
-	var version string
+	// The severity glyph carries the color; the finding name stays neutral
+	// ink — coloring whole finding text would dilute the one signal
+	// that matters.
+	glyph := SeverityStyle(string(f.Severity)).Render(severitySymbols[f.Severity])
+	_, _ = fmt.Fprintln(os.Stdout, "    "+glyph+"  "+ValueStyle.Render(types.Sanitize(f.Name)))
+
 	if f.Metadata != nil {
-		version = types.Sanitize(f.Metadata["version"])
+		if version := types.Sanitize(f.Metadata["version"]); version != "" {
+			_, _ = fmt.Fprintln(os.Stdout, Detail("  "+FaintStyle.Render(version)))
+		}
 	}
 
-	var name string
-	if version != "" {
-		name = lipgloss.NewStyle().
-			Foreground(color).
-			Padding(0, 0, 0, 4).
-			Render(types.Sanitize(f.Name))
-
-		ver := lipgloss.NewStyle().
-			Foreground(accentCyan).
-			Padding(0, 0, 0, 4).
-			Render(version)
-
-		_, _ = fmt.Fprintln(os.Stdout, name)
-		_, _ = fmt.Fprintln(os.Stdout, ver)
-	} else {
-		name = lipgloss.NewStyle().
-			Foreground(color).
-			Padding(0, 0, 0, 4).
-			Render(types.Sanitize(f.Name))
-		_, _ = fmt.Fprintln(os.Stdout, name)
-	}
-
-	var desc string
 	if f.Evidence != "" {
-		desc = lipgloss.NewStyle().
-			Foreground(textMuted).
-			Padding(0, 0, 0, 4).
-			Render(r.truncate(types.Sanitize(f.Evidence), r.width-20))
+		_, _ = fmt.Fprintln(os.Stdout, Detail(MutedStyle.Render(r.truncate(types.Sanitize(f.Evidence), r.width-24))))
 	}
 
-	confidence := lipgloss.NewStyle().
-		Foreground(textDim).
-		Padding(0, 0, 0, 4).
-		Render(fmt.Sprintf("%.0f%% confidence", f.Confidence*100))
-
-	if desc != "" {
-		_, _ = fmt.Fprintln(os.Stdout, desc)
-	}
-	_, _ = fmt.Fprintln(os.Stdout, confidence)
-	_, _ = fmt.Fprintln(os.Stdout)
+	confidence := FaintStyle.Render(fmt.Sprintf("%.0f%% confidence", f.Confidence*100))
+	_, _ = fmt.Fprintln(os.Stdout, Detail(confidence))
 }
 
 func (r *TerminalRenderer) renderEmptyState(findings []types.Finding) {
@@ -376,12 +239,8 @@ func (r *TerminalRenderer) renderEmptyState(findings []types.Finding) {
 		return
 	}
 
-	msg := lipgloss.NewStyle().
-		Foreground(textMuted).
-		Padding(0, 2).
-		Render("No issues detected. Target appears clean.")
-
-	_, _ = fmt.Fprintln(os.Stdout, msg)
+	_, _ = fmt.Fprintln(os.Stdout)
+	_, _ = fmt.Fprintln(os.Stdout, MutedStyle.Render("  No findings. Target appears clean against the checks run."))
 }
 
 func (r *TerminalRenderer) renderTransportStats(s transport.RequestStats) {
@@ -389,11 +248,10 @@ func (r *TerminalRenderer) renderTransportStats(s transport.RequestStats) {
 		return
 	}
 
-	items := []string{}
+	_, _ = fmt.Fprintln(os.Stdout)
+	_, _ = fmt.Fprintln(os.Stdout, Section("Transport"))
 	addStat := func(l, v string) {
-		lbl := lipgloss.NewStyle().Foreground(textMuted).Width(13).Render(l)
-		val := lipgloss.NewStyle().Foreground(textPrimary).Render(v)
-		items = append(items, lbl+val)
+		_, _ = fmt.Fprintln(os.Stdout, KV(l, v, 15))
 	}
 
 	addStat("Total Requests", fmt.Sprintf("%d", s.Total))
@@ -406,12 +264,6 @@ func (r *TerminalRenderer) renderTransportStats(s transport.RequestStats) {
 		addStat("Rate Limited", fmt.Sprintf("%d", s.RateLimited))
 	}
 	addStat("Elapsed", s.TotalTime.Round(time.Millisecond).String())
-
-	content := lipgloss.JoinVertical(lipgloss.Left, items...)
-
-	panel := r.styles.panel.Render(content)
-
-	_, _ = fmt.Fprintln(os.Stdout, panel)
 }
 
 func (r *TerminalRenderer) progressBar(current, total int) string {
@@ -433,19 +285,14 @@ func (r *TerminalRenderer) progressBar(current, total int) string {
 		filled = barWidth
 	}
 
-	fill := strings.Repeat("━", filled)
+	fill := strings.Repeat("─", filled)
 	empty := strings.Repeat("─", barWidth-filled)
 
-	bar := lipgloss.NewStyle().Foreground(accentCyan).Render(fill) +
-		lipgloss.NewStyle().Foreground(surfaceBorder).Render(empty)
+	bar := AccentStyle.Render(fill) + FaintStyle.Render(empty)
 
-	pctStr := lipgloss.NewStyle().
-		Foreground(textMuted).
-		Width(5).
-		Align(lipgloss.Right).
-		Render(fmt.Sprintf("%3.0f%%", pct*100))
+	pctStr := MutedStyle.Width(5).Align(lipgloss.Right).Render(fmt.Sprintf("%3.0f%%", pct*100))
 
-	return lipgloss.JoinHorizontal(lipgloss.Center, bar, " ", pctStr)
+	return bar + " " + pctStr
 }
 
 func (r *TerminalRenderer) truncate(s string, maxLen int) string {

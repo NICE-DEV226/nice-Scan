@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"html"
 	"strings"
 	"time"
 
@@ -21,6 +22,9 @@ type Report struct {
 	Risks       []types.Finding
 	Exposures   []types.Finding
 	Summary     ReportSummary
+	// Stacks: the fingerprint-first read the path probes were conditioned
+	// on — the report must explain why a family probe is ABSENT.
+	Stacks []StackReport
 }
 
 type ReportSummary struct {
@@ -42,6 +46,7 @@ func GenerateReport(result *ScanResult) *Report {
 		TotalReqs:   result.Stats.Total,
 		FailedReqs:  result.Stats.Failed,
 		Findings:    result.Findings,
+		Stacks:      result.Stacks,
 		SeverityMap: make(map[types.Severity]int),
 	}
 
@@ -194,7 +199,22 @@ func (r *Report) RenderHTML() string {
 	b.WriteString(`</span>
     </div>
   </div>
-
+`)
+	for _, st := range r.Stacks {
+		conditioned := "full probe set kept — no stack signal to condition on"
+		if st.Conditioned {
+			conditioned = "stack-conditioned — family-specific probes limited to the detected stack"
+		}
+		b.WriteString(`  <div class="summary-box"><h2>Target Stack (read before probing)</h2>
+    <div class="row"><span class="lbl">Detected</span><span class="val">`)
+		b.WriteString(html.EscapeString(st.Detail))
+		b.WriteString(`</span></div>
+    <div class="row"><span class="lbl">Probes</span><span class="val">`)
+		b.WriteString(conditioned)
+		b.WriteString(`</span></div></div>
+`)
+	}
+	b.WriteString(`
   <div class="score-card">
     <div class="score-item"><div class="num critical">`)
 	fmt.Fprintf(&b, "%d", r.Summary.Critical)

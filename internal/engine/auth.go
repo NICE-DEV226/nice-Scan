@@ -10,20 +10,30 @@ import (
 )
 
 var (
-	rxLoginForm     = regexp.MustCompile(`(?i)<form[^>]*>.*?<input[^>]*type=["']?password["'\]].*?</form>`)
+	// (?s) so the lazy ".*?" between <form> and </form> crosses NEWLINES:
+	// a real login/registration form is written across many lines, and
+	// without the dotall flag this regex matched almost nothing in the wild
+	// (it only caught single-line minified forms).
+	rxLoginForm     = regexp.MustCompile(`(?is)<form[^>]*>.*?<input[^>]*type=["']?password["'\]].*?</form>`)
 	rxPasswordField = regexp.MustCompile(`(?i)<input[^>]*type=["']?password["' ][^>]*>`)
 	rxUsernameField = regexp.MustCompile(`(?i)<input[^>]*(?:name|id)["']?\s*=\s*["']?(?:user|email|login|username|log)["'][^>]*>`)
 	rxLoginAction   = regexp.MustCompile(`(?i)<form[^>]*action=["']([^"']+)["']`)
 
 	rxAdminPanel = regexp.MustCompile(`(?i)(admin|dashboard|panel|backend|cpanel|administrator|wp-admin|manager)`)
 
-	rxRegisterForm = regexp.MustCompile(`(?i)<form[^>]*>.*?(?:register|signup|create-account).*?</form>`)
+	rxRegisterForm = regexp.MustCompile(`(?is)<form[^>]*>.*?(?:register|signup|create-account|create account).*?</form>`)
 
-	rxForgotPassword = regexp.MustCompile(`(?i)(forgot|reset|recover|lost)\s*(password|pwd)`)
+	rxForgotPassword = regexp.MustCompile(`(?i)\b(?:forgot|reset|recover|lost)\b[\s\S]{0,20}?\b(?:password|pwd)\b`)
 
 	rxUserEnumError = regexp.MustCompile(`(?i)(user|account|email|username).{0,20}(not found|doesn't exist|invalid|does not exist|incorrect|unknown)`)
 
-	rxRoleIndicator = regexp.MustCompile(`(?i)(role|admin|moderator|editor|manager|superuser|privilege|permission|access_level)`)
+	// A role is only LEAKED when a privilege KEY is bound to a PRIVILEGED
+	// VALUE. Word boundaries + ":"/"=" alone still matched ARIA markup such as
+	// role="img" (a plain page fired "Privilege Information Exposed" on an
+	// image's accessibility role), and role="user" is not a secret. Require the
+	// value to be a real authority token (admin/root/owner/…) or a boolean
+	// grant (is_admin=true), so only a genuine privilege disclosure matches.
+	rxRoleIndicator = regexp.MustCompile(`(?i)["'` + "`" + `]?(\b(?:role|access_level|permission|privilege|user_role|user_type|account_type|is_admin|is_superuser)\b)["'` + "`" + `]?\s*[:=]\s*["'` + "`" + `]?(?:admin(?:istrator)?|superuser|super_admin|root|owner|moderator|privileged|true|1)\b`)
 )
 
 type AuthAnalyzer struct{}

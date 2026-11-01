@@ -426,6 +426,24 @@ func (a *JSSecretsAction) Execute(ctx context.Context, target string, kb *Knowle
 			}
 			seenLiteral[hit.Literal] = true
 
+			// Feed the JWT forge module: a token actually read from a
+			// served asset is the scanner's real JWT inventory. Harvest
+			// only — acceptance stays unprobed (Valid=false).
+			if hit.Pattern == "Embedded JWT" {
+				if header, claims, _, derr := decodeJWT(hit.Literal); derr == nil {
+					alg, _ := header["alg"].(string)
+					roleClaim, _ := claims["role"].(string)
+					kb.AddJWT(JWTToken{
+						Raw:       hit.Literal,
+						Algorithm: alg,
+						Header:    header,
+						Payload:   claims,
+						Role:      roleClaim,
+						Valid:     false,
+					})
+				}
+			}
+
 			findings = append(findings, Finding{
 				Type:     "js_secret_literal",
 				Name:     fmt.Sprintf("%s in served JS: %s", hit.Pattern, types.Sanitize(asset)),

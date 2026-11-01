@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/NICE-DEV226/nice-Scan/internal/fingerprint"
 	"github.com/NICE-DEV226/nice-Scan/internal/transport"
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
@@ -24,21 +25,44 @@ func (a *FuzzAction) Metadata() ActionMetadata {
 	}
 }
 
-var commonPaths = []string{
-	"/admin", "/api", "/api/v1", "/api/v2", "/graphql",
-	"/.git/config", "/.env", "/.htaccess", "/.well-known/security.txt",
-	"/backup", "/config", "/dashboard", "/debug", "/health",
-	"/info", "/internal", "/logs", "/metrics", "/monitor",
-	"/phpinfo.php", "/robots.txt", "/sitemap.xml",
-	"/static", "/status", "/swagger", "/swagger-resources",
-	"/test", "/uploads", "/vendor", "/version",
-	"/webhook", "/ws", "/wp-admin", "/wp-content",
-	"/api/graphql", "/api/health", "/api/status",
-	"/api/users", "/api/admin", "/api/docs",
-	"/api/swagger.json", "/api/openapi.json",
-	"/actuator", "/actuator/health",
-	"/.git/HEAD", "/console", "/manage",
-	"/shell", "/cmd", "/exec",
+// stackPath is a fuzz target tagged with the server-side family it only
+// exists for ("" = stack-agnostic, always probed). FuzzAction classifies
+// the stack from the homepage response first and skips probes belonging
+// to families the target demonstrably does not run — spraying
+// /phpinfo.php at a Python server produced only noise rows and load.
+type stackPath struct {
+	path   string
+	family string
+}
+
+var commonPaths = []stackPath{
+	{"/admin", ""}, {"/api", ""}, {"/api/v1", ""}, {"/api/v2", ""}, {"/graphql", ""},
+	{"/.git/config", ""}, {"/.env", ""}, {"/.htaccess", fingerprint.FamPHP},
+	{"/.well-known/security.txt", ""},
+	{"/backup", ""}, {"/config", ""}, {"/dashboard", ""}, {"/debug", ""}, {"/health", ""},
+	{"/info", ""}, {"/internal", ""}, {"/logs", ""}, {"/metrics", ""}, {"/monitor", ""},
+	{"/phpinfo.php", fingerprint.FamPHP}, {"/robots.txt", ""}, {"/sitemap.xml", ""},
+	{"/static", ""}, {"/status", ""}, {"/swagger", ""}, {"/swagger-resources", fingerprint.FamJava},
+	{"/test", ""}, {"/uploads", ""}, {"/vendor", ""}, {"/version", ""},
+	{"/webhook", ""}, {"/ws", ""}, {"/wp-admin", fingerprint.FamWP}, {"/wp-content", fingerprint.FamWP},
+	{"/api/graphql", ""}, {"/api/health", ""}, {"/api/status", ""},
+	{"/api/users", ""}, {"/api/admin", ""}, {"/api/docs", ""},
+	{"/api/swagger.json", ""}, {"/api/openapi.json", ""},
+	{"/actuator", fingerprint.FamJava}, {"/actuator/health", fingerprint.FamJava},
+	{"/.git/HEAD", ""}, {"/console", ""}, {"/manage", ""},
+	{"/shell", ""}, {"/cmd", ""}, {"/exec", ""},
+}
+
+// pathsForStack filters the battery to probes the detected stack makes
+// sense for. Unknown stack keeps everything (Allows rule).
+func pathsForStack(st fingerprint.Stack) []stackPath {
+	out := make([]stackPath, 0, len(commonPaths))
+	for _, p := range commonPaths {
+		if st.Allows(p.family) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 var commonParams = []string{
@@ -59,17 +83,17 @@ type fuzzBaseline struct {
 	hash        [32]byte
 }
 
-func captureBaseline(ctx context.Context, client *transport.Client, probeURL string) *fuzzBaseline {
+func captureBaseline(ctx context.Context, client *transport.Client, probeURL string) (*fuzzBaseline, *types.Response) {
 	resp, err := client.Do(ctx, &types.Request{Method: "GET", URL: probeURL})
 	if err != nil || resp == nil {
-		return nil
+		return nil, nil
 	}
 	return &fuzzBaseline{
 		status:      resp.StatusCode,
 		length:      len(resp.Body),
 		contentType: resp.ContentType,
 		hash:        sha256.Sum256(resp.Body),
-	}
+	}, resp
 }
 
 // matches reports whether resp looks like the not-found control. A target
@@ -140,17 +164,32 @@ func (a *FuzzAction) Execute(ctx context.Context, target string, kb *Knowledge, 
 
 	// One control request: what does this target answer for a path that
 	// cannot exist? A random suffix keeps it out of any real route.
-	control := captureBaseline(ctx, client, baseURL+"/nice-scan-not-found-8f3a2c1b.html")
-	// The unparameterised page is the control for parameter probing.
-	home := captureBaseline(ctx, client, baseURL)
+	control, _ := captureBaseline(ctx, client, baseURL+"/nice-scan-not-found-8f3a2c1b.html")
+	// The unparameterised page is the control for parameter probing — and
+	// the fingerprint source: the battery is conditioned on the stack THIS
+	// response reports, not on a static wish list.
+	home, homeResp := captureBaseline(ctx, client, baseURL)
+	stack := fingerprint.Classify(homeResp)
+	paths := pathsForStack(stack)
+	if stack.Known() {
+		skipped := len(commonPaths) - len(paths)
+		findings = append(findings, Finding{
+			Type:        "fuzz_stack_conditioned",
+			Name:        fmt.Sprintf("Fuzzing conditioned on stack: %s", stack.String()),
+			Severity:    SevInfo,
+			Description: fmt.Sprintf("%d family-specific probes skipped for stacks the target does not claim (%d/%d paths kept)", skipped, len(paths), len(commonPaths)),
+			Evidence:    baseURL,
+		})
+	}
 
-	for _, path := range commonPaths {
+	for _, sp := range paths {
 		select {
 		case <-ctx.Done():
 			return ActionResult{Findings: findings}
 		default:
 		}
 
+		path := sp.path
 		u := baseURL + path
 		if kb.IsChecked(u) {
 			continue
@@ -173,7 +212,13 @@ func (a *FuzzAction) Execute(ctx context.Context, target string, kb *Knowledge, 
 
 		if isInterestingPath(resp) {
 			ep := Endpoint{
-				Path:        path,
+				// ABSOLUTE URL, not the bare path: every consumer
+				// (sqli.go, lfi.go, cmd-injection, graphql.go) feeds
+				// ep.Path straight into client.Do as a request URL — a
+				// scheme-less "/admin" made the transport error on every
+				// probe and silently killed SQLi/LFI/CMD/GraphQL in
+				// orchestrated runs.
+				Path:        u,
 				Method:      "GET",
 				Status:      resp.StatusCode,
 				BodyLen:     len(resp.Body),
