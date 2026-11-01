@@ -157,7 +157,7 @@ func looksLikeRealValue(v string) bool {
 	}
 	// A credential worth reporting mixes case or carries a non-letter.
 	return strings.IndexFunc(v, func(r rune) bool {
-		return !('a' <= r && r <= 'z' || 'A' <= r && r <= 'Z')
+		return (r < 'a' || r > 'z') && (r < 'A' || r > 'Z')
 	}) >= 0
 }
 
