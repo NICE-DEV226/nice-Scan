@@ -9,7 +9,6 @@ import (
 // this file only wires the few styles the dashboard adds on top.
 var (
 	textPrimary = output.Ink
-	textMuted   = output.Muted
 	accentCyan  = output.Accent
 
 	panelStyle = output.PanelStyle
