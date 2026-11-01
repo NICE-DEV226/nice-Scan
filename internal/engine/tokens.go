@@ -116,22 +116,11 @@ func (t *TokenExtractor) Analyze(ctx context.Context, resp *types.Response) []ty
 		}
 	}
 
-	patterns := []struct {
-		rx   *regexp.Regexp
-		name string
-		sev  types.Severity
-		desc string
-		conf float64
-	}{
-		{rxAccessToken, "Access Token Leaked", types.SeverityCritical, "Access token exposed in response body", 0.85},
-		{rxAPIToken, "API Key / Token Leaked", types.SeverityCritical, "API key or token exposed in response body", 0.85},
-		{rxSecret, "Secret Key Leaked", types.SeverityCritical, "Secret key exposed in response body", 0.8},
-		{rxPassword, "Password Leaked", types.SeverityCritical, "Password or credential exposed in response body", 0.85},
-		{rxAuth, "Authorization Credential Leaked", types.SeverityHigh, "Authorization credential exposed in response", 0.75},
-		{rxBasicAuth, "Basic Auth Credential", types.SeverityHigh, "Base64-encoded Basic Authentication credentials found", 0.8},
-	}
+	// reported seeds the buried/decoded pass so a value already found raw is not
+	// re-reported when the same bytes also appear inside a decoded view.
+	reported := map[string]bool{}
 
-	for _, p := range patterns {
+	for _, p := range credPatterns {
 		select {
 		case <-ctx.Done():
 			return findings
@@ -146,6 +135,7 @@ func (t *TokenExtractor) Analyze(ctx context.Context, resp *types.Response) []ty
 				continue
 			}
 			val := truncate(m[1], 30)
+			reported[val] = true
 			findings = append(findings, types.Finding{
 				Type:        types.FindingSecret,
 				Name:        p.name,
@@ -156,6 +146,29 @@ func (t *TokenExtractor) Analyze(ctx context.Context, resp *types.Response) []ty
 			})
 		}
 	}
+
+	// Basic-Auth: report the base64 blob only when it does NOT decode; when it
+	// does, replace the blob with the actionable user + masked-password pair
+	// (the password never leaves in plaintext in the report).
+	for _, m := range rxBasicAuth.FindAllStringSubmatch(body, -1) {
+		if len(m) < 2 {
+			continue
+		}
+		if dec := decodeBasicAuth(m[1]); dec != nil {
+			findings = append(findings, *dec)
+		} else {
+			findings = append(findings, types.Finding{
+				Type:        types.FindingSecret,
+				Name:        "Basic Auth Credential",
+				Severity:    types.SeverityHigh,
+				Description: "Base64-encoded Basic Authentication credentials found",
+				Evidence:    truncate(m[1], 30),
+				Confidence:  0.8,
+			})
+		}
+	}
+
+	findings = append(findings, findBuriedCreds(body, reported)...)
 
 	return findings
 }
