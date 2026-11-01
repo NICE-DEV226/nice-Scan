@@ -57,16 +57,10 @@ var (
 	}
 )
 
-// maskSecret keeps a credential's length (useful for classing it) without
-// reproducing the value: a decoded Basic password must never enter the JSON or
-// HTML report in plaintext.
-func maskSecret(v string) string {
-	n := len(strings.TrimSpace(v))
-	if n == 0 {
-		return "<empty>"
-	}
-	return fmt.Sprintf("<masked len=%d>", n)
-}
+// maskSecret keeps a credential's length without reproducing the value; it
+// delegates to the one project-wide masking helper so every surface masks
+// identically. A decoded Basic password must never enter a report in plaintext.
+func maskSecret(v string) string { return types.MaskSecret(v) }
 
 // mostlyPrintable guards base64 decoding: a real encoded credential decodes to
 // text, whereas random base64 in a bundle decodes to binary and would only

@@ -411,12 +411,13 @@ func (b *Brain) RenderReport(report *Report) {
 		fmt.Println(output.Section("Credentials"))
 		fmt.Println()
 		for _, c := range report.Credentials {
+			shown := types.Sanitize(c.Username) + ":" + types.MaskSecret(c.Password)
 			if c.Valid {
 				fmt.Printf("  %s %s\n", styleRed.Render("■"),
-					output.ValueStyle.Render(types.Sanitize(c.Username)+":"+types.Sanitize(c.Password))+" "+styleRed.Render("valid"))
+					output.ValueStyle.Render(shown)+" "+styleRed.Render("valid"))
 			} else {
 				fmt.Printf("  %s %s\n", output.FaintStyle.Render("·"),
-					output.MutedStyle.Render(types.Sanitize(c.Username)+":"+types.Sanitize(c.Password))+" "+output.FaintStyle.Render("tested"))
+					output.MutedStyle.Render(shown)+" "+output.FaintStyle.Render("tested"))
 			}
 		}
 		fmt.Println()

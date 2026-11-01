@@ -508,14 +508,15 @@ func (m *Model) exec(cmd string, target string) tea.Cmd {
 						cl = clCoral
 						sym = "✓"
 					}
-					// Echo the password ONLY on a verified success — that is
-					// the credential the operator actually needs. Failed spray
-					// rows show the tried username and status, never the
-					// plaintext guess, so the credential list does not linger
-					// in terminal scrollback / logs for every miss.
+					// The password NEVER rides the terminal in plaintext, not
+					// even on a verified hit — a working credential is what
+					// most needs keeping out of scrollback and logs. The
+					// operator uses the captured session (--access) to act
+					// on it; the mask proves which pair the differential
+					// accepted without disclosing the secret itself.
 					shown := r.Username
 					if r.Success {
-						shown = r.Username + ":" + r.Password
+						shown = r.Username + ":" + types.MaskSecret(r.Password)
 					}
 					expLines = append(expLines, lipgloss.NewStyle().Foreground(cl).Padding(0, 4).Render(
 						fmt.Sprintf("  %s %s → %d", sym, shown, r.StatusCode),

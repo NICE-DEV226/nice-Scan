@@ -140,10 +140,10 @@ func (a *LoginBruteAction) Execute(ctx context.Context, target string, kb *Knowl
 
 				findings = append(findings, Finding{
 					Type:        "login_valid",
-					Name:        fmt.Sprintf("Valid credentials: %s:%s", cred[0], cred[1]),
+					Name:        fmt.Sprintf("Valid credentials: %s:%s", types.Sanitize(cred[0]), types.MaskSecret(cred[1])),
 					Severity:    SevCritical,
 					Description: fmt.Sprintf("Login successful at %s (differential verdict vs junk-credential baseline)", actionURL),
-					Evidence:    fmt.Sprintf("%s:%s → %d richer than baseline", cred[0], cred[1], loginResp.StatusCode),
+					Evidence:    fmt.Sprintf("%s:%s → %d richer than baseline", types.Sanitize(cred[0]), types.MaskSecret(cred[1]), loginResp.StatusCode),
 					Details:     map[string]string{"verification": "baseline-differential"},
 				})
 
