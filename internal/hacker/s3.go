@@ -189,27 +189,22 @@ func generateBucketNames(target string, kb *Knowledge) []string {
 	return candidates
 }
 
+// isPublicBucket reports true only on executed proof that an anonymous GET
+// of the bucket root returns a real object listing. The previous verdict
+// counted 301/307 redirects (region errors, console redirects — list
+// nothing) and any non-error 200 body between 100 and 100000 bytes as a
+// "possible directory listing", minting SevCritical "public bucket" over
+// ordinary landing pages. A listing must carry the S3 ListBucketResult
+// envelope AND at least one object entry (<Contents>/<Key>).
 func isPublicBucket(resp *types.Response) bool {
-	if resp.StatusCode == 200 || resp.StatusCode == 301 || resp.StatusCode == 307 {
-		body := string(resp.Body)
-		lowBody := strings.ToLower(body)
-		if strings.Contains(lowBody, "listbucketresult") ||
-			strings.Contains(lowBody, "contents") ||
-			strings.Contains(lowBody, "<key>") ||
-			strings.Contains(lowBody, "<name>") ||
-			strings.Contains(lowBody, "anonymous") {
-			return true
-		}
-		if !strings.Contains(lowBody, "accessdenied") &&
-			!strings.Contains(lowBody, "access denied") &&
-			!strings.Contains(lowBody, "notfound") {
-			// Possible directory listing
-			if len(resp.Body) > 100 && len(resp.Body) < 100000 {
-				return true
-			}
-		}
+	if resp.StatusCode != 200 {
+		return false
 	}
-	return false
+	lowBody := strings.ToLower(string(resp.Body))
+	if !strings.Contains(lowBody, "<listbucketresult") {
+		return false
+	}
+	return strings.Contains(lowBody, "<contents>") || strings.Contains(lowBody, "<key>")
 }
 
 func extractBucketName(bucketURL string) string {

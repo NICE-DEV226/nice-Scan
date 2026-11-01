@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NICE-DEV226/nice-Scan/internal/fingerprint"
 	"github.com/NICE-DEV226/nice-Scan/internal/transport"
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
@@ -109,7 +110,7 @@ func TestXSSAnalyzerNonProbeRequestsSilent(t *testing.T) {
 // exactly the token the analyzer was built with, URL-encoded markup.
 func TestScannerXSSCanaryContract(t *testing.T) {
 	s := NewScanner(&types.Config{}, transport.NewClient())
-	reqs := s.buildProbes("http://target.local")
+	reqs := s.buildProbes("http://target.local", fingerprint.NewStack())
 
 	xssProbes := 0
 	for _, r := range reqs {

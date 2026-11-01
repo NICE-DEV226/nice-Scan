@@ -103,11 +103,37 @@ func (rd *ReportDir) save(subdir, name string, data []byte) string {
 		slog.Warn("reportdir: cannot create directory", "dir", filepath.Join(rd.BasePath, subdir), "error", err)
 		return ""
 	}
+	// Least-effort uniqueness: two findings saving under the same artifact
+	// name (repeated cmd label, same JWT pattern literal twice) used to
+	// silently overwrite the first — its Evidence then pointed at bytes
+	// that were not its own. rd.mu serializes callers in-process.
+	fullPath = uniqueArtifactPath(fullPath)
 	if err := os.WriteFile(fullPath, data, 0600); err != nil {
 		slog.Warn("reportdir: write failed", "path", fullPath, "error", err)
 		return ""
 	}
 	return fullPath
+}
+
+// uniqueArtifactPath appends -1, -2, … before the extension until the
+// path does not exist yet.
+func uniqueArtifactPath(fullPath string) string {
+	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+		return fullPath
+	}
+	dir := filepath.Dir(fullPath)
+	name := filepath.Base(fullPath)
+	ext := ""
+	if dot := strings.LastIndexByte(name, '.'); dot > 0 {
+		ext = name[dot:]
+		name = name[:dot]
+	}
+	for i := 1; ; i++ {
+		cand := filepath.Join(dir, fmt.Sprintf("%s-%d%s", name, i, ext))
+		if _, err := os.Stat(cand); os.IsNotExist(err) {
+			return cand
+		}
+	}
 }
 
 func (rd *ReportDir) ensureDirsFor(subdir string) error {

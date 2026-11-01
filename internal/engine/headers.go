@@ -38,6 +38,7 @@ func (a *HeaderAnalyzer) Analyze(ctx context.Context, resp *types.Response) []ty
 		severity    types.Severity
 		description string
 		missing     bool
+		httpsOnly   bool
 		checkValue  func(string) (bool, string)
 	}{
 		{
@@ -53,6 +54,12 @@ func (a *HeaderAnalyzer) Analyze(ctx context.Context, resp *types.Response) []ty
 			severity:    types.SeverityMedium,
 			description: "HTTP Strict-Transport-Security header is missing, allowing MITM downgrade attacks",
 			missing:     true,
+			// HSTS is only meaningful over HTTPS — the browser ignores it on an
+			// http:// origin and there is nothing to downgrade on one. Firing
+			// "Missing HSTS" on a plain-HTTP target was pure noise (and every
+			// http:// scan produced it). Only report it when the response came
+			// back over TLS.
+			httpsOnly: true,
 		},
 		{
 			header:      "X-Frame-Options",
@@ -117,7 +124,13 @@ func (a *HeaderAnalyzer) Analyze(ctx context.Context, resp *types.Response) []ty
 
 		val := resp.Headers.Get(check.header)
 
+		isHTTPS := strings.HasPrefix(strings.ToLower(resp.FinalURL), "https://") ||
+			strings.HasPrefix(strings.ToLower(resp.RequestURL), "https://")
+
 		if check.missing {
+			if check.httpsOnly && !isHTTPS {
+				continue
+			}
 			if val == "" {
 				findings = append(findings, types.Finding{
 					Type:        types.FindingHeader,
@@ -150,39 +163,49 @@ func (a *HeaderAnalyzer) Analyze(ctx context.Context, resp *types.Response) []ty
 func (a *HeaderAnalyzer) checkCookies(resp *types.Response) []types.Finding {
 	var findings []types.Finding
 
-	for _, cookie := range resp.Headers.Values("Set-Cookie") {
-		parts := strings.SplitN(cookie, ";", 2)
-		name := strings.TrimSpace(parts[0])
+	isHTTPS := strings.HasPrefix(strings.ToLower(resp.FinalURL), "https://") ||
+		strings.HasPrefix(strings.ToLower(resp.RequestURL), "https://")
 
-		if !strings.Contains(strings.ToLower(cookie), "secure") && strings.HasPrefix(resp.FinalURL, "https") {
+	for _, cookie := range resp.Headers.Values("Set-Cookie") {
+		nameValue := strings.TrimSpace(strings.SplitN(cookie, ";", 2)[0])
+		// Report the cookie NAME only. The leading pair is "name=value" and a
+		// session VALUE is a credential — echoing it into the finding (and
+		// thus the saved HTML/JSON report) leaked live session tokens.
+		cookieName := nameValue
+		if eq := strings.IndexByte(cookieName, '='); eq >= 0 {
+			cookieName = strings.TrimSpace(cookieName[:eq])
+		}
+
+		attrs := cookieAttrSet(cookie)
+		if isHTTPS && !attrs["secure"] {
 			findings = append(findings, types.Finding{
 				Type:        types.FindingMisconfig,
 				Name:        "Cookie Missing Secure Flag",
 				Severity:    types.SeverityMedium,
-				Description: fmt.Sprintf("Cookie %q is missing the Secure flag over HTTPS", name),
-				Evidence:    fmt.Sprintf("Set-Cookie: %s", cookie),
+				Description: fmt.Sprintf("Cookie %q is missing the Secure flag over HTTPS", cookieName),
+				Evidence:    fmt.Sprintf("Set-Cookie name: %s", cookieName),
 				Confidence:  1.0,
 			})
 		}
 
-		if !strings.Contains(strings.ToLower(cookie), "httponly") {
+		if !attrs["httponly"] {
 			findings = append(findings, types.Finding{
 				Type:        types.FindingMisconfig,
 				Name:        "Cookie Missing HttpOnly Flag",
 				Severity:    types.SeverityLow,
-				Description: fmt.Sprintf("Cookie %q is missing the HttpOnly flag", name),
-				Evidence:    fmt.Sprintf("Set-Cookie: %s", cookie),
+				Description: fmt.Sprintf("Cookie %q is missing the HttpOnly flag", cookieName),
+				Evidence:    fmt.Sprintf("Set-Cookie name: %s", cookieName),
 				Confidence:  1.0,
 			})
 		}
 
-		if !strings.Contains(strings.ToLower(cookie), "samesite") {
+		if !attrs["samesite"] {
 			findings = append(findings, types.Finding{
 				Type:        types.FindingMisconfig,
 				Name:        "Cookie Missing SameSite Attribute",
 				Severity:    types.SeverityLow,
-				Description: fmt.Sprintf("Cookie %q is missing SameSite attribute", name),
-				Evidence:    fmt.Sprintf("Set-Cookie: %s", cookie),
+				Description: fmt.Sprintf("Cookie %q is missing SameSite attribute", cookieName),
+				Evidence:    fmt.Sprintf("Set-Cookie name: %s", cookieName),
 				Confidence:  0.8,
 			})
 		}

@@ -10,9 +10,14 @@ import (
 )
 
 var (
-	rxIDOR      = regexp.MustCompile(`(?i)(id|user_id|account_id|uid|pid|order_id|profile_id|item_id)=(\d+)`)
-	rxRoleMod   = regexp.MustCompile(`(?i)(role|user_type|account_type|access|level|priv|permission)=(\w+)`)
-	rxStatusMod = regexp.MustCompile(`(?i)(status|state|active|enabled|verified)=(0|1|true|false|yes|no)`)
+	// The numeric-id value must be a COMPLETE parameter value — bounded by
+	// "&" or end-of-string. Without that anchor the scanner's own SQLi probe
+	// "?id=1'" matched as "id=1" and the analyzer reported a phantom
+	// "Potential IDOR" on a referent the scanner had just invented. A real IDOR
+	// hint is a genuine "?id=123" link, whose digits run to a parameter break.
+	rxIDOR      = regexp.MustCompile(`(?i)(?:[?&])(id|user_id|account_id|uid|pid|order_id|profile_id|item_id)=(\d+)(?:&|$)`)
+	rxRoleMod   = regexp.MustCompile(`(?i)(?:[?&])(role|user_type|account_type|access|level|priv|permission)=(\w+)`)
+	rxStatusMod = regexp.MustCompile(`(?i)(?:[?&])(status|state|active|enabled|verified)=(0|1|true|false|yes|no)(?:&|$)`)
 
 	rxUserProfile = regexp.MustCompile(`(?i)(/profile/|/user/|/account/|/users/|/members/)(\d+)`)
 

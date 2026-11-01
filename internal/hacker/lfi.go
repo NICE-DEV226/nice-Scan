@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/NICE-DEV226/nice-Scan/internal/transport"
@@ -133,6 +134,8 @@ func (a *CMDInjectAction) Metadata() ActionMetadata {
 		Priority:    70,
 		Requires:    []string{"has_api"},
 		Provides:    []string{"has_rce"},
+		// Executes OS commands through the target — worst-case consent.
+		Destructive: true,
 	}
 }
 
@@ -168,7 +171,11 @@ func (a *CMDInjectAction) Execute(ctx context.Context, target string, kb *Knowle
 				f, u := testCMDPayload(ctx, client, p.URL, param)
 				if f != nil {
 					findings = append(findings, *f)
-					spawned = append(spawned, &CMDShellAction{vulnURL: u, param: param})
+					// Only a marker-confirmed execution queues the shell;
+					// a suspect verdict (u == "") must not spray commands.
+					if u != "" {
+						spawned = append(spawned, &CMDShellAction{vulnURL: u, param: param})
+					}
 				}
 			}
 		}
@@ -180,7 +187,9 @@ func (a *CMDInjectAction) Execute(ctx context.Context, target string, kb *Knowle
 			f, u := testCMDPayload(ctx, client, ep.Path, param)
 			if f != nil {
 				findings = append(findings, *f)
-				spawned = append(spawned, &CMDShellAction{vulnURL: u, param: param})
+				if u != "" {
+					spawned = append(spawned, &CMDShellAction{vulnURL: u, param: param})
+				}
 			}
 		}
 	}
@@ -189,6 +198,15 @@ func (a *CMDInjectAction) Execute(ctx context.Context, target string, kb *Knowle
 }
 
 func testCMDPayload(ctx context.Context, client *transport.Client, baseURL, param string) (*Finding, string) {
+	// Differential baseline: an indicator that is ALREADY on the page
+	// (HTML id="root", a "www-data" changelog) proves nothing when the
+	// injected response still contains it. Only text that APPEARS with the
+	// payload is a lead.
+	baseline := ""
+	if resp, err := client.Do(ctx, &types.Request{Method: "GET", URL: baseURL}); err == nil && resp != nil {
+		baseline = strings.ToLower(string(resp.Body))
+	}
+
 	for _, cmd := range cmdPayloadsB64 {
 		payload, err := base64.StdEncoding.DecodeString(cmd.payload)
 		if err != nil {
@@ -196,45 +214,85 @@ func testCMDPayload(ctx context.Context, client *transport.Client, baseURL, para
 		}
 
 		testURL := baseURL
+		// The payload must be query-escaped: "; id" carries a space and
+		// servers answer 400 Bad Request to raw whitespace in the URL —
+		// every probe died before the wire, and the detector saw nothing.
 		if strings.Contains(testURL, "?") {
-			testURL += "&" + param + "=" + string(payload)
+			testURL += "&" + param + "=" + url.QueryEscape(string(payload))
 		} else {
-			testURL += "?" + param + "=" + string(payload)
+			testURL += "?" + param + "=" + url.QueryEscape(string(payload))
 		}
 
 		resp, err := client.Do(ctx, &types.Request{
 			Method: "GET",
 			URL:    testURL,
 		})
-		if err != nil {
+		if err != nil || resp == nil {
 			continue
 		}
 
-		if hasCMDInjection(string(resp.Body)) {
+		lowBody := strings.ToLower(string(resp.Body))
+		indicator := ""
+		for _, b64ind := range cmdIndicatorsB64 {
+			ind, err := base64.StdEncoding.DecodeString(b64ind)
+			if err != nil {
+				continue
+			}
+			s := strings.ToLower(string(ind))
+			if strings.Contains(lowBody, s) && !strings.Contains(baseline, s) {
+				indicator = s
+				break
+			}
+		}
+		if indicator == "" {
+			continue
+		}
+
+		// The keyword differential is only a LEAD: a server that echoes
+		// query parameters back renders "uid=" without executing
+		// anything. The executed fact needs the echo-marker window.
+		if uid := cmdMarkerProbe(ctx, client, baseURL, param); uid != "" {
 			return &Finding{
 				Type:        "cmd_injection",
-				Name:        fmt.Sprintf("CMD injection: %s via %s", cmd.name, param),
+				Name:        fmt.Sprintf("CMD injection executed: marked 'id' returned %s via %s", uid, param),
 				Severity:    SevCritical,
-				Description: "OS command execution confirmed",
+				Description: "Command output appeared inside the echo-marker window — reflection cannot produce this",
 				Evidence:    testURL,
 			}, testURL
 		}
+
+		return &Finding{
+			Type:        "cmd_injection_suspect",
+			Name:        fmt.Sprintf("CMD injection suspected: '%s' appeared only with the injection payload on %s", indicator, param),
+			Severity:    SevMedium,
+			Description: "Differential keyword present, but the marked 'id' probe returned no executed output — the server may just echo query parameters. Verify manually before treating this as RCE; no shell action was queued",
+			Evidence:    testURL,
+		}, ""
 	}
 	return nil, ""
 }
 
-func hasCMDInjection(body string) bool {
-	lowBody := strings.ToLower(body)
-	for _, b64ind := range cmdIndicatorsB64 {
-		ind, err := base64.StdEncoding.DecodeString(b64ind)
-		if err != nil {
-			continue
-		}
-		if strings.Contains(lowBody, strings.ToLower(string(ind))) {
-			return true
-		}
+// cmdMarkerProbe settles "did it execute?" with the same discipline as
+// CMDShellAction: ; echo nsxCMDE7BE"GIN"; id; echo nsxCMDE7"END". A URL
+// reflection echoes the quotes and can never open the clean window, so a
+// uid line inside it is strictly an executed fact.
+func cmdMarkerProbe(ctx context.Context, client *transport.Client, baseURL, param string) string {
+	cleanBase := baseURL
+	if idx := strings.Index(cleanBase, "?"); idx > 0 {
+		cleanBase = cleanBase[:idx]
 	}
-	return false
+	idCmd, err := base64.StdEncoding.DecodeString(cmdIDB64)
+	if err != nil {
+		return ""
+	}
+	resp, err := client.Do(ctx, &types.Request{
+		Method: "GET",
+		URL:    cmdShellURL(cleanBase, param, string(idCmd)),
+	})
+	if err != nil || resp == nil {
+		return ""
+	}
+	return rxUIDLine.FindString(cmdMarkedWindow(string(resp.Body)))
 }
 
 type UploadAction struct{}
@@ -249,7 +307,8 @@ func (a *UploadAction) Metadata() ActionMetadata {
 		// State-changing (uploads arbitrary files). Only when an upload
 		// endpoint was actually observed (e.g. a form with a file input
 		// field was fetched), never from page-text hints.
-		Sensitive: true,
+		Sensitive:   true,
+		Destructive: true,
 	}
 }
 
@@ -282,38 +341,66 @@ func (a *UploadAction) Execute(ctx context.Context, target string, kb *Knowledge
 			default:
 			}
 
-			resp, err := client.Do(ctx, &types.Request{
-				Method: "POST",
-				URL:    page.URL,
-				Body:   []byte("test"),
-				Headers: map[string]string{
-					"Content-Disposition": fmt.Sprintf(`form-data; name="file"; filename="%s"`, up.filename),
-					"Content-Type":        up.ctype,
-				},
-			})
-			if err != nil {
-				continue
+			// Upload a BENIGN unique marker (never a web shell here). The
+			// honest "unrestricted upload" verdict requires reading that
+			// marker back from the server: POSTing and getting a 200 proves
+			// nothing, since most endpoints answer 200 to anything. PHP/ASP
+			// markers will not echo (the server executes or stores them), so
+			// those simply fail retrieval — that is the correct outcome;
+			// execution proof is WebShellAction's separate, marked-id job.
+			marker := uploadMarker()
+			storedURL, retrieved := retrieveUploadMarker(ctx, client, page.URL, up.filename, up.ctype, marker)
+
+			if retrieved {
+				findings = append(findings, Finding{
+					Type:        "upload_confirmed",
+					Name:        fmt.Sprintf("Unrestricted file upload confirmed: %s", up.filename),
+					Severity:    SevMedium,
+					Description: fmt.Sprintf("The endpoint stored the uploaded %s and served it back at %s — the scanner read its unique marker from that URL (arbitrary file write; execution not demonstrated here)", up.filename, storedURL),
+					Evidence:    storedURL,
+					Details: map[string]string{
+						"filename":   up.filename,
+						"stored_url": storedURL,
+						"method":     "multipart-marker-retrieval",
+					},
+				})
+			} else {
+				// Accepted-but-unresolved uploads are an observation, not a
+				// finding: no file was shown to be stored or served. Record
+				// it at SevInfo so the operator can look, without the old
+				// "200 + no error word" minting a Critical RCE headline.
+				findings = append(findings, Finding{
+					Type:        "upload_accepted_unverified",
+					Name:        fmt.Sprintf("Upload endpoint accepted a well-formed POST for %s (storage unconfirmed)", up.filename),
+					Severity:    SevInfo,
+					Description: "The endpoint returned success for a genuine multipart file POST, but the marker could not be retrieved from any same-origin path — the scanner cannot claim an upload without read-back proof",
+					Evidence:    page.URL,
+					Details:     map[string]string{"filename": up.filename, "status": "not-verified"},
+				})
 			}
 
-			body := string(resp.Body)
-			if resp.StatusCode == 200 || resp.StatusCode == 201 || resp.StatusCode == 302 {
-				if !strings.Contains(strings.ToLower(body), "error") && !strings.Contains(strings.ToLower(body), "invalid") {
-					findings = append(findings, Finding{
-						Type:        "upload_confirmed",
-						Name:        fmt.Sprintf("Upload vulnerable: %s", up.filename),
-						Severity:    SevCritical,
-						Description: "File upload accepted — potential RCE via web shell",
-						Evidence:    fmt.Sprintf("Filename: %s", up.filename),
-					})
-					spawned = append(spawned, &WebShellAction{
-						uploadURL: page.URL,
-						filename:  up.filename,
-					})
-					break
-				}
-			}
+			// This is a real upload surface; escalate to the web-shell path
+			// which self-verifies (it only reports RCE when its marked id
+			// probe returns executed output). Pass the POST endpoint and the
+			// origin so the shell probe resolves real URLs, not empty ones.
+			spawned = append(spawned, &WebShellAction{
+				vulnURL:   page.URL,
+				uploadURL: uploadOrigin(page.URL),
+				filename:  strings.TrimSuffix(up.filename, ".jpg"),
+			})
+			break
 		}
 	}
 
 	return ActionResult{Findings: findings, Actions: spawned}
+}
+
+// uploadOrigin returns scheme://host for a URL so WebShellAction can build
+// <origin>/<shell name> probe paths instead of concatenating onto a page path.
+func uploadOrigin(pageURL string) string {
+	u, err := url.Parse(pageURL)
+	if err != nil {
+		return strings.TrimRight(pageURL, "/")
+	}
+	return u.Scheme + "://" + u.Host
 }

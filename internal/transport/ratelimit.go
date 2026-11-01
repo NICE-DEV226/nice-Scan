@@ -22,6 +22,10 @@ func NewRateLimiter(ratePerSecond int) *RateLimiter {
 	rl := &RateLimiter{
 		rate:     ratePerSecond,
 		interval: time.Second / time.Duration(ratePerSecond),
+		// Seed the bucket full: starting at 0 stalled the very first
+		// request until the first refill tick (up to a second) even on an
+		// idle limiter.
+		tokens: ratePerSecond,
 	}
 	rl.cond = sync.NewCond(&rl.mu)
 	go rl.refill()

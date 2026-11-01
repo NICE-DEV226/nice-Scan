@@ -121,6 +121,13 @@ type ActionMetadata struct {
 	// sensitive action only runs when every Requires capability is verified
 	// (Origin == OriginVerified), never from remote-text hints.
 	Sensitive bool
+	// Destructive marks actions that write to the target (shell upload,
+	// mutation fuzzing, credential spray) or bulk-extract production data
+	// (SQLi dumps, LFI file reads, S3 downloads). The planner refuses to
+	// dispatch them unless the operator granted --destructive consent at
+	// run time — registration is not consent, and neither is a chain
+	// spawning them.
+	Destructive bool
 }
 
 type ActionResult struct {
@@ -155,4 +162,7 @@ type Report struct {
 	Credentials  []Credential
 	Endpoints    []Endpoint
 	Pages        []Page
+	// PendingDestructive names runnable actions withheld for lack of
+	// --destructive consent, so the report never silently omits a module.
+	PendingDestructive []string
 }

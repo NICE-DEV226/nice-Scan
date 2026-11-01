@@ -34,7 +34,13 @@ var (
 
 	rxDBConnection = regexp.MustCompile(`(?i)(mysql|postgres|mongodb|redis|sqlite|oracle)://[^\s"']+`)
 
-	rxUserDump = regexp.MustCompile(`(?i)(users|accounts|customers|members|employees)\s*(?:table|list|collection|database)?\s*:?`)
+	// The old pattern matched the bare prose word ("our valued members",
+	// "registered users") as a HIGH "User Data Reference Found" — that is a
+	// marketing sentence, not a dump endpoint. Require the term to be a
+	// STRUCTURED collection key bound to actual records: a JSON key whose value
+	// opens with [ or {, or a "<word> table/collection dump" style marker
+	// followed by row-looking text.
+	rxUserDump = regexp.MustCompile(`(?i)(?:["']?(?:users|accounts|customers|members|employees)["']?\s*[:=]\s*[\[{])|(?:(?:users|accounts|customers|members|employees)_?(?:table|collection|dump|list)\b[\s\S]{0,40}?\{)`)
 
 	rxInternalIP = regexp.MustCompile(`\b(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b`)
 )
@@ -176,14 +182,26 @@ func (a *DataExtractionAnalyzer) Analyze(ctx context.Context, resp *types.Respon
 		})
 	}
 
-	ccs := uniqueStrings(rxCreditCard.FindAllString(body, -1))
+	ccCandidates := uniqueStrings(rxCreditCard.FindAllString(body, -1))
+	var ccs []string
+	for _, c := range ccCandidates {
+		// A bare 16-digit run is overwhelmingly an order id, timestamp,
+		// tracking number, or log line — NOT a card. Flagging those as a
+		// CRITICAL PCI breach was a pure false positive. Keep a candidate
+		// only when it passes the Luhn checksum AND carries a real
+		// major-industry prefix (Visa/Mastercard/Amex/Discover), the two
+		// signals that actually distinguish a PAN from arbitrary digits.
+		if isLikelyCardNumber(c) {
+			ccs = append(ccs, c)
+		}
+	}
 	if len(ccs) > 0 {
 		findings = append(findings, types.Finding{
 			Type:        types.FindingSecret,
 			Name:        fmt.Sprintf("Credit Card Numbers Found (%d)", len(ccs)),
 			Severity:    types.SeverityCritical,
-			Description: "Credit card numbers exposed in response body — PCI DSS compliance violation, financial fraud risk",
-			Evidence:    truncate(strings.Join(ccs, ", "), 60),
+			Description: "Luhn-valid card numbers with a major issuer prefix exposed in response body — PCI DSS violation, financial fraud risk",
+			Evidence:    truncate(strings.Join(maskCardNumbers(ccs), ", "), 60),
 			Confidence:  0.85,
 		})
 	}
@@ -231,6 +249,83 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n-1] + "…"
+}
+
+// isLikelyCardNumber reports whether a raw match is plausibly a payment card
+// PAN: only digits are kept, length is 13-19, the leading digits map to a real
+// major-industry prefix (Visa/Mastercard/Amex/Discover/JCB), and the run
+// satisfies the Luhn mod-10 checksum. Arbitrary 16-digit ids fail one of these
+// far more often than not, which is exactly what prunes the false positives.
+func isLikelyCardNumber(raw string) bool {
+	digits := make([]byte, 0, len(raw))
+	for i := 0; i < len(raw); i++ {
+		if c := raw[i]; c >= '0' && c <= '9' {
+			digits = append(digits, c)
+		}
+	}
+	n := len(digits)
+	if n < 13 || n > 19 {
+		return false
+	}
+	if !hasCardPrefix(string(digits)) {
+		return false
+	}
+	// Luhn: from the right, double every second digit; fold >9 by -9; sum.
+	sum := 0
+	double := false
+	for i := n - 1; i >= 0; i-- {
+		d := int(digits[i] - '0')
+		if double {
+			d *= 2
+			if d > 9 {
+				d -= 9
+			}
+		}
+		sum += d
+		double = !double
+	}
+	return sum%10 == 0
+}
+
+func hasCardPrefix(d string) bool {
+	switch {
+	case strings.HasPrefix(d, "4"): // Visa
+		return true
+	case len(d) >= 2 && d[0] == '5' && d[1] >= '1' && d[1] <= '5': // Mastercard 51-55
+		return true
+	case len(d) >= 4 && d[:4] >= "2221" && d[:4] <= "2720": // Mastercard 2-series
+		return true
+	case len(d) >= 2 && d[0] == '3' && (d[1] == '4' || d[1] == '7'): // Amex
+		return true
+	case len(d) >= 4 && d[:4] == "6011": // Discover
+		return true
+	case len(d) >= 2 && d[0] == '6' && d[1] == '5': // Discover
+		return true
+	case len(d) >= 4 && d[:4] >= "3528" && d[:4] <= "3589": // JCB
+		return true
+	}
+	return false
+}
+
+// maskCardNumbers keeps only the first 6 and last 4 digits of a confirmed PAN.
+// A scanner report that copies full card numbers into HTML/JSON output would
+// itself be a PCI violation — the finding is the EXPOSURE, not the value.
+func maskCardNumbers(cards []string) []string {
+	out := make([]string, 0, len(cards))
+	for _, c := range cards {
+		var b strings.Builder
+		for i := 0; i < len(c); i++ {
+			if ch := c[i]; ch >= '0' && ch <= '9' {
+				b.WriteByte(ch)
+			}
+		}
+		digits := b.String()
+		if len(digits) >= 11 {
+			digits = digits[:6] + strings.Repeat("*", len(digits)-10) + digits[len(digits)-4:]
+		}
+		out = append(out, digits)
+	}
+	return out
 }
 
 func uniqueStrings(s []string) []string {

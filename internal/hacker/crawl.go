@@ -35,7 +35,12 @@ func (a *CrawlAction) Execute(ctx context.Context, target string, kb *Knowledge,
 
 	var findings []Finding
 
-	for len(queue) > 0 && len(visited) <= maxPages {
+	// The budget counts pages ACTUALLY FETCHED. Marking discovered links
+	// visited up-front (the old rule) burned maxPages on URLs that were
+	// popped past maxDepth and never fetched — downstream actions then
+	// starved on a crawl that claimed 30 pages but returned a handful.
+	fetched := 0
+	for len(queue) > 0 && fetched < maxPages {
 		select {
 		case <-ctx.Done():
 			return ActionResult{Findings: findings}
@@ -48,6 +53,7 @@ func (a *CrawlAction) Execute(ctx context.Context, target string, kb *Knowledge,
 		if depth[u] >= maxDepth {
 			continue
 		}
+		fetched++
 
 		resp, err := client.Do(ctx, &types.Request{
 			Method: "GET",
@@ -150,11 +156,21 @@ func (a *CrawlAction) Execute(ctx context.Context, target string, kb *Knowledge,
 		}
 
 		for _, link := range links {
-			abs := resolveURL(link, baseURL)
+			// Resolve against the CURRENT page, not the site root: a
+			// relative "report.php" on /docs/index.html lives at
+			// /docs/report.php — resolving it at the base produced
+			// /report.php 404s and dropped real surfaces.
+			abs := resolveURL(link, u)
 			if abs == "" {
 				continue
 			}
 			if !isSameDomain(abs, baseURL) {
+				continue
+			}
+			// Depth+1 must still be FETCHABLE to enter the queue:
+			// enqueueing links the depth guard will skip burns memory
+			// and dedupe budget on pages nobody ever requests.
+			if depth[u]+1 >= maxDepth {
 				continue
 			}
 			if !visited[abs] {

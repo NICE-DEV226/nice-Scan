@@ -209,6 +209,28 @@ func isSameOriginURL(a, b *url.URL) bool {
 	return a.Scheme == b.Scheme && a.Host == b.Host
 }
 
+// effectivePort resolves the default port for the scheme, so
+// "https://h" and "https://h:443" compare equal.
+func effectivePort(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return "443"
+	case "http":
+		return "80"
+	}
+	return ""
+}
+
+// sameChannel compares scheme + port only (host is checked separately by
+// the scope rule). Used to keep credentials off downgrade/port-change
+// redirects that stay inside the credential scope.
+func sameChannel(a, b *url.URL) bool {
+	return strings.EqualFold(a.Scheme, b.Scheme) && effectivePort(a) == effectivePort(b)
+}
+
 // hopsCtxKey carries the per-request redirect-hop buffer.
 type hopsCtxKey struct{}
 
@@ -264,7 +286,7 @@ func (c *Client) captureStoreFromResponse(u *url.URL, resp *http.Response) {
 	if resp == nil || u == nil || !c.sessionCookiesEnabled() {
 		return
 	}
-	c.sess.capture(u.Host, resp.Cookies())
+	c.sess.capture(u.String(), resp.Cookies())
 }
 
 func NewClient(opts ...ClientOption) *Client {
@@ -345,6 +367,14 @@ func NewClient(opts ...ClientOption) *Client {
 						break
 					}
 				}
+				// Scope names hosts, not channels: even inside scope,
+				// operator credentials ride a redirect only when the
+				// scheme and port are unchanged. An https→http downgrade
+				// or a host:port hop would ship the cookie in the clear
+				// or hand it to a different service on the same name.
+				if allowed && !sameChannel(via[0].URL, req.URL) {
+					allowed = false
+				}
 			} else {
 				// No scope configured: cookies stay on the exact origin
 				// (scheme+host+port) they were issued for — mirroring the
@@ -405,6 +435,11 @@ func newTransport(o *clientOptions) *http.Transport {
 		IdleConnTimeout:       o.idleConnTimeout,
 		TLSHandshakeTimeout:   o.tlsTimeout,
 		ExpectContinueTimeout: 1 * time.Second,
+		// Backstop for a server that accepts the connection and then says
+		// nothing: the per-attempt context deadline already covers it, but
+		// a hung head-of-line response must not occupy a worker forever on
+		// shared connections.
+		ResponseHeaderTimeout: o.timeout,
 		ReadBufferSize:        32 * 1024,
 		WriteBufferSize:       32 * 1024,
 		DisableCompression:    false,
@@ -523,6 +558,21 @@ func doWithRetries(ctx context.Context, c *Client, req *types.Request) (*types.R
 }
 
 func (c *Client) execute(ctx context.Context, req *types.Request) (*types.Response, error) {
+	// Honor request deadlines: types.Request.Timeout has always been part
+	// of the contract but nothing consumed it, and http.Client.Timeout is
+	// deliberately 0 (it would defeat per-attempt budgets across retries).
+	// The budget is per ATTEMPT: doWithRetries calls execute again, so a
+	// retry is not strangled by the first attempt's clock.
+	timeout := req.Timeout
+	if timeout <= 0 {
+		timeout = c.opts.timeout
+	}
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
 	httpReq, err := http.NewRequestWithContext(ctx, req.Method, req.URL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -585,6 +635,9 @@ func (c *Client) execute(ctx context.Context, req *types.Request) (*types.Respon
 	if err != nil {
 		select {
 		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return nil, fmt.Errorf("%w after %s: %w", types.ErrTimeout, timeout, ctx.Err())
+			}
 			return nil, ctx.Err()
 		default:
 		}
@@ -690,6 +743,12 @@ func (c *Client) Stats() RequestStats {
 }
 
 func (c *Client) Close() error {
+	// The refill goroutine runs on a 1s ticker for the limiter's whole
+	// life: without this, every constructed rate-limited client leaked a
+	// goroutine and ticker past Close.
+	if c.rl != nil {
+		c.rl.Stop()
+	}
 	c.http.CloseIdleConnections()
 	return nil
 }

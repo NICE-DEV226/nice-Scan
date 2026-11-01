@@ -60,11 +60,16 @@ func (a *XSSAction) Execute(ctx context.Context, target string, kb *Knowledge, c
 			continue
 		}
 
+		// Reflection alone is not XSS: a param that echoes input may be safely
+		// HTML-escaped. This is the attack SURFACE (a prerequisite), so it
+		// lands at SevMedium and is named as a candidate — the per-vector
+		// classification below mints the SevHigh xss_confirmed claim only when
+		// a canary round-trips as executable markup.
 		findings = append(findings, Finding{
 			Type:        "xss_reflection_points",
-			Name:        fmt.Sprintf("XSS reflection points found on %s", page.URL),
-			Severity:    SevHigh,
-			Description: fmt.Sprintf("Parameters reflect input: %s", strings.Join(reflectedParams, ", ")),
+			Name:        fmt.Sprintf("Reflected input on %s (XSS candidate, execution unproven)", page.URL),
+			Severity:    SevMedium,
+			Description: fmt.Sprintf("Parameters reflect input and warrant XSS probing: %s — reflection is a precondition, not proof; see any per-vector findings below", strings.Join(reflectedParams, ", ")),
 		})
 
 		for _, param := range reflectedParams {
@@ -76,7 +81,12 @@ func (a *XSSAction) Execute(ctx context.Context, target string, kb *Knowledge, c
 
 			state, rx, vectorName, probeURL := "", detect.XssReflex{}, "", ""
 			for _, vp := range probes {
-				testURL := appendQueryParam(page.URL, param, vp.Value)
+				// REPLACE the reflected param's own value: appending
+				// beside the original gave "?p=orig&p=<payload>", and
+				// first-value-wins servers (Go, PHP) answered with the
+				// original — the canary never round-tripped and no XSS
+				// verdict could ever fire on real reflection points.
+				testURL := setQueryParam(page.URL, param, vp.Value)
 				resp, err := client.Do(ctx, &types.Request{
 					Method: "GET",
 					URL:    testURL,
@@ -208,7 +218,10 @@ func (a *XSSExploitAction) Metadata() ActionMetadata {
 
 // Execute emits a PoC note for confirmed reflections. It is a documented
 // deliverable, not an executed attack: nothing here runs against the
-// target.
+// target, so the finding must not exceed what the reflection probe
+// already proved. The old SevCritical "XSS payload confirmed" line
+// double-counted the xss_confirmed finding AND claimed an exploit that
+// was never executed.
 func (a *XSSExploitAction) Execute(ctx context.Context, target string, kb *Knowledge, client *transport.Client) ActionResult {
 	cookieStealer := fmt.Sprintf("PoC URL: %s", a.vulnURL)
 
@@ -216,9 +229,9 @@ func (a *XSSExploitAction) Execute(ctx context.Context, target string, kb *Knowl
 		Findings: []Finding{
 			{
 				Type:        "xss_poc",
-				Name:        fmt.Sprintf("XSS Exploit: %s", a.technique),
-				Severity:    SevCritical,
-				Description: "XSS payload confirmed — generate cookie stealer, phishing page, or defacement",
+				Name:        fmt.Sprintf("XSS PoC drafted: %s", a.technique),
+				Severity:    SevInfo,
+				Description: "Documented proof-of-concept URL for the confirmed executable reflection — no exploit was run against the target",
 				Evidence:    cookieStealer,
 			},
 		},
@@ -263,15 +276,4 @@ func findReflectedParams(ctx context.Context, client *transport.Client, pageURL 
 	}
 
 	return candidates
-}
-
-// appendQueryParam appends param=value with proper URL encoding, keeping
-// the raw values out of the query string (the previous builder hand-rolled
-// a %20 substitution that left quotes and angle brackets unescaped).
-func appendQueryParam(rawURL, param, rawValue string) string {
-	sep := "?"
-	if strings.Contains(rawURL, "?") {
-		sep = "&"
-	}
-	return rawURL + sep + url.QueryEscape(param) + "=" + url.QueryEscape(rawValue)
 }

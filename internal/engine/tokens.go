@@ -14,11 +14,18 @@ import (
 var (
 	rxBearer      = regexp.MustCompile(`(?i)Bearer\s+([A-Za-z0-9\-_.]+(?:\.[A-Za-z0-9\-_.]+)+)`)
 	rxBasicAuth   = regexp.MustCompile(`(?i)Basic\s+([A-Za-z0-9+/=]+)`)
-	rxAccessToken = regexp.MustCompile(`(?i)access[_\-]token["']?\s*[:=]\s*["']([A-Za-z0-9\-_.]+)["']`)
-	rxAPIToken    = regexp.MustCompile(`(?i)api[_\-]key|api[_\-]token|app[_\-]token["']?\s*[:=]\s*["']([A-Za-z0-9\-_.@]+)["']`)
-	rxSecret      = regexp.MustCompile(`(?i)secret["']?\s*[:=]\s*["']([A-Za-z0-9\-_.@!]+)["']`)
-	rxPassword    = regexp.MustCompile(`(?i)password["']?\s*[:=]\s*["']([^"']{6,})["']`)
-	rxAuth        = regexp.MustCompile(`(?i)authorization["']?\s*[:=]\s*["']([^"']+)["']`)
+	rxAccessToken = regexp.MustCompile(`(?i)access[_\-]token["']?\s*[:=]\s*["']([A-Za-z0-9\-_.]{8,})["']`)
+	// The label alternation must be grouped: the old
+	// `api[_\-]key|api[_\-]token|app[_\-]token["']?\s*[:=]...` bound the
+	// `:= value` clause ONLY to the last alternative, so the bare words
+	// "api_key"/"api-token" (every JS variable, every doc) matched with NO
+	// value captured — the loop then fell back to m[0] and printed a CRITICAL
+	// "API Key Leaked" whose evidence was the word "api_key" itself. Group the
+	// labels and demand a real ≥8-char value after ":" or "=".
+	rxAPIToken = regexp.MustCompile(`(?i)(?:api[_\-]key|api[_\-]token|app[_\-]token)["']?\s*[:=]\s*["']?([A-Za-z0-9\-_.@]{8,})["']?`)
+	rxSecret   = regexp.MustCompile(`(?i)secret["']?\s*[:=]\s*["']?([A-Za-z0-9\-_.@!]{8,})["']?`)
+	rxPassword = regexp.MustCompile(`(?i)password["']?\s*[:=]\s*["']([^"']{6,})["']`)
+	rxAuth     = regexp.MustCompile(`(?i)authorization["']?\s*[:=]\s*["']([^"']+)["']`)
 
 	sessionCookies = []string{
 		"sessionid", "session_id", "sessid", "sid", "PHPSESSID", "JSESSIONID",
@@ -84,7 +91,8 @@ func (t *TokenExtractor) Analyze(ctx context.Context, resp *types.Response) []ty
 					},
 				})
 
-				if !strings.Contains(c, "; Secure") && strings.HasPrefix(resp.RequestURL, "https") {
+				attrs := cookieAttrSet(c)
+				if !attrs["secure"] && strings.HasPrefix(resp.RequestURL, "https") {
 					findings = append(findings, types.Finding{
 						Type:        types.FindingMisconfig,
 						Name:        fmt.Sprintf("Session Cookie Missing Secure Flag: %s", name),
@@ -94,7 +102,7 @@ func (t *TokenExtractor) Analyze(ctx context.Context, resp *types.Response) []ty
 						Confidence:  0.9,
 					})
 				}
-				if !strings.Contains(c, "; HttpOnly") {
+				if !attrs["httponly"] {
 					findings = append(findings, types.Finding{
 						Type:        types.FindingMisconfig,
 						Name:        fmt.Sprintf("Session Cookie Missing HttpOnly Flag: %s", name),
@@ -130,12 +138,14 @@ func (t *TokenExtractor) Analyze(ctx context.Context, resp *types.Response) []ty
 		default:
 		}
 		for _, m := range p.rx.FindAllStringSubmatch(body, -1) {
-			val := ""
-			if len(m) > 1 {
-				val = truncate(m[1], 30)
-			} else {
-				val = truncate(m[0], 40)
+			// Every credential pattern must expose a captured VALUE (m[1]).
+			// A match whose value group is empty is the bare keyword, not a
+			// leak — emitting it produced Critical findings whose "evidence"
+			// was the word "api_key". Withhold those.
+			if len(m) < 2 || strings.TrimSpace(m[1]) == "" {
+				continue
 			}
+			val := truncate(m[1], 30)
 			findings = append(findings, types.Finding{
 				Type:        types.FindingSecret,
 				Name:        p.name,
@@ -281,4 +291,25 @@ func extractCookieValue(c string) string {
 		return kv[1]
 	}
 	return ""
+}
+
+// cookieAttrSet returns the lowercase attribute-name set of one Set-Cookie
+// string. Substring checks like Contains(c, "; Secure") miss the flag when the
+// server writes ";secure", ";Secure", or ";  Secure", and falsely "find" it
+// when a value merely contains the word — so tokenize the real attributes and
+// match whole names (the leading "name=value" pair excluded).
+func cookieAttrSet(c string) map[string]bool {
+	set := map[string]bool{}
+	parts := strings.Split(c, ";")
+	for _, p := range parts[1:] {
+		token := strings.ToLower(strings.TrimSpace(p))
+		if token == "" {
+			continue
+		}
+		if eq := strings.IndexByte(token, '='); eq >= 0 {
+			token = strings.TrimSpace(token[:eq])
+		}
+		set[token] = true
+	}
+	return set
 }

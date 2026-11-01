@@ -6,9 +6,10 @@ import (
 )
 
 type Planner struct {
-	mu      sync.Mutex
-	actions []Action
-	done    map[string]bool
+	mu          sync.Mutex
+	actions     []Action
+	done        map[string]bool
+	destructive bool
 }
 
 func NewPlanner(actions ...Action) *Planner {
@@ -21,6 +22,15 @@ func NewPlanner(actions ...Action) *Planner {
 		actions: sorted,
 		done:    make(map[string]bool),
 	}
+}
+
+// AllowDestructive records the operator's --destructive consent. Without
+// it the planner withholds every action flagged Destructive at dispatch
+// time — registering or spawning such an action is not consent.
+func (p *Planner) AllowDestructive(allowed bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.destructive = allowed
 }
 
 func (p *Planner) AddAction(a Action) {
@@ -63,19 +73,15 @@ func (p *Planner) NextAction(kb *Knowledge) Action {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	caps := kb.GetCapabilities()
-	capMap := make(map[string]bool)
-	verifiedCapMap := make(map[string]bool)
-	for _, c := range caps {
-		capMap[c.Name] = true
-		if c.Origin == OriginVerified {
-			verifiedCapMap[c.Name] = true
-		}
-	}
+	capMap, verifiedCapMap := p.capMaps(kb)
 
 	for _, a := range p.actions {
 		name := a.Metadata().Name
 		if p.done[name] {
+			continue
+		}
+
+		if a.Metadata().Destructive && !p.destructive {
 			continue
 		}
 
@@ -93,19 +99,15 @@ func (p *Planner) HasRemaining(kb *Knowledge) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	caps := kb.GetCapabilities()
-	capMap := make(map[string]bool)
-	verifiedCapMap := make(map[string]bool)
-	for _, c := range caps {
-		capMap[c.Name] = true
-		if c.Origin == OriginVerified {
-			verifiedCapMap[c.Name] = true
-		}
-	}
+	capMap, verifiedCapMap := p.capMaps(kb)
 
 	for _, a := range p.actions {
 		name := a.Metadata().Name
 		if p.done[name] {
+			continue
+		}
+
+		if a.Metadata().Destructive && !p.destructive {
 			continue
 		}
 
@@ -115,4 +117,46 @@ func (p *Planner) HasRemaining(kb *Knowledge) bool {
 		return true
 	}
 	return false
+}
+
+// PendingDestructive lists consent-gated actions that are otherwise runnable
+// right now. The report prints them so a withheld module never vanishes
+// silently — the operator sees exactly what --destructive would unlock.
+func (p *Planner) PendingDestructive(kb *Knowledge) []string {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.destructive {
+		return nil
+	}
+
+	capMap, verifiedCapMap := p.capMaps(kb)
+
+	var pending []string
+	for _, a := range p.actions {
+		meta := a.Metadata()
+		if p.done[meta.Name] || !meta.Destructive {
+			continue
+		}
+		if !ActionRequirementsMet(meta, capMap, verifiedCapMap) {
+			continue
+		}
+		pending = append(pending, meta.Name)
+	}
+	return pending
+}
+
+func (p *Planner) capMaps(kb *Knowledge) (capMap, verifiedCapMap map[string]bool) {
+	capMap = make(map[string]bool)
+	verifiedCapMap = make(map[string]bool)
+	for _, c := range kb.GetCapabilities() {
+		capMap[c.Name] = true
+		if c.Origin == OriginVerified {
+			verifiedCapMap[c.Name] = true
+		}
+	}
+	return capMap, verifiedCapMap
 }

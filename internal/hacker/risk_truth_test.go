@@ -111,8 +111,53 @@ func TestPlannerBlocksSensitiveActionOnHints(t *testing.T) {
 	}
 }
 
+// Consent is orthogonal to capability evidence: a Destructive action whose
+// every Requires is verified must STILL not dispatch without operator
+// consent — registered or runtime-spawned — and must surface in the
+// withheld list instead of vanishing silently.
+func TestDestructiveWithheldWithoutConsent(t *testing.T) {
+	p := NewPlanner(&CrawlAction{}, &LoginBruteAction{}, &SQLiDataExtractAction{})
+	_, kb := kbForTest("example.com")
+	kb.AddCapability(Capability{Name: "has_login", Origin: OriginVerified})
+
+	a := p.NextAction(kb)
+	if a == nil || a.Metadata().Name != "Web Crawler" {
+		t.Fatalf("read-only action must dispatch, got %+v", a)
+	}
+	if a := p.NextAction(kb); a != nil {
+		t.Fatalf("destructive action dispatched without consent: %s", a.Metadata().Name)
+	}
+	if p.HasRemaining(kb) {
+		t.Error("HasRemaining must respect the consent gate")
+	}
+
+	pending := p.PendingDestructive(kb)
+	if len(pending) != 2 || pending[0] == pending[1] {
+		t.Fatalf("both runnable destructive actions must be listed as withheld, got %v", pending)
+	}
+
+	p.AllowDestructive(true)
+	if p.PendingDestructive(kb) != nil {
+		t.Error("consent granted: nothing may remain withheld")
+	}
+	ran := map[string]bool{}
+	for {
+		a := p.NextAction(kb)
+		if a == nil {
+			break
+		}
+		ran[a.Metadata().Name] = true
+	}
+	if !ran["Login Bruteforce"] || !ran["SQLi Data Extraction"] {
+		t.Fatalf("with consent both actions must dispatch, ran %v", ran)
+	}
+}
+
 func TestPlannerRunsSensitiveActionOnVerified(t *testing.T) {
 	p := NewPlanner(&LoginBruteAction{})
+	// Consent is a second, orthogonal gate (see TestDestructiveWithheld
+	// WithoutConsent); grant it here to isolate the origin requirement.
+	p.AllowDestructive(true)
 	_, kb := kbForTest("example.com")
 
 	kb.AddCapability(Capability{Name: "has_login", Origin: OriginVerified})
@@ -125,10 +170,10 @@ func TestPlannerRunsSensitiveActionOnVerified(t *testing.T) {
 func TestChainsRequireVerifiedCapabilities(t *testing.T) {
 	b, kb := kbForTest("example.com")
 
-	// Feed remote-text hints for has_cors and has_xss: the CORS→XSS chain
-	// (risk 9.0) must NOT appear in DetectChains.
-	kb.AddFinding(Finding{Type: "cors_hint", Name: "cors mentioned in response text"})
-	kb.AddFinding(Finding{Type: "xss_hint", Name: "xss keyword present in html"})
+	// A remote-text hint that mentions "secret" derives has_secret at the
+	// HINT tier. The "Secrets → Cloud Compromise" chain requires has_secret
+	// VERIFIED, so a planted keyword must not surface the chain.
+	kb.AddFinding(Finding{Type: "secret_hint", Name: "the word secret appears in response text"})
 
 	chains := b.chainer.DetectChains(kb)
 	if len(chains) != 0 {
@@ -147,8 +192,10 @@ func TestChainsRequireVerifiedCapabilities(t *testing.T) {
 func TestChainsFireOnVerifiedCapabilities(t *testing.T) {
 	b, kb := kbForTest("example.com")
 
-	kb.AddCapability(Capability{Name: "has_cors", Origin: OriginVerified})
-	kb.AddCapability(Capability{Name: "has_xss", Origin: OriginVerified})
+	// "XSS → Session Hijack" requires BOTH has_xss_exploit and has_token at
+	// verified tier; supply executed evidence for each and the chain fires.
+	kb.AddCapability(Capability{Name: "has_xss_exploit", Origin: OriginVerified})
+	kb.AddCapability(Capability{Name: "has_token", Origin: OriginVerified})
 
 	chains := b.chainer.DetectChains(kb)
 	if len(chains) == 0 {
@@ -304,6 +351,7 @@ func TestCrawlPasswordInputStaysVerified(t *testing.T) {
 		t.Fatalf("structural password input must keep verified origin, got %+v", cap)
 	}
 	p := NewPlanner(&LoginBruteAction{})
+	p.AllowDestructive(true)
 	if act := p.NextAction(kb); act == nil || act.Metadata().Name != "Login Bruteforce" {
 		t.Error("verified structural has_login must still unlock the login brute force")
 	}
@@ -349,5 +397,29 @@ func TestGenericChainFindingIsAHypothesis(t *testing.T) {
 	}
 	if !strings.Contains(f.Name, "hypothesis") {
 		t.Errorf("finding must be labelled a hypothesis, got %q", f.Name)
+	}
+}
+
+// The scoring half of the same lie: an unexecuted chain — even one whose
+// every capability is verified — is a lead, not evidence. It must never
+// outscore a confirmed finding.
+func TestChainHypothesisCannotTopConfirmedFindings(t *testing.T) {
+	b, kb := kbForTest("example.com")
+
+	// "Upload → RCE" (risk 10.0) fires on a verified has_upload alone.
+	kb.AddCapability(Capability{Name: "has_upload", Origin: OriginVerified})
+	rep := b.buildReport(1)
+	if rep.RiskScore > 7.0 {
+		t.Errorf("chain-only risk = %.1f, want ≤7.0 (hypothesis weight, below the confirmed-high floor)", rep.RiskScore)
+	}
+
+	// With a wire-confirmed high finding present, the finding must win.
+	kb.AddFinding(Finding{Type: "xss_confirmed", Name: "XSS confirmed", Severity: SevHigh})
+	rep = b.buildReport(1)
+	if rep.RiskScore != 7.5 {
+		t.Errorf("confirmed high + 10/10 chain hypothesis = %.1f, want 7.5 (evidence outranks pattern)", rep.RiskScore)
+	}
+	if !strings.Contains(rep.Impact, "Confirmed finding") {
+		t.Errorf("impact must name the executed evidence, got %q", rep.Impact)
 	}
 }

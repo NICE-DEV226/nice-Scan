@@ -156,7 +156,7 @@ make build
 | `--role` | Role/privilege escalation via parameters and headers |
 | `--token` | Token and session reuse on protected endpoints (tokens are harvested from the target; none are invented, an empty harvest is reported) |
 | `--reset` | Password reset flows — user enumeration and token leaks |
-| `--session` | Session fixation and cookie security |
+| `--session` | Session cookie hardening on login surfaces (Secure/HttpOnly flags, ID entropy) — fixation itself needs a credentialed login and is reported as not tested |
 | `--register` | Account registration testing — **refused without `--destructive`** (account creation modifies target state) |
 | `--all` | Run every non-destructive module (registration still requires `--destructive`) |
 

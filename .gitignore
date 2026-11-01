@@ -55,3 +55,6 @@ reports/*.html
 gpg-private.key
 cosign.key
 attack_report.html
+
+# Qoder CLI local session/permission state (not project code)
+.qoder/
