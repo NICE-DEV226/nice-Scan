@@ -719,10 +719,11 @@ func exploitCmd() *cobra.Command {
 				if len(disc) > 0 {
 					fmt.Println(output.Section("Discovered Credential Access"))
 					proven := 0
+				discoveredLoop:
 					for _, c := range disc {
 						select {
 						case <-ctx.Done():
-							break
+							break discoveredLoop
 						default:
 						}
 						shown := types.Sanitize(c.User) + " " + types.MaskSecret(c.Pass)
