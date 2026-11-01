@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"regexp"
 	"strings"
@@ -206,16 +207,27 @@ func (a *DataExtractionAnalyzer) Analyze(ctx context.Context, resp *types.Respon
 		})
 	}
 
-	jwtClaims := uniqueStrings(rxJWTClaim.FindAllString(body, -1))
-	if len(jwtClaims) > 0 {
-		findings = append(findings, types.Finding{
-			Type:        types.FindingSecret,
-			Name:        "JWT Claim Data Found",
-			Severity:    types.SeverityMedium,
-			Description: "User identity claims (sub, name, email) found in response — potential user data exposure",
-			Evidence:    truncate(strings.Join(jwtClaims, " | "), 100),
-			Confidence:  0.7,
-		})
+	// A JWT's payload is base64url, NOT encrypted — sub/name/email are the
+	// standard, client-visible OIDC claims. Seeing them in a token is by-design
+	// and is not itself an exposure; it only matters if the token carries data
+	// the client should not hold, or if it belongs to another principal and
+	// surfaces in an unauthenticated response (reported by the token-leak /
+	// IDOR checks, not here). So this is an informational note, and it is only
+	// emitted when a real three-segment JWT is present AND decoded — the old
+	// matcher called any plain `{"email":"…"}` JSON a "JWT claim", which was
+	// simply wrong.
+	if payload := jwtPayload(rxJWT.FindString(body)); payload != "" {
+		jwtClaims := uniqueStrings(rxJWTClaim.FindAllString(payload, -1))
+		if len(jwtClaims) > 0 {
+			findings = append(findings, types.Finding{
+				Type:        types.FindingExposure,
+				Name:        "JWT Carries Identity Claims",
+				Severity:    types.SeverityInfo,
+				Description: "A JWT in the response carries identity claims (sub/name/email). A JWT payload is base64url, not encrypted, so these are client-visible by design and not an exposure on their own — confirm they are meant to be client-side, and escalate only if another principal's token appears here without authentication.",
+				Evidence:    truncate(strings.Join(jwtClaims, " | "), 100),
+				Confidence:  0.6,
+			})
+		}
 	}
 
 	dbConns := uniqueStrings(rxDBConnection.FindAllString(body, -1))
@@ -342,4 +354,21 @@ func uniqueStrings(s []string) []string {
 		}
 	}
 	return r
+}
+
+// jwtPayload base64url-decodes the payload segment of a three-part JWT so the
+// claim matcher reads the token's own claims rather than any `{"email":…}` in
+// the surrounding body. Returns "" when tok is not a decodable JWT.
+func jwtPayload(tok string) string {
+	parts := strings.Split(tok, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		if raw, err = base64.URLEncoding.DecodeString(parts[1]); err != nil {
+			return ""
+		}
+	}
+	return string(raw)
 }

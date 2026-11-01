@@ -48,7 +48,7 @@ func TestCreditCardRequiresLuhnAndPrefix(t *testing.T) {
 	}
 }
 
-// The user-dump heuristic once fired HIGH on the prose word "members".
+// A structured users collection should raise the reference.
 func TestUserDumpRequiresStructuredContext(t *testing.T) {
 	a := NewDataExtractionAnalyzer()
 
@@ -68,5 +68,43 @@ func TestUserDumpRequiresStructuredContext(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("a structured users collection should raise the reference: %+v", fs2)
+	}
+}
+
+// const with a real, decodable JWT (header.payload.signature).
+const testJWT = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZW1haWwiOiJqb2huQGV4YW1wbGUuY29tIn0.Zsig123"
+
+// The old matcher called ANY {"email":…} JSON a "JWT Claim Data" finding at
+// MEDIUM — wrong on two counts: there was no JWT, and a JWT payload is not a
+// secret (base64url, not encrypted). It must now (a) only fire when a real
+// three-part JWT is present and decoded, and (b) report INFO, not Medium.
+func TestJWTIdentityClaimsNotASecretWithoutToken(t *testing.T) {
+	a := NewDataExtractionAnalyzer()
+
+	// Plain JSON with a name/email but NO token anywhere.
+	fs := a.Analyze(context.Background(), respWithBody(`{"name":"John Doe","email":"john@example.com"}`))
+	for _, f := range fs {
+		if strings.Contains(f.Name, "JWT") {
+			t.Errorf("plain JSON with no JWT must not raise a JWT finding: %+v", f)
+		}
+	}
+
+	// A real JWT carrying the same identity claims: now it is a genuine, but
+	// informational, observation.
+	fs2 := a.Analyze(context.Background(), respWithBody("token: "+testJWT))
+	var hit *types.Finding
+	for i := range fs2 {
+		if strings.Contains(fs2[i].Name, "JWT") {
+			hit = &fs2[i]
+		}
+	}
+	if hit == nil {
+		t.Fatal("a real JWT with identity claims should surface the informational note")
+	}
+	if hit.Severity != types.SeverityInfo {
+		t.Errorf("JWT identity claims are client-visible by design, want Info, got %v", hit.Severity)
+	}
+	if hit.Type == types.FindingSecret {
+		t.Errorf("identity claims are not a secret; Type must not be FindingSecret")
 	}
 }

@@ -21,6 +21,12 @@ var (
 
 	rxAdminPanel = regexp.MustCompile(`(?i)(admin|dashboard|panel|backend|cpanel|administrator|wp-admin|manager)`)
 
+	// Strong admin surface in the URL PATH (not body prose). A path that names
+	// an admin endpoint is a real, checkable surface worth a Low; a bare
+	// "dashboard"/"panel"/"manager" word in the body is marketing copy and only
+	// justifies Info.
+	rxAdminPath = regexp.MustCompile(`(?i)/(?:admin|administrator|wp-admin|wp-login|cpanel|phpmyadmin|manager|backend|console)(?:[/?#]|$)`)
+
 	rxRegisterForm = regexp.MustCompile(`(?is)<form[^>]*>.*?(?:register|signup|create-account|create account).*?</form>`)
 
 	rxForgotPassword = regexp.MustCompile(`(?i)\b(?:forgot|reset|recover|lost)\b[\s\S]{0,20}?\b(?:password|pwd)\b`)
@@ -55,7 +61,9 @@ func (a *AuthAnalyzer) Analyze(ctx context.Context, resp *types.Response) []type
 	body := string(resp.Body)
 	url := resp.FinalURL
 
-	if rxLoginForm.MatchString(body) {
+	loginFormFound := rxLoginForm.MatchString(body)
+
+	if loginFormFound {
 		action := ""
 		if m := rxLoginAction.FindStringSubmatch(body); len(m) > 1 {
 			action = m[1]
@@ -150,20 +158,34 @@ func (a *AuthAnalyzer) Analyze(ctx context.Context, resp *types.Response) []type
 		})
 	}
 
-	// The old finding sold "Admin Panel Found" at HIGH confidence for any
-	// page whose URL or body contained an admin keyword — a blog post about
-	// admins qualified. A keyword is not a panel: demoted to a medium
-	// unverified-surface notice; real panels surface through actions that
-	// actually access them.
-	if rxAdminPanel.MatchString(url) || rxAdminPanel.MatchString(body) {
-		findings = append(findings, types.Finding{
-			Type:        types.FindingMisconfig,
-			Name:        "Possible Admin Panel (keyword match — unverified)",
-			Severity:    types.SeverityMedium,
-			Description: "The URL or page content contains admin-panel keywords. No access test was performed — verify manually whether an actual restricted panel exists",
-			Evidence:    fmt.Sprintf("URL: %s", url),
-			Confidence:  0.45,
-		})
+	// A keyword is not a panel. Report the weakest form of evidence at the
+	// lowest defensible level, and never alongside the concrete login-form
+	// detection above — that already proves an authenticated surface at this
+	// URL with real evidence. Admin prose that only names a management feature
+	// ("dashboard", "channel manager") would otherwise stack a second, weaker
+	// "admin" signal on the same page and inflate the count.
+	if !loginFormFound {
+		adminInPath := rxAdminPath.MatchString(url)
+		if adminInPath || rxAdminPanel.MatchString(body) {
+			severity := types.SeverityInfo
+			name := "Admin Panel Keyword in Content (unverified)"
+			desc := "The page text contains admin/panel keywords but no authenticated surface was detected here. No access test was performed — treat as a lead to verify, not a finding."
+			confidence := 0.3
+			if adminInPath {
+				severity = types.SeverityLow
+				name = "Possible Admin Surface in URL (unverified)"
+				desc = "The URL path names an admin-style endpoint. Its accessibility was not tested — verify manually whether it is restricted or public."
+				confidence = 0.4
+			}
+			findings = append(findings, types.Finding{
+				Type:        types.FindingMisconfig,
+				Name:        name,
+				Severity:    severity,
+				Description: desc,
+				Evidence:    fmt.Sprintf("URL: %s", url),
+				Confidence:  confidence,
+			})
+		}
 	}
 
 	return findings
