@@ -1,299 +1,361 @@
 <p align="center">
-  <a href="https://github.com/NICE-DEV226/nice-Scan/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/NICE-DEV226/nice-Scan/ci.yml?branch=main&style=flat-square&logo=githubactions&label=CI&color=58D6E6" alt="CI"/></a>
-  <a href="https://github.com/NICE-DEV226/nice-Scan/releases/latest"><img src="https://img.shields.io/github/v/release/NICE-DEV226/nice-Scan?style=flat-square&logo=github&label=Release&color=B484E6" alt="Latest release"/></a>
-  <img src="https://img.shields.io/badge/version-0.2.1-7DCFFF?style=flat-square&logo=go&logoColor=white" alt="Version"/>
+  <a href="https://github.com/NICE-DEV226/nice-Scan">
+    <img src="https://img.shields.io/badge/nice__scan-security%20recon-7DCFFF?style=for-the-badge&logo=go&logoColor=white" alt="nice_scan"/>
+  </a>
 </p>
 
 <p align="center">
-  <code>Fast. Precise. Intelligent.</code><br/>
-  <em>Modern Security Reconnaissance Engine — Autonomous Attack Chaining &amp; Real Data Extraction</em>
+  <a href="https://github.com/NICE-DEV226/nice-Scan/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/NICE-DEV226/nice-Scan/ci.yml?branch=main&style=flat-square&logo=githubactions&label=CI&color=58D6E6" alt="CI status"/></a>
+  <a href="https://github.com/NICE-DEV226/nice-Scan/releases/latest"><img src="https://img.shields.io/github/v/release/NICE-DEV226/nice-Scan?style=flat-square&logo=github&label=release&color=B484E6" alt="Latest release"/></a>
+  <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.24%2B-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go 1.24+"/></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3FB950?style=flat-square" alt="MIT license"/></a>
+  <a href="SECURITY.md"><img src="https://img.shields.io/badge/security%20policy-read-f85149?style=flat-square" alt="Security policy"/></a>
+</p>
+
+<p align="center">
+  <strong>A defensive-first reconnaissance and validation CLI for authorized security work.</strong><br/>
+  <sub>Fast HTTP scanning · technology fingerprinting · an evidence-driven decision engine that chains checks and proves what it claims.</sub>
 </p>
 
 ---
 
-## Overview
+**nice_scan** is a command-line tool for *authorized* security testing. It performs
+reconnaissance, fingerprinting, and controlled validation of common web
+vulnerabilities, then reports each result at the confidence the evidence actually
+supports. It is built to be honest: a finding states whether it was executed and
+server-verified, merely observed, or an untested hypothesis — so a report tells
+you what is real, not what is scary.
 
-**nice_scan** is a command-line offensive security tool for authorized engagements. It combines high-performance HTTP scanning, technology fingerprinting, and an autonomous Decision Engine that chains attacks, extracts real data, and renders a full HTML report — from a single command.
+> **Use only on systems you own or are explicitly authorized to test.** See
+> [Responsible use](#responsible-use).
 
-Every claim in a report is tied to the evidence that supports it. Server-verified findings, passively observed signals and untested hypotheses are labelled differently, so the risk score reflects what the scanner actually executed, not what it guessed.
+## Table of contents
 
-```shell
-# Full autonomous attack with an HTML report
-nice_scan hack example.com -R report.html
+- [Why this design](#why-this-design)
+- [Capabilities](#capabilities)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Commands](#commands)
+- [Global flags](#global-flags)
+- [The `exploit` modules](#the-exploit-modules)
+- [Output and reporting](#output-and-reporting)
+- [Supply chain and release integrity](#supply-chain-and-release-integrity)
+- [Development](#development)
+- [Architecture](#architecture)
+- [Documentation](#documentation)
+- [Responsible use](#responsible-use)
+- [License](#license)
 
-# One-line install (fail-closed installer)
-curl -sfL https://raw.githubusercontent.com/NICE-DEV226/nice-Scan/main/scripts/install.sh | sh
-```
+## Why this design
 
-## Features
+Most scanners drown operators in keyword matches. nice_scan ties every claim to a
+concrete verification state:
 
-### Autonomous Hack Agent
+| Verdict | What it means | How it earns the label |
+|---|---|---|
+| **Confirmed** | Server-verified | A probe was executed and the target's response carries structural proof (an error oracle, a marked command's output, a canary reflected in an executable context, a session cookie issued only on a valid login). |
+| **Observed** | Seen on the target, not exploited | A real signal was directly fetched (a login form, an upload field, a set of exposed headers) with no state-changing action run over it. |
+| **Hypothesis** | A chain the engine would attempt | Reported as a plan, never as a breach. |
 
-Run `nice_scan hack <target>` and the Decision Engine plans and executes the attack actions, then chains forward: every structural finding can spawn its exploitation module.
+Two rules follow from this:
 
-| | |
+1. **Differential baselines, not single responses.** A claim compares against a
+   control (a junk-credential round, an anonymous request, the endpoint's own
+   modal response size) so the verdict rests on a delta, not a status code.
+2. **Consent gates state changes.** Login spray, role/privilege tampering,
+   account registration, discovered-credential attempts, and file/command probes
+   modify target state. They are **disabled unless you pass `--destructive`** (or
+   enable `consent on` in the shell).
+
+## Capabilities
+
+| Area | What nice_scan does |
 |---|---|
-| **Reconnaissance** | Passive recon (crt.sh, Wayback — zero target requests) · BFS crawl (pages, forms, JS) · path fuzzing · concurrent port scan · S3 bucket enumeration |
-| **Exploitation** | SQLi detection + data extraction · LFI detection + file read · XSS verification · login brute-force vs. differential baseline · JWT forge · GraphQL introspection |
-| **Decision Engine** | Attack chain patterns (CORS→XSS, JWT→Admin, Upload→RCE) · forward-chaining planner · session management · knowledge base with capability derivation |
-| **Output** | HTML attack report (risk scoring, findings timeline, evidence) · extracted artifacts under `reports/<target>/` · live TUI dashboard · interactive REPL · JSON for CI/CD |
-
-### Honest verdicts
-
-A claim needs evidence, not keywords:
-
-- **Confirmed (server-verified)** — a probe was executed and the target's response carries the structural proof (SQL error oracle, `uid=` output from a marked command, attacker marker reflected in an executable context).
-- **Observed** — a signal was directly seen on the target (a login form, an admin keyword, an upload field) without executing an exploit over it.
-- **Hypothesis** — a chain the engine *would* run if it existed, reported as such.
-
-Risk scoring weights executed severity highest and never lets an untested chain outscore a confirmed finding. State-modifying actions (command injection probes, web shell upload, account registration) are disabled unless the operator passes `--destructive`.
-
-## Quick Start
-
-```shell
-# Autonomous hack — detection, chaining, extraction, HTML report
-nice_scan hack example.com -R report.html
-
-# Interactive reconnaissance shell
-nice_scan shell
-
-# Real-time dashboard with live findings
-nice_scan scan example.com -i
-
-# Time-boxed engagement
-nice_scan hack example.com --timeout 30s -R report.html
-
-# Exploitation modules
-nice_scan exploit https://example.com --login --idor 1-100
-
-# Technology fingerprinting
-nice_scan tech https://example.com
-```
+| **Reconnaissance** | Passive sources (crt.sh, Wayback) that send zero requests to the target · BFS crawl of pages, forms, and JS · path fuzzing · concurrent TCP port scan · S3 bucket enumeration |
+| **Fingerprinting** | 165 technology signatures, version extraction, and stack classification cached per target |
+| **Validation** | SQLi detection with a differential oracle · LFI detection and bounded file read · canary-based XSS reflection with context classification · login validation against a junk baseline · JWT analysis · GraphQL introspection |
+| **Decision engine** | Forward-chaining planner · knowledge base with capability derivation · session/context reuse · attack-chain patterns surfaced as hypotheses |
+| **Output** | Terminal report with severity and confidence · live TUI dashboard · interactive REPL shell · JSON for pipelines · HTML engagement report with a findings timeline and evidence |
 
 ## Installation
 
-> **Package managers:** nice_scan currently ships through GitHub Releases and
-> `go install` only. No Scoop bucket, Winget identity or Homebrew tap is
-> published — installation commands circulating elsewhere (such as `winget
-> install --id NICE-DEV226.nice-Scan` or `scoop install nice-scan/nice_scan`)
-> target package IDs this project does not own.
+nice_scan ships through **GitHub Releases** and **`go install`** only. There is
+no Homebrew tap, Scoop bucket, or Winget identity; any `brew install`,
+`scoop install`, or `winget install` command you see elsewhere targets package
+IDs this project does not own and is not maintained here.
 
-The installer is **fail-closed**: it resolves one release tag, verifies SHA256
-checksums and the GPG signature first, and aborts with nothing installed if any
-step fails.
+The installers are **fail-closed**: they resolve a single release tag, verify the
+SHA256 checksum and the GPG signature over `checksums.txt` first, and abort with
+nothing installed if any step fails.
 
-### Linux / macOS
+### Linux and macOS
 
 ```bash
 curl -sfL https://raw.githubusercontent.com/NICE-DEV226/nice-Scan/main/scripts/install.sh | sh
 ```
 
-The installer drops the binary in `~/.local/bin` (or, with `go install`, in
-`$(go env GOPATH)/bin`) and appends that directory to your `PATH` in your
-shell rc file (`.zshrc` / `.bashrc` / `.profile`). **Open a new terminal, or
-run the export below, so the current shell sees it:**
+The installer places the binary in **`~/.local/bin`** (or, if it builds via
+`go install`, in **`$(go env GOPATH)/bin`**) and appends that directory to your
+`PATH` in the shell rc file it finds (`.zshrc` / `.bashrc` / `.zprofile` /
+`.profile`). Open a new terminal, or apply it to the current one:
 
 ```bash
-export PATH="$HOME/.local/bin:$PATH"        # installer (binary) path
-export PATH="$PATH:$(go env GOPATH)/bin"    # go install path
+export PATH="$HOME/.local/bin:$PATH"          # installer (release binary)
+export PATH="$PATH:$(go env GOPATH)/bin"      # go install path
 ```
 
-> If `nice_scan` seems to "disappear" after a reboot, it is on disk but not on
-> your `PATH` — re-run the export (or the installer) and it is back.
+> **`nice_scan` "disappears" after a reboot?** It is on disk — it simply is not
+> on that login shell's `PATH`. Re-run the export above (or the installer) and it
+> is reachable again. The current installer writes the `PATH` line into your rc
+> files so the install survives a restart.
 
-Or with Go 1.24+ (builds from the pinned release tag):
+### From source with Go (1.24+)
+
+```bash
+go install github.com/NICE-DEV226/nice-Scan/cmd/nice_scan@latest
+```
+
+`go install` resolves the newest release tag itself. To pin an exact, audited
+version (recommended), name the tag instead of `latest`:
 
 ```bash
 go install github.com/NICE-DEV226/nice-Scan/cmd/nice_scan@v0.3.4
 ```
 
-### Windows — PowerShell 7+
+### Windows (PowerShell 7+)
 
 ```powershell
 Invoke-WebRequest https://raw.githubusercontent.com/NICE-DEV226/nice-Scan/main/scripts/install.ps1 -OutFile install.ps1
-powershell -ExecutionPolicy RemoteSigned -File install.ps1
+pwsh -ExecutionPolicy Bypass -File install.ps1
 ```
 
-### Manual
+### Manual download
 
-Download the binary for your platform from the [Releases page](https://github.com/NICE-DEV226/nice-Scan/releases), verify the checksums, and extract:
+Download the archive for your platform from the
+[Releases page](https://github.com/NICE-DEV226/nice-Scan/releases), verify it (see
+[Release verification](#release-verification)), and install it anywhere on your
+`PATH` — for example `/usr/local/bin` on Linux/macOS.
 
-```bash
-curl -sSfL https://github.com/NICE-DEV226/nice-Scan/releases/latest/download/nice_scan_latest_linux_amd64.tar.gz | tar xz
-sudo mv nice_scan /usr/local/bin/
-```
-
-### Build from Source
+### Build from source
 
 ```bash
 git clone https://github.com/NICE-DEV226/nice-Scan.git
 cd nice-Scan
-make build
-# or: go build -o nice_scan ./cmd/nice_scan
+go build -o nice_scan ./cmd/nice_scan
+```
+
+## Quick start
+
+```bash
+# Autonomous reconnaissance + validation, with an HTML engagement report
+nice_scan hack example.com -R report.html
+
+# Standard scan with a live dashboard
+nice_scan scan example.com -i
+
+# Deep audit: verbose, every module in detail, HTML report on by default
+nice_scan audit example.com
+
+# Fingerprinting and TLS analysis only
+nice_scan tech example.com
+nice_scan tls https://example.com
+
+# Targeted exploitation modules (non-destructive by default)
+nice_scan exploit https://example.com --idor 1-100 --token
+
+# Interactive REPL shell
+nice_scan shell
+```
+
+Time-box a run and prove you consented to state-changing checks:
+
+```bash
+nice_scan hack example.com --timeout 30s -R report.html --destructive
 ```
 
 ## Commands
 
 | Command | Description |
-|---------|-------------|
-| `hack <target>` | Autonomous attack chain — detection, chaining, data extraction<!--, HTML report --> |
-| `scan <target>` | Standard reconnaissance scan (headers, TLS, fingerprint, endpoints) |
-| `exploit <target>` | Exploitation modules (login, IDOR, privesc, token/session reuse) |
+|---|---|
+| `hack <target>` | Autonomous chain — reconnaissance, fingerprinting, validation, and forward-chaining, with optional HTML report |
+| `scan <target>` | Standard reconnaissance scan — headers, TLS, fingerprint, endpoints |
+| `audit <target>` | Deep scan: forces verbose output, details every module, and writes an HTML report by default |
+| `exploit <target>` | Individual exploitation modules (login, IDOR, privesc, token/session reuse) — see below |
 | `tech <target>` | Technology fingerprinting only (165 signatures) |
-| `tls <target>` | TLS/SSL analysis (ciphers, certs, protocol versions) |
-| `shell` | Interactive REPL reconnaissance shell |
+| `tls <target>` | TLS/SSL analysis — ciphers, certificates, protocol versions |
+| `shell` | Interactive REPL: run checks against one or more targets, with command history, clipboard copy, and a `consent` toggle |
+| `update` | Self-update to the latest release, checksum-verified, with the previous binary kept as `nice_scan.old` for rollback |
 
-### Global flags
+Run `nice_scan <command> --help` for each command's full flag set.
 
-| Flag | Description |
-|------|-------------|
-| `--workers, -w` | Concurrent workers (default 64) |
-| `--timeout` | Per-request timeout |
-| `--rate-limit` | Requests per second (0 = unlimited) |
-| `--proxy` | HTTP proxy URL |
-| `--cookie` | Cookie header included in every request |
-| `--header` | Custom headers, repeatable (`key:value`) |
-| `--follow-redirects` / `--max-redirects` | Redirect policy (default: follow, 5 hops) |
-| `--json, -j` | JSON output for pipelines |
-| `--interactive, -i` | Live dashboard |
-| `--report, -R` | Detailed HTML report file |
-| `--destructive` | **Explicit consent for state-modifying actions** (command/shell upload, registration) |
-| `--version` / `--verbose, -v` | Version / verbose output |
+## Global flags
 
-### `exploit` module flags
+| Flag | Default | Description |
+|---|---|---|
+| `-w, --workers <n>` | `64` | Concurrent workers |
+| `--timeout <dur>` | config | Per-request timeout (e.g. `10s`) |
+| `--retries <n>` | config | Max retries per request |
+| `--rate-limit <n>` | `0` | Requests per second (`0` = unlimited) |
+| `--proxy <url>` | — | HTTP proxy URL |
+| `--cookie <value>` | — | `Cookie` header included in every request |
+| `--header key:value` | — | Custom header, repeatable |
+| `--follow-redirects` | `true` | Follow redirects |
+| `--max-redirects <n>` | `5` | Redirect hop limit |
+| `-j, --json` | `false` | Machine-readable JSON output |
+| `-i, --interactive` | `false` | Live TUI dashboard |
+| `-R, --report <file>` | — | Write a detailed HTML report |
+| `-v, --verbose` | `false` | Verbose output |
+| `--destructive` | `false` | **Consent to state-modifying actions** (login spray, role tamper, registration, discovered-credential attempts). Required to enable them; targets must be authorized |
+| `--no-update-check` | `false` | Disable the automatic new-release check (also `NICE_SCAN_NO_UPDATE_CHECK=1`) |
+| `--version` | — | Print the version |
 
-| Flag | Module |
-|------|--------|
-| `--login` | Credential brute-force against login forms (differential verdict vs. junk baseline) |
-| `--idor 1-100` | IDOR enumeration range |
-| `--role` | Role/privilege escalation via parameters and headers |
-| `--token` | Token and session reuse on protected endpoints (tokens are harvested from the target; none are invented, an empty harvest is reported) |
-| `--reset` | Password reset flows — user enumeration and token leaks |
-| `--session` | Session cookie hardening on login surfaces (Secure/HttpOnly flags, ID entropy) — fixation itself needs a credentialed login and is reported as not tested |
-| `--register` | Account registration testing — **refused without `--destructive`** (account creation modifies target state) |
-| `--all` | Run every non-destructive module (registration still requires `--destructive`) |
+## The `exploit` modules
 
-<details>
-<summary><strong>Attack walkthrough</strong> — a sample <code>hack</code> run</summary>
+Non-destructive by default. Modules that modify target state refuse to run
+without `--destructive`.
+
+| Flag | Module | Consent |
+|---|---|---|
+| `--idor <start-end>` | IDOR enumeration with a **per-endpoint modal baseline** (only referents that differ from their *own* endpoint are flagged) | no |
+| `--token` | Token/session reuse on protected endpoints — tokens are **harvested from the target**; nothing is invented, and an empty harvest is reported honestly | no |
+| `--session` | Session cookie hardening on login surfaces (`Secure`/`HttpOnly`, ID entropy). Fixation needs a credentialed login and is reported as *not tested* | no |
+| `--reset` | Password-reset flows — user enumeration split and token leaks | no |
+| `--access` | Replays admin paths anonymously vs. with the session — a **differential** access check; reports real gains or states plainly that nothing was verified | no |
+| `--creds user:pass` | Attempt a specific credential pair, then attach the session to `--access` verification | no\* |
+| `--login` | Credential spray against login forms, verdict differential vs. a junk baseline | **yes** |
+| `--role` | Role/privilege escalation via parameters and headers (tampered requests) | **yes** |
+| `--register` | Account registration testing (creates state) | **yes** |
+| `--all` | Run every module; the destructive ones still require `--destructive` | mixed |
+
+\* An operator-supplied credential is not sprayed at the target beyond the single
+attempt; automatic exploitation of *discovered* leaked credentials is consent-gated.
+
+## Output and reporting
+
+`hack` and `audit` render a terminal report grouped by severity, with a
+confidence value and an evidence line for each finding. Use `--json` for machine
+consumption and `-R report.html` for a shareable engagement report (risk score,
+findings timeline, evidence). Extracted artifacts are written under
+`reports/<target>/` with restrictive `0700` permissions.
+
+Every finding name and evidence is run through sanitization, and plaintext
+secrets are **masked by default** (only the length is preserved) so credentials
+never leak into terminal scrollback, JSON, or the HTML report.
+
+The snippet below is **illustrative** — actual findings depend on the target. It
+shows the point of the design: nice_scan records an escaped reflection but does
+**not** inflate it into an executable-XSS claim, because encoded markup cannot run
+as reflected.
 
 ```
-$ nice_scan hack example.com --timeout 15s -R report.html
+◈ MEDIUM
+  ⚠  Session cookie missing HttpOnly                         92% confidence
+     Set-Cookie: sid=<masked len=32>; Secure
 
-  ◈ NICE HACKER — DECISION ENGINE
-  Target: https://example.com
-  Actions loaded (destructive modules gated by --destructive)
-
-    Step 1  Passive Reconnaissance  → crt.sh: 3 subdomains (+ wayback)
-    Step 2  Crawl Endpoints         → 47 paths discovered
-    Step 3  SQL Injection           → CRITICAL  login.php (param: id)
-            ◈ Spawned: SQLi Data Extraction
-    Step 4  SQLi Extraction         → CRITICAL  142 user records
-    Step 5  Local File Inclusion    → CRITICAL  /etc/passwd via page=
-            ◈ Spawned: LFI File Read
-    Step 6  LFI File Read           → CRITICAL  12 structural records
-    Step 7  Attack Chain Detection  → hypothesis chains listed
-    Step 8  Report Generation       → report.html
-
-  ── Extraction Summary ──
-  📁 reports/example.com/
-  ├── sql_dump/  users.sql          (142 records)
-  ├── lfi_files/ passwd, shadow, .env, …
-  └── credentials.txt               (8 credentials)
+◈ LOW
+  ○  XSS reflection (escaped)                                45% confidence
+     search=&lt;svg onload=alert(…)&gt;   (entity-encoded — does not execute)
 ```
 
-</details>
+## Supply chain and release integrity
 
-## Trust & Supply Chain Security
-
-| Layer | State | Verification |
-|-------|-------|--------------|
-| Binary integrity | SHA256 checksums published per release | `sha256sum --check checksums.txt --ignore-missing` |
-| Release authenticity | GPG-signed `checksums.txt` when signing keys are configured | `gpg --verify checksums.txt.sig checksums.txt` |
-| Build provenance | GitHub build-provenance attestations + cosign keyless bundles at release time (releases cut after 2026-10-24; nothing retroactive) | `gh attestation verify <file> -R NICE-DEV226/nice-Scan` |
-| SBOM | SPDX SBOM emitted per release | present in the release assets |
-| Code integrity | Commits are **not** systematically GPG-signed | `git log --show-signature` |
+| Layer | Status | How to verify |
+|---|---|---|
+| Binary integrity | SHA256 `checksums.txt` published per release | `sha256sum --check <checksums> --ignore-missing` |
+| Release authenticity | `checksums.txt` GPG-signed | `gpg --verify <checksums>.sig <checksums>` |
+| Build provenance | GitHub provenance attestations for releases cut after 2026-10-24 (not retroactive) | `gh attestation verify <file> -R NICE-DEV226/nice-Scan` |
+| SBOM | SPDX SBOM emitted per release | in the release assets |
+| Source trust | Commits are **not** systematically GPG-signed | build from a pinned tag and audit it |
 | Distribution | GitHub Releases + `go install <tag>` | — |
 
-The installers (`scripts/install.sh`, `scripts/install.ps1`) fail closed: a missing
-checksum file, an uncovered archive or a failed signature aborts with nothing
-installed. The `go install` path anchors strictly to the resolved release tag —
-no `@latest`, no `main` HEAD.
+The pinned maintainer GPG fingerprint is
+`4CE466095C5B3185883288C593FBFE29F62FA4DB`, imported on first use from
+`keyserver.ubuntu.com` over `hkps`. A key that does not match this fingerprint
+makes `install.sh` abort rather than validate an unexpected signature. The full
+policy, including the honest limitations of the above, is in
+[SECURITY.md](SECURITY.md).
 
-### Quick verification
+### Release verification
 
 ```bash
-# Release assets
-gh release download v0.2.1 --pattern "checksums*" -R NICE-DEV226/nice-Scan
-
-# SHA256
-sha256sum --check nice_scan_0.2.1_checksums.txt --ignore-missing
-
-# GPG (when signing is configured)
-gpg --verify nice_scan_0.2.1_checksums.txt.sig nice_scan_0.2.1_checksums.txt
-
-# Most trustworthy: build from a pinned tag and audit what you run
-git clone --branch v0.2.1 https://github.com/NICE-DEV226/nice-Scan.git
-cd nice-Scan && go build ./cmd/nice_scan
+TAG=v0.3.4
+gh release download "$TAG" --pattern "checksums*" -R NICE-DEV226/nice-Scan
+sha256sum --check nice_scan_*_checksums.txt --ignore-missing
+gpg --verify nice_scan_*_checksums.txt.sig nice_scan_*_checksums.txt
 ```
 
-> The maintainer GPG key is imported on first use from `keyserver.ubuntu.com`
-> (hkps) and must match the pinned fingerprint
-> `4CE466095C5B3185883288C593FBFE29F62FA4DB` (verified out-of-band, published in
-> [SECURITY.md](SECURITY.md)) — a mismatched key makes `install.sh` abort. For a
-> hardcoded chain of trust, clone and build from source.
+For a hardcoded chain of trust, the most verifiable option is always to build
+from the tag you audit:
+
+```bash
+git clone --branch v0.3.4 --depth 1 https://github.com/NICE-DEV226/nice-Scan.git
+cd nice-Scan && go build -o nice_scan ./cmd/nice_scan
+```
 
 ## Development
 
 ```bash
 make build            # build the CLI
+make test             # run the test suite
 make run ARGS="hack example.com --timeout 10s"
-make test             # tests
 make build-all        # cross-compile (linux/windows/darwin, amd64/arm64)
-make lint             # golangci-lint (gofmt, goimports, staticcheck, …)
-make vet
-make snapshot         # full local release snapshot
-make release
+make lint             # golangci-lint (gofmt, staticcheck, …)
+make vet              # go vet
+make govulncheck      # known-vulnerability scan of dependencies
+make snapshot         # local release snapshot (goreleaser)
 ```
 
-Continuous integration runs the suite with race detection on every push to
-`main`, and enforces the lint/formatting gate (`.golangci.yml`). Pull requests
-must keep both green.
+CI (GitHub Actions) enforces, on every push and pull request: `golangci-lint` →
+`build` → `go test -race -count=1` → `govulncheck`. A change is not "done" until
+CI is green. Contributor details and conventions are in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Architecture
 
 ```
-cmd/nice_scan/          CLI entry point (Cobra commands)
+cmd/nice_scan/     CLI entry point — Cobra commands, flag wiring
 internal/
-  hacker/               Decision Engine (planner, chaining, knowledge base, actions)
-  engine/               Analysis modules (SQLi, XSS, CORS, TLS, tokens, auth, …)
-  exploit/              Exploitation modules (login, IDOR, privesc, token, session)
-  fingerprint/          Technology fingerprinting (165 signatures)
-  transport/            HTTP client (pooling, retry policy, HTTP/2, session/hops)
-  shell/                Interactive REPL shell
-  tui/                  Terminal UI (live dashboard)
-  output/               Output renderers (terminal, JSON, HTML)
-  types/                Shared types
-scripts/                Install scripts (install.sh, install.ps1)
-docs/                   Landing page & documentation
+  hacker/          Decision engine: planner, forward-chaining, knowledge base, actions
+  engine/          Analysis modules: SQLi, XSS, CORS, headers, TLS, tokens, auth, creds
+  exploit/         Exploitation modules: login, IDOR, privesc, token, session
+  detect/          Shared evidence primitives: canaries and classified reflection
+  fingerprint/     Technology fingerprinting (165 signatures, stack classifier)
+  transport/       HTTP client: pooling, retries, HTTP/2, session/redirect hops, credentials
+  shell/           Interactive REPL (history, clipboard copy, consent toggle)
+  tui/             Live terminal dashboard (BubbleTea)
+  output/          Renderers: terminal, JSON, HTML
+  types/           Shared types, sanitization, secret masking
+  update/          Self-update with checksum verification and rollback
+scripts/           Install scripts (install.sh, install.ps1)
+docs/              Landing page and architecture documentation
 ```
 
 ## Documentation
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — detailed system design
+- [ARCHITECTURE.md](ARCHITECTURE.md) — system design
 - [docs/architecture/overview.md](docs/architecture/overview.md) — architecture overview
 - [docs/architecture/transport.md](docs/architecture/transport.md) — transport layer
-- [CONTRIBUTING.md](CONTRIBUTING.md) — development workflow & conventions
-- [SECURITY.md](SECURITY.md) — security policy, vulnerability reporting and the honest supply-chain inventory
+- [CONTRIBUTING.md](CONTRIBUTING.md) — development workflow and conventions
+- [SECURITY.md](SECURITY.md) — security policy, vulnerability reporting, and the supply-chain inventory
 
-## Legal
+## Responsible use
 
-This tool is intended exclusively for **authorized security testing** of systems you own
-or have explicit written permission to test. Unauthorized use may violate applicable laws.
-The authors accept no liability for misuse or damage caused by this tool.
+nice_scan is intended exclusively for **authorized security testing** of systems
+you own or have explicit written permission to test. Unauthorized scanning or
+exploitation may be illegal in your jurisdiction. The authors accept no
+liability for misuse or damage. State-changing capabilities are consent-gated for
+this reason, but the gate is a safeguard, not a substitute for authorization — you
+are responsible for staying within scope.
+
+To report a vulnerability in nice_scan itself, follow [SECURITY.md](SECURITY.md);
+do not open a public issue for an unfixed security problem.
+
+## License
+
+Distributed under the **MIT License**. See [LICENSE](LICENSE) for the full text.
 
 ---
 
 <p align="center">
-  <sub>Built with <a href="https://go.dev/">Go</a> · <a href="https://github.com/spf13/cobra">Cobra</a> · <a href="https://github.com/charmbracelet/bubbletea">BubbleTea</a> · <a href="https://github.com/charmbracelet/lipgloss">LipGloss</a></sub><br/>
-  <sub>© 2026 NICE-DEV226</sub>
+  <sub>Built with <a href="https://go.dev/">Go</a> · <a href="https://github.com/spf13/cobra">Cobra</a> · <a href="https://github.com/charmbracelet/bubbletea">BubbleTea</a> · <a href="https://github.com/charmbracelet/lipgloss">Lipgloss</a></sub>
 </p>
