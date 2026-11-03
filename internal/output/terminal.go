@@ -299,6 +299,11 @@ func (r *TerminalRenderer) truncate(s string, maxLen int) string {
 	// Render sink: rune-aligned truncation (byte slicing of multibyte
 	// evidence renders a corrupted glyph) and a guard for degenerate
 	// widths (byte slicing to a negative index would panic).
+	//
+	// Evidence overflows as a head + tail problem: a finding's meaning is
+	// carried by BOTH the start (which surface) and the end (the reflected
+	// snippet the old cut-to-length deleted, reading as an arbitrary mid-URL
+	// severance). Center-cut — keep the front and the back, elide the middle.
 	if maxLen <= 0 {
 		return ""
 	}
@@ -306,7 +311,12 @@ func (r *TerminalRenderer) truncate(s string, maxLen int) string {
 	if len(runes) <= maxLen {
 		return s
 	}
-	return string(runes[:maxLen-1]) + "…"
+	if maxLen < 8 {
+		return string(runes[:maxLen-1]) + "…"
+	}
+	head := (maxLen - 1) * 2 / 3
+	tail := maxLen - 1 - head
+	return string(runes[:head]) + "…" + string(runes[len(runes)-tail:])
 }
 
 func (r *TerminalRenderer) RenderJSON(res *engine.ScanResult) {

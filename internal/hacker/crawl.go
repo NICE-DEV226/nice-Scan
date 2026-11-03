@@ -2,6 +2,7 @@ package hacker
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -35,6 +36,33 @@ func (a *CrawlAction) Execute(ctx context.Context, target string, kb *Knowledge,
 
 	var findings []Finding
 
+	// Per-page INFO observations ("JavaScript files discovered", "Large page
+	// with many links") used to be appended once per page, so a 30-page crawl
+	// returned 12 identical noise lines. Accumulate across the crawl and emit
+	// each observation once at the end.
+	seenJS := map[string]bool{}
+	var allJS, largeLinkPages []string
+	flushInfo := func() {
+		if len(allJS) > 0 {
+			findings = append(findings, Finding{
+				Type:        "js_discovery",
+				Name:        "JavaScript files discovered",
+				Severity:    SevInfo,
+				Description: fmt.Sprintf("%d JS file(s) across the crawl may contain API endpoints, tokens, and secrets", len(allJS)),
+				Evidence:    strings.Join(allJS, ", "),
+			})
+		}
+		if len(largeLinkPages) > 0 {
+			findings = append(findings, Finding{
+				Type:        "crawl_sitemap",
+				Name:        "Pages with many links (sitemap/index candidates)",
+				Severity:    SevInfo,
+				Description: fmt.Sprintf("%d page(s) carry >30 links — likely sitemaps or index pages exposing many endpoints", len(largeLinkPages)),
+				Evidence:    strings.Join(largeLinkPages, ", "),
+			})
+		}
+	}
+
 	// The budget counts pages ACTUALLY FETCHED. Marking discovered links
 	// visited up-front (the old rule) burned maxPages on URLs that were
 	// popped past maxDepth and never fetched — downstream actions then
@@ -43,6 +71,7 @@ func (a *CrawlAction) Execute(ctx context.Context, target string, kb *Knowledge,
 	for len(queue) > 0 && fetched < maxPages {
 		select {
 		case <-ctx.Done():
+			flushInfo()
 			return ActionResult{Findings: findings}
 		default:
 		}
@@ -135,24 +164,15 @@ func (a *CrawlAction) Execute(ctx context.Context, target string, kb *Knowledge,
 			}
 		}
 
-		if len(jsFiles) > 0 {
-			findings = append(findings, Finding{
-				Type:        "js_discovery",
-				Name:        "JavaScript files discovered",
-				Severity:    SevInfo,
-				Description: "JS files may contain API endpoints, tokens, and secrets",
-				Evidence:    strings.Join(jsFiles, ", "),
-			})
+		for _, js := range jsFiles {
+			if !seenJS[js] {
+				seenJS[js] = true
+				allJS = append(allJS, js)
+			}
 		}
 
 		if len(links) > 30 {
-			findings = append(findings, Finding{
-				Type:        "crawl_sitemap",
-				Name:        "Large page with many links",
-				Severity:    SevInfo,
-				Description: "Page may be a sitemap or index with many endpoints",
-				Evidence:    u,
-			})
+			largeLinkPages = append(largeLinkPages, u)
 		}
 
 		for _, link := range links {
@@ -182,6 +202,7 @@ func (a *CrawlAction) Execute(ctx context.Context, target string, kb *Knowledge,
 		}
 	}
 
+	flushInfo()
 	return ActionResult{Findings: findings}
 }
 
