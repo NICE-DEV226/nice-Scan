@@ -88,10 +88,23 @@ step fails.
 curl -sfL https://raw.githubusercontent.com/NICE-DEV226/nice-Scan/main/scripts/install.sh | sh
 ```
 
+The installer drops the binary in `~/.local/bin` (or, with `go install`, in
+`$(go env GOPATH)/bin`) and appends that directory to your `PATH` in your
+shell rc file (`.zshrc` / `.bashrc` / `.profile`). **Open a new terminal, or
+run the export below, so the current shell sees it:**
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"        # installer (binary) path
+export PATH="$PATH:$(go env GOPATH)/bin"    # go install path
+```
+
+> If `nice_scan` seems to "disappear" after a reboot, it is on disk but not on
+> your `PATH` — re-run the export (or the installer) and it is back.
+
 Or with Go 1.24+ (builds from the pinned release tag):
 
 ```bash
-go install github.com/NICE-DEV226/nice-Scan/cmd/nice_scan@v0.2.1
+go install github.com/NICE-DEV226/nice-Scan/cmd/nice_scan@v0.3.4
 ```
 
 ### Windows — PowerShell 7+
