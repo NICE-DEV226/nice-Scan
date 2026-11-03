@@ -117,43 +117,100 @@ func (a *LoginBruteAction) Execute(ctx context.Context, target string, kb *Knowl
 		}
 
 		sprayed := 0
-		for _, cred := range commonCreds {
+		verifiedThisForm := false
+
+		// Discovered-credential chain FIRST: a pair the TARGET leaked (from
+		// the crawl / JS scan, or from this very page's markup) is a higher-
+		// value lead than a guessed wordlist — it is the owner's real
+		// credential, so verifying it proves access without locking accounts
+		// across a spray. Same baseline-differential verdict as the spray.
+		var discovered []Credential
+		discovered = append(discovered, kb.GetDiscoveredCredentials()...)
+		for _, p := range detect.ExtractCredentialPairs(body) {
+			discovered = append(discovered, Credential{Username: p.User, Password: p.Pass, Source: page.URL})
+		}
+		for _, cred := range discovered {
 			select {
 			case <-ctx.Done():
 				return ActionResult{Findings: findings, Actions: spawned}
 			default:
 			}
-
-			loginResp, err := postLoginForm(ctx, client, actionURL, formFields, cred[0], cred[1])
+			if cred.Username == "" || cred.Password == "" {
+				continue
+			}
+			loginResp, err := postLoginForm(ctx, client, actionURL, formFields, cred.Username, cred.Password)
 			if err != nil {
 				continue
 			}
 			sprayed++
-
 			if loginVerdict(loginResp, *base, cookiesTrusted) {
+				verifiedThisForm = true
 				kb.AddCredential(Credential{
-					Username: cred[0],
-					Password: cred[1],
-					Source:   page.URL,
+					Username: cred.Username,
+					Password: cred.Password,
+					Source:   cred.Source,
 					Valid:    true,
 				})
-
 				findings = append(findings, Finding{
-					Type:        "login_valid",
-					Name:        fmt.Sprintf("Valid credentials: %s:%s", types.Sanitize(cred[0]), types.MaskSecret(cred[1])),
+					Type:        "login_discovered_valid",
+					Name:        fmt.Sprintf("Discovered credential VERIFIED: %s (%s)", types.Sanitize(cred.Username), types.MaskSecret(cred.Password)),
 					Severity:    SevCritical,
-					Description: fmt.Sprintf("Login successful at %s (differential verdict vs junk-credential baseline)", actionURL),
-					Evidence:    fmt.Sprintf("%s:%s → %d richer than baseline", types.Sanitize(cred[0]), types.MaskSecret(cred[1]), loginResp.StatusCode),
-					Details:     map[string]string{"verification": "baseline-differential"},
+					Description: fmt.Sprintf("A credential pair the target leaked (%s) is accepted at %s — differential verdict vs junk baseline. This is the owner's live credential, not a guessed one.", cred.Source, actionURL),
+					Evidence:    fmt.Sprintf("%s:%s → %d richer than baseline", types.Sanitize(cred.Username), types.MaskSecret(cred.Password), loginResp.StatusCode),
+					Details:     map[string]string{"verification": "baseline-differential", "source": cred.Source, "origin": "discovered"},
 				})
-
 				spawned = append(spawned, &PostLoginCrawlAction{
-					username:   cred[0],
-					password:   cred[1],
+					username:   cred.Username,
+					password:   cred.Password,
 					loginURL:   actionURL,
 					formFields: formFields,
 				})
 				break
+			}
+		}
+
+		// Fall back to the common wordlist only if no leaked pair verified:
+		// spraying when we already hold a working credential is pointless
+		// account-lock risk.
+		if !verifiedThisForm {
+			for _, cred := range commonCreds {
+				select {
+				case <-ctx.Done():
+					return ActionResult{Findings: findings, Actions: spawned}
+				default:
+				}
+
+				loginResp, err := postLoginForm(ctx, client, actionURL, formFields, cred[0], cred[1])
+				if err != nil {
+					continue
+				}
+				sprayed++
+
+				if loginVerdict(loginResp, *base, cookiesTrusted) {
+					kb.AddCredential(Credential{
+						Username: cred[0],
+						Password: cred[1],
+						Source:   page.URL,
+						Valid:    true,
+					})
+
+					findings = append(findings, Finding{
+						Type:        "login_valid",
+						Name:        fmt.Sprintf("Valid credentials: %s:%s", types.Sanitize(cred[0]), types.MaskSecret(cred[1])),
+						Severity:    SevCritical,
+						Description: fmt.Sprintf("Login successful at %s (differential verdict vs junk-credential baseline)", actionURL),
+						Evidence:    fmt.Sprintf("%s:%s → %d richer than baseline", types.Sanitize(cred[0]), types.MaskSecret(cred[1]), loginResp.StatusCode),
+						Details:     map[string]string{"verification": "baseline-differential"},
+					})
+
+					spawned = append(spawned, &PostLoginCrawlAction{
+						username:   cred[0],
+						password:   cred[1],
+						loginURL:   actionURL,
+						formFields: formFields,
+					})
+					break
+				}
 			}
 		}
 		totalSprayed += sprayed

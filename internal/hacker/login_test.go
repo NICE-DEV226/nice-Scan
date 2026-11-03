@@ -236,3 +236,81 @@ func TestLoginSprayFindsRealCredential(t *testing.T) {
 		t.Fatal("post-login crawl should have been spawned for real credentials")
 	}
 }
+
+// Full discovered-credential chain in the autonomous engine: the crawler
+// harvests a user+pass pair a page LEAKS, stores it as a candidate, and
+// LoginBrute aims it at the target's own form BEFORE spraying — proving access
+// with the owner's real credential rather than a wordlist guess. The pair is
+// deliberately NOT in commonCreds, so any valid result can only come from the
+// discovered chain. Success is the differential (session cookie + reroute to
+// /dashboard); the report must mask the password.
+func TestLoginBruteUsesDiscoveredPairNotSpray(t *testing.T) {
+	const (
+		u, p = "svc-backup", "Tr0ub4dor!3x"
+	)
+	// The login page also leaks the live pair in an app-state blob.
+	leakingForm := `<html><body><form action="/login" method="post">` +
+		`<input name="username"><input name="password"><button>Login</button></form>` +
+		`<script>window.__STATE=` + `{"user":"` + u + `","password":"` + p + `"}` + `;</script>` +
+		`</body></html>`
+	dashboard := `<html><body><h1>Console</h1></body></html>`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/dashboard":
+			_, _ = fmt.Fprint(w, dashboard)
+		case r.URL.Path == "/login" && r.Method == http.MethodPost:
+			_ = r.ParseForm()
+			if r.FormValue("username") == u && r.FormValue("password") == p {
+				http.SetCookie(w, &http.Cookie{Name: "session", Value: "real-session"})
+				http.Redirect(w, r, "/dashboard", http.StatusFound)
+				return
+			}
+			http.Redirect(w, r, "/login?err=1", http.StatusFound)
+		default:
+			_, _ = fmt.Fprint(w, leakingForm)
+		}
+	}))
+	defer srv.Close()
+
+	client := transport.NewClient(transport.WithTimeout(5*time.Second), transport.WithRetries(0))
+	defer func() { _ = client.Close() }()
+	kb := NewKnowledge(srv.URL)
+
+	// Crawler runs first and must harvest the leaked pair as a candidate.
+	(&CrawlAction{}).Execute(context.Background(), srv.URL, kb, client)
+	var seeded bool
+	for _, c := range kb.GetDiscoveredCredentials() {
+		if c.Username == u && c.Password == p {
+			seeded = true
+		}
+	}
+	if !seeded {
+		t.Fatalf("crawler must harvest the leaked pair as a discovered candidate: %+v", kb.GetDiscoveredCredentials())
+	}
+
+	res := (&LoginBruteAction{}).Execute(context.Background(), srv.URL, kb, client)
+
+	var discovered *Finding
+	for i, f := range res.Findings {
+		if f.Type == "login_discovered_valid" {
+			discovered = &res.Findings[i]
+		}
+		if f.Type == "login_valid" {
+			t.Fatalf("must verify via the DISCOVERED pair, not a wordlist spray hit")
+		}
+	}
+	if discovered == nil {
+		t.Fatalf("expected a discovered-credential verification finding; got %+v", res.Findings)
+	}
+	if !strings.Contains(discovered.Name, u) {
+		t.Errorf("finding should name the accepted user, got %q", discovered.Name)
+	}
+	if strings.Contains(discovered.Name, p) || strings.Contains(discovered.Evidence, p) ||
+		strings.Contains(discovered.Description, p) {
+		t.Fatalf("plaintext password leaked into the report: name=%q evidence=%q", discovered.Name, discovered.Evidence)
+	}
+	if len(res.Actions) == 0 {
+		t.Fatal("verified discovered credential must spawn the post-login crawl")
+	}
+}

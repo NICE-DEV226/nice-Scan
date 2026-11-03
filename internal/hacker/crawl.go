@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/NICE-DEV226/nice-Scan/internal/detect"
 	"github.com/NICE-DEV226/nice-Scan/internal/transport"
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
@@ -97,6 +98,19 @@ func (a *CrawlAction) Execute(ctx context.Context, target string, kb *Knowledge,
 		jsFiles := extractJS(body)
 		forms := extractFormCount(body)
 		title := extractTitle(body)
+
+		// A page that discards BOTH halves of a login pair (JSON config,
+		// form/query string, or a decodable Basic blob) is an actionable
+		// lead: harvest it now, while the body is in hand, and LoginBrute
+		// aims it at the target's own form later. Never a spray — pairs
+		// only, deduped and capped inside the knowledge base.
+		for _, p := range detect.ExtractCredentialPairs(body) {
+			kb.AddDiscoveredCredential(Credential{
+				Username: p.User,
+				Password: p.Pass,
+				Source:   u,
+			})
+		}
 
 		page := Page{
 			URL:     u,
