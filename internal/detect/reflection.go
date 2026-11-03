@@ -130,7 +130,15 @@ func ClassifyXss(body []byte, canary string) (XssReflex, bool) {
 	for _, off := range offsets {
 		if insideComment(s, off) {
 			rx.Neutralized = true
-		} else if insideScriptBlock(s, off) {
+		} else if insideScriptBlock(s, off) && !jsonEscapedValue(s, off, off+len(canary)) {
+			// A raw canary inside a <script> block is only a JS-context
+			// concern if the embedding left our delimiters live. When the
+			// value sits inside a backslash-escaped JSON string — the
+			// signature of serialized flight/RSC data (`self.__next_f.push
+			// ([1,"…\"nsx…\"…"])`) — the framework escaped our quotes, so
+			// the canary is inert data that could never break out. Claiming
+			// "script context" there was the false-positive generator that
+			// turned every reflected param on a Next.js page into MEDIUM.
 			rx.InScript = true
 		}
 	}
@@ -291,4 +299,34 @@ func insideScriptBlock(s string, off int) bool {
 		return false
 	}
 	return lastTailOf(s, off, "</script") <= open
+}
+
+// jsonEscapedValue reports whether the reflected span [start,end) sits inside
+// a double-quoted string whose delimiters are backslash-escaped — a serialized
+// JSON string value, not JS source. It finds the nearest `"` on each side of
+// the value; only when BOTH are present and preceded by an odd run of
+// backslashes (a `\"` that escaped our quote) is the value provably inert
+// data. A genuinely breakable JS echo (`var q = ";canary//";`) has a raw
+// opening quote, so it stays a script-context concern.
+func jsonEscapedValue(s string, start, end int) bool {
+	left := nearestQuoteEscaped(s, start-1, -1)
+	right := nearestQuoteEscaped(s, end, 1)
+	return left && right
+}
+
+// nearestQuoteEscaped scans from pos in direction dir for the first double
+// quote and reports whether it is backslash-escaped. No quote found → false
+// (the value is not delimited by an escaped string, so no inert-data claim).
+func nearestQuoteEscaped(s string, pos, dir int) bool {
+	for pos >= 0 && pos < len(s) {
+		if s[pos] == '"' {
+			bs := 0
+			for p := pos - 1; p >= 0 && s[p] == '\\'; p-- {
+				bs++
+			}
+			return bs%2 == 1
+		}
+		pos += dir
+	}
+	return false
 }

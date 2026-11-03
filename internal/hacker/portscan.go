@@ -190,8 +190,13 @@ func classifyPortSeverity(port int) Severity {
 	switch port {
 	case 21, 23, 25, 110, 143, 135, 445, 2049, 3389, 3306, 5432, 6379, 27017:
 		return SevHigh
-	case 22, 80, 443:
-		return SevMedium
+	case 22:
+		return SevLow
+	case 80, 443:
+		// The port we reached the web target through. An open 80/443 on an
+		// HTTP site is the expected transport, not a finding — rating it
+		// MEDIUM made every scan carry two lines of pure noise.
+		return SevInfo
 	case 53, 389, 636, 993, 995:
 		return SevLow
 	default:

@@ -104,6 +104,26 @@ func TestClassifyXssScriptBlockContext(t *testing.T) {
 	}
 }
 
+// The exact false-positive flood: a Next.js / React-server-components page
+// serializes the reflected value into a flight string inside <script> …
+// self.__next_f.push([1,"…"]) . There the framework JSON-escapes the value's
+// delimiters (`\"nsx…\"`), so the canary is inert data that could never break
+// out of its string — not a JS injection surface. Before this fix every such
+// reflection became a MEDIUM "script context" finding, one per param per page.
+func TestClassifyXssFlightJSONIsNotScriptContext(t *testing.T) {
+	body := []byte(`<html><body><script>self.__next_f.push([1,"0:{\"q\":\"` + can + `\",\":null,\"` + can + `\":null}"])</script></body></html>`)
+	rx, ok := ClassifyXss(body, can)
+	if !ok {
+		t.Fatal("canary did reflect — it is present on the page")
+	}
+	if rx.InScript {
+		t.Fatalf("escaped-JSON flight data must NOT claim script context, got %+v", rx)
+	}
+	if rx.Executable {
+		t.Fatal("flight data is not executable markup")
+	}
+}
+
 func TestClassifyXssMarkupCoreInsideScriptIsNotExecutable(t *testing.T) {
 	// The FULL tag-break core reflected inside a script body: browsers
 	// parse JS source there, not markup, so `<svg onload=…>` is a string
