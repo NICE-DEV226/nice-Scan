@@ -126,6 +126,36 @@ func TestGenericSignaturesDoNotFalsePositive(t *testing.T) {
 	}
 }
 
+// Same FP class as Preact/Magento, one layer down: a page that merely
+// *mentions* GraphQL or FastAPI in prose is not a target that serves them.
+// HTML patterns match the whole body, so the old bare `graphql`/`fastapi`
+// substrings fired a whole-technology claim from any lowercase mention.
+func TestProseMentionsDoNotFingerprintAPIFrameworks(t *testing.T) {
+	f := New()
+	prose := &types.Response{StatusCode: 200, Headers: http.Header{},
+		Body: []byte(`<html><body><p>This tutorial covers graphql queries and why we chose fastapi on the backend.</p></body></html>`)}
+	for _, fd := range f.Analyze(context.Background(), prose) {
+		if fd.Name == "GraphQL" {
+			t.Errorf("prose `graphql` must not fingerprint GraphQL: %+v", fd)
+		}
+		if fd.Name == "FastAPI" {
+			t.Errorf("prose `fastapi` must not fingerprint FastAPI: %+v", fd)
+		}
+	}
+
+	// The anchored markers still fire — noise removed, signal kept.
+	gql := &types.Response{StatusCode: 200, Headers: http.Header{},
+		Body: []byte(`<html><div id="graphiql"><script>ApolloProvider</script></div></html>`)}
+	if !containsTech(f.Analyze(context.Background(), gql), "GraphQL") {
+		t.Error("graphiql/ApolloProvider must still match GraphQL")
+	}
+	fast := &types.Response{StatusCode: 200, Headers: http.Header{},
+		Body: []byte(`{"openapi":"3.1.0","info":{"title":"FastAPI","version":"1.0"}}`)}
+	if !containsTech(f.Analyze(context.Background(), fast), "FastAPI") {
+		t.Error(`served openapi info.title must still match FastAPI`)
+	}
+}
+
 func containsTech(fs []types.Finding, name string) bool {
 	for _, fd := range fs {
 		if fd.Name == name {

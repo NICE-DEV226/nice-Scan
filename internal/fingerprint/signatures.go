@@ -428,7 +428,12 @@ func (f *Fingerprinter) loadSignatures() {
 			Name: "FastAPI", Type: "framework", Category: "Python Backend",
 			Confidence: 0.8,
 			Headers:    hdr("Server", `(?i)uvicorn`),
-			HTML:       html(`fastapi`),
+			// Bare `fastapi` fired on any lowercase mention ("built with
+			// fastapi" prose, an unrelated bundle string). Anchor to the OpenAPI
+			// document FastAPI serves by default (info.title="FastAPI") and its
+			// docs title rather than a floating word; the uvicorn Server header
+			// stays the primary served signal.
+			HTML: html(`"title"\s*:\s*"FastAPI`, `<title>FastAPI`, `content="FastAPI`),
 		},
 		{
 			Name: "Spring Boot", Type: "framework", Category: "Java Backend",
@@ -903,8 +908,15 @@ func (f *Fingerprinter) loadSignatures() {
 		{
 			Name: "GraphQL", Type: "api", Category: "API Protocol",
 			Confidence: 0.8,
-			URL:        one(`/graphql|/gql`),
-			HTML:       html(`graphql`),
+			// Bare `graphql` matched any lowercase mention in a page body — a
+			// tutorial, a "powered by" line, an unrelated JS string — and
+			// claimed the target serves a GraphQL API. Anchor to identifiers
+			// only a GraphQL server/client actually emits (the GraphiQL IDE,
+			// the application/graphql media type, Apollo/Hasura/urql/relay
+			// runtimes). The URL probe stays: landing on /graphql|/gql is an
+			// honest served-path signal.
+			URL:  one(`/graphql|/gql`),
+			HTML: html(`graphiql`, `application/graphql`, `ApolloProvider`, `__APOLLO_`, `apollo-link`, `apollo-client`, `hasura`, `urql`, `relay-runtime`, `graphql-ws`),
 		},
 		{
 			Name: "REST API", Type: "api", Category: "API Protocol",
