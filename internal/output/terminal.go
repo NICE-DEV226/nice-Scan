@@ -227,7 +227,7 @@ func (r *TerminalRenderer) renderFinding(f types.Finding) {
 	}
 
 	if f.Evidence != "" {
-		_, _ = fmt.Fprintln(os.Stdout, Detail(MutedStyle.Render(r.truncate(types.Sanitize(f.Evidence), r.width-24))))
+		_, _ = fmt.Fprintln(os.Stdout, Detail(MutedStyle.Render(r.renderEvidence(types.Sanitize(f.Evidence)))))
 	}
 
 	confidence := FaintStyle.Render(fmt.Sprintf("%.0f%% confidence", f.Confidence*100))
@@ -295,28 +295,57 @@ func (r *TerminalRenderer) progressBar(current, total int) string {
 	return bar + " " + pctStr
 }
 
-func (r *TerminalRenderer) truncate(s string, maxLen int) string {
-	// Render sink: rune-aligned truncation (byte slicing of multibyte
-	// evidence renders a corrupted glyph) and a guard for degenerate
-	// widths (byte slicing to a negative index would panic).
+func (r *TerminalRenderer) renderEvidence(ev string) string {
+	// Evidence IS the verdict: "Access-Control-Allow-Origin: https://real-origin"
+	// is the whole argument. The old width-derived cut (r.width-24) shrank to a
+	// handful of runes on a narrow/non-TTY terminal and mangled the decisive
+	// value to "h…ue"; even a center-cut destroyed it, because the carried value
+	// (the echoed origin) sits in the MIDDLE of a longer evidence line.
 	//
-	// Evidence overflows as a head + tail problem: a finding's meaning is
-	// carried by BOTH the start (which surface) and the end (the reflected
-	// snippet the old cut-to-length deleted, reading as an arbitrary mid-URL
-	// severance). Center-cut — keep the front and the back, elide the middle.
-	if maxLen <= 0 {
-		return ""
+	// There is no finding where hiding part of the evidence beats showing it: a
+	// truncated HIGH the operator cannot verify is worse than a wrapped line.
+	// So evidence is ALWAYS rendered whole and folded onto indented
+	// continuation lines instead of being cut away.
+	return wrapText(ev, evidenceWrapWidth(r.width))
+}
+
+// evidenceWrapWidth picks a soft wrap column: the terminal width minus the
+// finding indent, floored so a very narrow terminal still gets readable chunks
+// rather than a one-word-per-line cascade.
+func evidenceWrapWidth(termWidth int) int {
+	w := termWidth - 24
+	if w < 48 {
+		w = 48
 	}
-	runes := []rune(s)
-	if len(runes) <= maxLen {
+	return w
+}
+
+// wrapText folds long single-line evidence onto indented continuation lines so
+// it stays readable on narrow terminals instead of being truncated away.
+func wrapText(s string, width int) string {
+	if width < 12 {
+		width = 12
+	}
+	words := strings.Fields(s)
+	if len(words) == 0 {
 		return s
 	}
-	if maxLen < 8 {
-		return string(runes[:maxLen-1]) + "…"
+	var lines []string
+	var cur strings.Builder
+	for _, w := range words {
+		if cur.Len() > 0 && cur.Len()+1+len([]rune(w)) > width {
+			lines = append(lines, cur.String())
+			cur.Reset()
+		}
+		if cur.Len() > 0 {
+			cur.WriteString(" ")
+		}
+		cur.WriteString(w)
 	}
-	head := (maxLen - 1) * 2 / 3
-	tail := maxLen - 1 - head
-	return string(runes[:head]) + "…" + string(runes[len(runes)-tail:])
+	if cur.Len() > 0 {
+		lines = append(lines, cur.String())
+	}
+	return strings.Join(lines, "\n                        ")
 }
 
 func (r *TerminalRenderer) RenderJSON(res *engine.ScanResult) {

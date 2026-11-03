@@ -65,6 +65,7 @@ func (a *DataExtractionAnalyzer) Analyze(ctx context.Context, resp *types.Respon
 	body := string(resp.Body)
 
 	emails := uniqueStrings(rxEmail.FindAllString(body, -1))
+	emails = filterDocEmails(emails)
 	if len(emails) > 0 {
 		findings = append(findings, types.Finding{
 			Type:        types.FindingSecret,
@@ -336,6 +337,53 @@ func maskCardNumbers(cards []string) []string {
 			digits = digits[:6] + strings.Repeat("*", len(digits)-10) + digits[len(digits)-4:]
 		}
 		out = append(out, digits)
+	}
+	return out
+}
+
+// docEmailDomains are reserved by RFC 2606/6761 or are documentation
+// placeholders. A "real PII" finding built from them is noise: they appear in
+// templates, comments and example copy, never as an actual contact to report.
+var docEmailDomains = map[string]struct{}{
+	"example.com": {}, "example.net": {}, "example.org": {},
+	"invalid": {}, "test": {}, "localhost": {},
+	"email.com": {}, "email.tld": {}, "domain.com": {},
+	"sdomain.ink": {}, "sub.example.com": {},
+}
+
+// placeholderEmailLocals are template/documentation stub words used as the
+// local-part ("utilisateur@mail.com", "exemple@…", "vous@…"). They are French
+// and English placeholder text shipped in copy, never a real contact — a PII
+// finding counting them overstates an exposure that does not exist.
+var placeholderEmailLocals = map[string]struct{}{
+	"user": {}, "users": {}, "admin": {}, "example": {}, "test": {},
+	"name": {}, "email": {}, "mail": {}, "info": {}, "you": {}, "someone": {},
+	"utilisateur": {}, "exemple": {}, "vous": {}, "nom": {}, "pseudo": {},
+	"monnom": {}, "mon_nom": {}, "toto": {}, "machin": {}, "bidule": {},
+}
+
+// filterDocEmails drops addresses on reserved/placeholder domains and stub
+// local-parts so the PII finding counts real contacts, not template text.
+func filterDocEmails(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, e := range in {
+		at := strings.LastIndexByte(e, '@')
+		if at < 0 {
+			continue
+		}
+		local := strings.ToLower(strings.TrimSpace(e[:at]))
+		domain := strings.ToLower(strings.TrimSpace(e[at+1:]))
+		if _, ok := docEmailDomains[domain]; ok {
+			continue
+		}
+		// any subdomain of example.* is reserved too
+		if strings.HasSuffix(domain, ".example.com") || strings.HasSuffix(domain, ".example.org") || strings.HasSuffix(domain, ".example.net") {
+			continue
+		}
+		if _, ok := placeholderEmailLocals[local]; ok {
+			continue
+		}
+		out = append(out, e)
 	}
 	return out
 }

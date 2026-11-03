@@ -44,9 +44,13 @@ func (a *HeaderAnalyzer) Analyze(ctx context.Context, resp *types.Response) []ty
 		{
 			header:      "Content-Security-Policy",
 			name:        "Missing CSP Header",
-			severity:    types.SeverityMedium,
+			severity:    types.SeverityLow,
 			description: "Content-Security-Policy header is missing, increasing risk of XSS and data injection attacks",
 			missing:     true,
+			// Absent CSP is a defense-in-depth gap, not an exploitable finding
+			// on its own — it only raises the blast radius of an XSS that must
+			// already exist. Many correctly-secured sites ship without it, so
+			// MEDIUM over-weighted an unproven risk; Low is the honest call.
 		},
 		{
 			header:      "Strict-Transport-Security",

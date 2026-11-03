@@ -87,3 +87,50 @@ func TestSignatureMatchEchoesResponseEvidence(t *testing.T) {
 		t.Errorf("versionless banner must not invent a version, got %q", version)
 	}
 }
+
+func TestGenericSignaturesDoNotFalsePositive(t *testing.T) {
+	// Regression: HTML/Script patterns are OR-matched, so one loose pattern
+	// fires a whole tech. "image:" matched Magento's `mage\s*:` and any React
+	// app matched Preact's bare `createElement`. A non-Magento, non-Preact
+	// page that only contains those substrings must NOT be fingerprinted.
+	f := New()
+	body := []byte(`<html><head><script>
+		const icon = { image: "logo.png" };
+		function h(tag){ return document.createElement(tag); }
+	</script></head><body>Product gallery</body></html>`)
+	resp := &types.Response{
+		StatusCode: 200,
+		Headers:    http.Header{},
+		Body:       body,
+	}
+	for _, fd := range f.Analyze(context.Background(), resp) {
+		if fd.Name == "Magento" {
+			t.Errorf("`image:` must not match Magento: %+v", fd)
+		}
+		if fd.Name == "Preact" {
+			t.Errorf("bare `createElement` must not match Preact: %+v", fd)
+		}
+	}
+
+	// The anchored markers still have to fire — the fix removed noise, not the
+	// signal.
+	respM := &types.Response{StatusCode: 200, Headers: http.Header{},
+		Body: []byte(`<html><script>window.Mage = { RequireJS: {} };</script></html>`)}
+	if !containsTech(f.Analyze(context.Background(), respM), "Magento") {
+		t.Error("window.Mage must still match Magento")
+	}
+	respP := &types.Response{StatusCode: 200, Headers: http.Header{},
+		Body: []byte(`<html><script>import { h } from "preact";</script></html>`)}
+	if !containsTech(f.Analyze(context.Background(), respP), "Preact") {
+		t.Error(`from "preact" must still match Preact`)
+	}
+}
+
+func containsTech(fs []types.Finding, name string) bool {
+	for _, fd := range fs {
+		if fd.Name == name {
+			return true
+		}
+	}
+	return false
+}
