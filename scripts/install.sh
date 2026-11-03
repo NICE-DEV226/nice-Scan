@@ -61,6 +61,39 @@ die() {
     exit 1
 }
 
+# persist_path DIR — make DIR reachable in FUTURE login shells, not just this
+# installer's transient one. The bug this closes: `go install` drops the binary
+# in $(go env GOPATH)/bin (e.g. ~/go/bin) which Arch does not put on PATH by
+# default. A warning to "export PATH" is lost on the next reboot, so the
+# operator sees "nice_scan: command not found" and believes the install
+# evaporated — the file is still on disk, simply unreachable. Writing the
+# export into each rc file that already exists makes the install survive.
+persist_path() {
+    local dir="$1"
+    local touched=false
+    for RC in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.zprofile" "${HOME}/.profile"; do
+        [ -f "$RC" ] || continue
+        if grep -qF "$dir" "$RC" 2>/dev/null; then
+            touched=true
+            continue
+        fi
+        {
+            printf '\n# Added by nice_scan installer\n'
+            printf 'export PATH="%s:$PATH"\n' "$dir"
+        } >> "$RC"
+        dim "  PATH updated in ${RC}"
+        touched=true
+    done
+    if [ "$touched" = false ]; then
+        warn "No shell rc file found to edit — add ${dir} to your PATH yourself:"
+        dim "  export PATH=\"${dir}:\$PATH\"  (put it in ~/.zshrc or ~/.bashrc)"
+    else
+        # The current shell will pick it up on the next login; tell the
+        # operator how to use it without closing the terminal now.
+        dim "  For THIS session:  export PATH=\"${dir}:\$PATH\"  (or open a new terminal)"
+    fi
+}
+
 # ── Header ──
 cat <<EOF
 
@@ -104,10 +137,22 @@ if command -v go >/dev/null 2>&1; then
         go install "github.com/${REPO}/cmd/${BINARY}@${TAG}" || die "go install ${TAG} failed."
         GOBIN=$(go env GOPATH)/bin
         ok "${BINARY} built from source at tag ${TAG} → ${GOBIN}/${BINARY}"
-        if ! echo "$PATH" | grep -q "$GOBIN"; then
-            warn "Add ${GOBIN} to your PATH:"
-            dim "  export PATH=\"\$PATH:${GOBIN}\""
+        if ! echo ":$PATH:" | grep -q ":${GOBIN}:"; then
+            persist_path "$GOBIN"
         fi
+        echo ""
+        printf "  $(tput dim)%s$(tput sgr0)\n" "$(printf '%.0s─' $(seq 1 56))"
+        ok "${BINARY} installed successfully"
+        echo ""
+        dim "  Location:  ${GOBIN}/${BINARY}"
+        dim "  Version:   ${TAG}"
+        echo ""
+        info "Get started:"
+        echo "    nice_scan --help"
+        echo ""
+        warn "Only run this tool on systems you own or have explicit permission to test."
+        warn "Unauthorized use may violate applicable laws."
+        echo ""
         exit 0
     fi
     warn "Go version < 1.24. Falling back to binary download."
@@ -225,17 +270,9 @@ fi
 chmod 0755 "${INSTALL_DIR}/${BINARY}"
 
 # ── PATH setup ──
-if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
-    warn "Add ${INSTALL_DIR} to your PATH:"
-    dim "  export PATH=\"\$HOME/.local/bin:\$PATH\""
-    for RC in "${HOME}/.bashrc" "${HOME}/.zshrc"; do
-        if [ -f "$RC" ] && ! grep -q "\.local/bin" "$RC" 2>/dev/null; then
-            echo "" >> "$RC"
-            echo "# Added by nice_scan installer" >> "$RC"
-            echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$RC"
-            dim "  Added to ${RC}"
-        fi
-    done
+if ! echo ":$PATH:" | grep -q ":${INSTALL_DIR}:"; then
+    warn "${BINARY} was placed in ${INSTALL_DIR}, which is not on your PATH yet:"
+    persist_path "$INSTALL_DIR"
 fi
 
 # ── Binary info ──

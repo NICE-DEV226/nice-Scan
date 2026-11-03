@@ -92,8 +92,18 @@ if (Get-Command go -ErrorAction SilentlyContinue) {
         go install "github.com/${Repo}/cmd/nice_scan@${tag}" 2>&1 | ForEach-Object { "  $_" }
         if ($LASTEXITCODE -eq 0) {
             $goBin = go env GOPATH
-            Write-Ok "nice_scan built from source at tag ${tag} → ${goBin}\bin\nice_scan.exe"
-            Write-Warn "Ensure ${goBin}\bin is in your PATH"
+            $goBinPath = "${goBin}\bin"
+            Write-Ok "nice_scan built from source at tag ${tag} → ${goBinPath}\nice_scan.exe"
+            # Persist to the USER PATH (survives reboot), same as the binary
+            # branch — a warning alone leaves the operator convinced the
+            # install vanished after the next restart.
+            $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+            if ($userPath -notlike "*$goBinPath*") {
+                Write-Step "Adding ${goBinPath} to your PATH..."
+                [Environment]::SetEnvironmentVariable("Path", "$userPath;$goBinPath", "User")
+                Write-Warn "PATH updated. Restart your terminal or run:"
+                Write-Host "  `$env:Path += ';${goBinPath}'" -ForegroundColor DarkGray
+            }
             exit 0
         }
         Write-Warn "go install failed — falling back to binary download."
