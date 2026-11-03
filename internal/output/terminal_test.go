@@ -6,38 +6,64 @@ import (
 	"unicode/utf8"
 )
 
-// Phase 5 — render-sink regressions: safe truncation and the terminal
-// sanitization chain at the last hop before stdout.
+// Phase 5 — render-sink regressions: evidence is never truncated away and the
+// terminal sanitization chain holds at the last hop before stdout.
 
-func TestTerminalTruncateBoundsAndIdentity(t *testing.T) {
+func TestWrapTextFoldsWithoutLoss(t *testing.T) {
+	// wrapText must only ADD line breaks — every word survives, so no
+	// decision-carrying evidence token can be dropped by the folding.
+	in := "the quick brown fox jumps over the lazy dog repeatedly forever"
+	out := wrapText(in, 20)
+	if strings.ContainsRune(out, '…') {
+		t.Errorf("wrap must never elide, got %q", out)
+	}
+	joined := strings.Join(strings.Fields(out), " ")
+	if joined != in {
+		t.Errorf("wrapping lost/changed words:\n in=%q\nout=%q", in, joined)
+	}
+
+	// Degenerate widths must not panic and must still emit the content.
+	if got := wrapText("a b c", 1); strings.Join(strings.Fields(got), " ") != "a b c" {
+		t.Errorf("width 1 must not lose words, got %q", got)
+	}
+
+	// Multibyte content is preserved whole (no partial rune at a break).
+	uni := wrapText("ééé ééé ééé", 4)
+	if strings.ContainsRune(uni, utf8.RuneError) {
+		t.Errorf("multibyte evidence corrupted by wrapping: %q", uni)
+	}
+}
+
+func TestRenderEvidenceKeepsDecisionCarryingValueWhole(t *testing.T) {
+	// Regression: the old r.width-24 cut mangled a HIGH CORS finding's echoed
+	// origin to "h…ue" on a narrow/non-TTY terminal, so the operator could not
+	// see WHICH origin leaked. A short value IS the finding — it must survive
+	// intact regardless of terminal width.
+	ev := "Access-Control-Allow-Origin: https://evil.com (verbatim echo of Origin, credentials=true)"
+
+	for _, width := range []int{40, 20, 78} {
+		r := NewTerminal()
+		r.width = width
+		out := r.renderEvidence(ev)
+		if !strings.Contains(out, "https://evil.com") {
+			t.Errorf("width %d: decisive origin lost from evidence, got %q", width, out)
+		}
+		if strings.Contains(out, "…") {
+			t.Errorf("width %d: short decision-carrying evidence must not be elided, got %q", width, out)
+		}
+	}
+
+	// A genuinely long blob is now wrapped, never elided — every character of
+	// evidence stays reachable on a continuation line.
+	long := strings.Repeat("x", 500)
 	r := NewTerminal()
-
-	// Identity: content that already fits is untouched.
-	if out := r.truncate("short", 78); out != "short" {
-		t.Errorf("truncate must not alter fitting content, got %q", out)
+	r.width = 78
+	out := r.renderEvidence(long)
+	if strings.Contains(out, "…") {
+		t.Errorf("a long blob must wrap, not elide, got %q", out)
 	}
-
-	// Overflow: budget holds counting glyphs, not bytes.
-	out := r.truncate("0123456789", 5)
-	if c := utf8.RuneCountInString(out); c != 5 {
-		t.Errorf("expected 5 glyphs, got %q (%d)", out, c)
-	}
-	if !strings.HasSuffix(out, "…") {
-		t.Errorf("overflow is signalled with an ellipsis, got %q", out)
-	}
-
-	// Degenerate widths must not panic.
-	if out := r.truncate("abcdefgh", 0); out != "" {
-		t.Errorf("maxLen 0 must yield empty string, got %q", out)
-	}
-	if out := r.truncate("abcdefgh", -20); out != "" {
-		t.Errorf("negative width must yield empty string, got %q", out)
-	}
-
-	// No partial rune ever reaches the terminal.
-	uni := r.truncate("éééééé", 4)
-	if utf8.RuneCountInString(uni) != 4 || strings.ContainsRune(uni, utf8.RuneError) {
-		t.Errorf("rune-aligned truncation broken: %q", uni)
+	if strings.Count(out, "x") != 500 {
+		t.Errorf("wrapping must preserve all %d chars, got %d", 500, strings.Count(out, "x"))
 	}
 }
 

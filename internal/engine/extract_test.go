@@ -71,6 +71,39 @@ func TestUserDumpRequiresStructuredContext(t *testing.T) {
 	}
 }
 
+// Template placeholder emails (RFC 2606 domains and stub local-parts like
+// "utilisateur@"/"exemple@") flooded the PII finding with non-existent
+// contacts. They must be filtered; a real address must still surface.
+func TestPlaceholderEmailsFiltered(t *testing.T) {
+	a := NewDataExtractionAnalyzer()
+
+	fs := a.Analyze(context.Background(), respWithBody(
+		"contact utilisateur@mail.com or exemple@mail.com — ou vous@mail.com"))
+	for _, f := range fs {
+		if strings.Contains(f.Name, "Email Addresses Found") {
+			t.Errorf("placeholder emails must not raise a PII finding: %+v", f)
+		}
+	}
+
+	fs2 := a.Analyze(context.Background(), respWithBody(
+		"reach support at jane.doe@acme-corp.io (utilisateur@mail.com is a sample)"))
+	var hit *types.Finding
+	for i, f := range fs2 {
+		if strings.Contains(f.Name, "Email Addresses Found") {
+			hit = &fs2[i]
+		}
+	}
+	if hit == nil {
+		t.Fatalf("a real address must still raise the finding despite the placeholder: %+v", fs2)
+	}
+	if !strings.Contains(hit.Evidence, "jane.doe@acme-corp.io") {
+		t.Errorf("evidence should carry the real address, got %q", hit.Evidence)
+	}
+	if strings.Contains(hit.Evidence, "utilisateur@mail.com") {
+		t.Errorf("placeholder address leaked into evidence: %q", hit.Evidence)
+	}
+}
+
 // const with a real, decodable JWT (header.payload.signature).
 const testJWT = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZW1haWwiOiJqb2huQGV4YW1wbGUuY29tIn0.Zsig123"
 

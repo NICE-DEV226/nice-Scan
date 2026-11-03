@@ -355,7 +355,10 @@ func (f *Fingerprinter) loadSignatures() {
 			Name: "Preact", Type: "frontend", Category: "UI Library",
 			Confidence: 0.75,
 			HTML:       html(`preact\.js`, `__PREACT_DEVTOOLS__`),
-			Script:     html(`createElement`),
+			// `createElement` alone matches React, Preact, and any vanilla-DOM
+			// wrapper — a bare hit is not Preact evidence. Anchor to markers
+			// that only Preact emits.
+			Script: html(`preact[\w.]*\.createElement`, `from ?["']preact["']`, `preact-router`),
 		},
 		{
 			Name: "Solid.js", Type: "frontend", Category: "UI Library",
@@ -540,8 +543,11 @@ func (f *Fingerprinter) loadSignatures() {
 		{
 			Name: "Magento", Type: "cms", Category: "E-commerce",
 			Confidence: 0.85,
-			HTML:       html(`Magento`, `mage\s*:`, `var\s+BASE_URL`),
-			Cookies:    cook("frontend", `.+`),
+			// `mage\s*:` matched the substring inside "image:" and bare
+			// `Magento` matched any prose mention — both flagged non-Magento
+			// sites. Anchor to markers Magento actually emits.
+			HTML:    html(`window\.Mage`, `Magento/initjs`, `data-mage-`, `/skin/frontend/`, `magento/version`, `var\s+BASE_URL.*mage/`),
+			Cookies: cook("frontend", `.+`),
 		},
 		{
 			Name: "Shopify", Type: "cms", Category: "E-commerce",
