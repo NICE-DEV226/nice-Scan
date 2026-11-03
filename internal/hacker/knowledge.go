@@ -13,16 +13,22 @@ type Knowledge struct {
 	capabilities []Capability
 	findings     []Finding
 	credentials  []Credential
-	sessions     []SessionToken
-	endpoints    []Endpoint
-	pages        []Page
-	jsFiles      []string
-	secrets      []string
-	scannerState []string
-	jwts         []JWTToken
-	chainSteps   []ChainStep
-	parentURLs   map[string]string
-	checkedPaths map[string]bool
+	// discoveredCreds are login PAIRS (user+pass together in one body) the
+	// crawl / JS scan harvested from the target itself. They are candidates,
+	// never a spray, and are attempted by LoginBruteAction BEFORE the common
+	// wordlist; kept separate from `credentials` (which holds spray/dump
+	// results) so an unverified lead never reads as a captured credential.
+	discoveredCreds []Credential
+	sessions        []SessionToken
+	endpoints       []Endpoint
+	pages           []Page
+	jsFiles         []string
+	secrets         []string
+	scannerState    []string
+	jwts            []JWTToken
+	chainSteps      []ChainStep
+	parentURLs      map[string]string
+	checkedPaths    map[string]bool
 	// sourceMapRefs maps a crawler-discovered script reference to the map
 	// URL that script declares via `//# sourceMappingURL=`. Populated by
 	// the JS secret scan (which already has the body in memory) and read
@@ -130,6 +136,35 @@ func (kb *Knowledge) AddCredential(c Credential) {
 	kb.mu.Lock()
 	defer kb.mu.Unlock()
 	kb.credentials = append(kb.credentials, c)
+}
+
+// AddDiscoveredCredential records a login pair harvested from a fetched body as
+// an unverified CANDIDATE (Valid=false). Deduped by user+pass and capped, so a
+// pair re-shipped across chunks/pages is one lead, not many.
+func (kb *Knowledge) AddDiscoveredCredential(c Credential) {
+	if c.Username == "" || c.Password == "" {
+		return
+	}
+	kb.mu.Lock()
+	defer kb.mu.Unlock()
+	if len(kb.discoveredCreds) >= 8 {
+		return
+	}
+	for _, existing := range kb.discoveredCreds {
+		if existing.Username == c.Username && existing.Password == c.Password {
+			return
+		}
+	}
+	c.Valid = false
+	kb.discoveredCreds = append(kb.discoveredCreds, c)
+}
+
+func (kb *Knowledge) GetDiscoveredCredentials() []Credential {
+	kb.mu.RLock()
+	defer kb.mu.RUnlock()
+	out := make([]Credential, len(kb.discoveredCreds))
+	copy(out, kb.discoveredCreds)
+	return out
 }
 
 func (kb *Knowledge) AddEndpoint(e Endpoint) {

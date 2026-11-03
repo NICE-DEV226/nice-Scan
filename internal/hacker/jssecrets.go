@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NICE-DEV226/nice-Scan/internal/detect"
 	"github.com/NICE-DEV226/nice-Scan/internal/transport"
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
@@ -410,6 +411,17 @@ func (a *JSSecretsAction) Execute(ctx context.Context, target string, kb *Knowle
 		if looksLikeHTMLDocument(body) {
 			// Soft-404/SPA fallback: not JavaScript, nothing to claim.
 			continue
+		}
+		// Bundles and app-state JSON frequently ship a service-account
+		// user+pass pair. Harvest the pair from the WHOLE asset (before the
+		// scan cap truncates a match) so LoginBrute can aim it at the login
+		// form; single secrets are handled by scanSecrets below.
+		for _, p := range detect.ExtractCredentialPairs(string(body)) {
+			kb.AddDiscoveredCredential(Credential{
+				Username: p.User,
+				Password: p.Pass,
+				Source:   fetchURL,
+			})
 		}
 		// Hand the declared map reference to Source Map Discovery so it
 		// fetches the real map instead of guessing one filename.
