@@ -156,6 +156,50 @@ func TestProseMentionsDoNotFingerprintAPIFrameworks(t *testing.T) {
 	}
 }
 
+// URL-field matching is a plain substring against FinalURL (engine.go:152), so
+// an unanchored `/graphql` fired "GraphQL API" on a docs path like
+// /api/graphql-docs. Discovered by running the compiled tool, not from source.
+// The signatures now require a segment terminator (/, ? or end), so a real
+// endpoint matches and a path merely *containing* the word does not.
+func TestURLSignaturesAreSegmentAnchored(t *testing.T) {
+	f := New()
+	fp := func(finalURL string) map[string]bool {
+		resp := &types.Response{StatusCode: 200, Headers: http.Header{}, FinalURL: finalURL}
+		got := map[string]bool{}
+		for _, fd := range f.Analyze(context.Background(), resp) {
+			got[fd.Name] = true
+		}
+		return got
+	}
+
+	cases := []struct {
+		url    string
+		tech   string
+		expect bool
+	}{
+		{"https://x.test/graphql", "GraphQL", true},
+		{"https://x.test/api/graphql", "GraphQL", true},
+		{"https://x.test/graphql?query=1", "GraphQL", true},
+		{"https://x.test/gql", "GraphQL", true},
+		{"https://x.test/api/graphql-docs", "GraphQL", false}, // docs page about GraphQL
+
+		{"https://x.test/grafana", "Grafana", true},
+		{"https://x.test/dash/grafana/", "Grafana", true},
+		{"https://x.test/grafana-migration", "Grafana", false},
+		{"https://x.test/mygrafana", "Grafana", false},
+
+		{"https://x.test/metrics", "Prometheus", true},
+		{"https://x.test/prometheus", "Prometheus", true},
+		{"https://x.test/metrics-history", "Prometheus", false},
+	}
+	for _, c := range cases {
+		got := fp(c.url)
+		if got[c.tech] != c.expect {
+			t.Errorf("%s on %q: want %v, got %v", c.tech, c.url, c.expect, got[c.tech])
+		}
+	}
+}
+
 func containsTech(fs []types.Finding, name string) bool {
 	for _, fd := range fs {
 		if fd.Name == name {
