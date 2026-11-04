@@ -56,6 +56,14 @@ func (a *AuthAnalyzer) Analyze(ctx context.Context, resp *types.Response) []type
 	if resp == nil || len(resp.Body) == 0 {
 		return nil
 	}
+	// A probe that re-served the homepage shell (soft-404 / SPA catch-all) is
+	// the same page already analyzed at the root, reached via a path WE
+	// synthesized. Conclusions from its body keywords or from that path ("admin"
+	// in /wp-admin, "dashboard" in the shared bundle) are false evidence, so
+	// the whole auth pass is skipped; the honest read happened on the homepage.
+	if resp.Soft404 {
+		return nil
+	}
 
 	var findings []types.Finding
 	body := string(resp.Body)

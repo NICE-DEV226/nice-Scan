@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -348,6 +350,13 @@ func (s *Scanner) ScanStream(ctx context.Context, targets []string, events chan<
 		preamble = append(preamble, res)
 	}
 
+	// Soft-404 baseline: fingerprint each target's homepage shell. A
+	// client-side-routing SPA serves the byte-identical index.html for every
+	// unknown path, so "200 on /graphql" carries no signal — the server never
+	// routed it. Any probe response matching its target's shell is tagged
+	// Soft404 so path/body analyzers refuse to draw conclusions from it.
+	baselines := buildBaselines(preamble)
+
 	reqs := s.buildRequests(targets)
 
 	s.mu.Lock()
@@ -384,6 +393,11 @@ func (s *Scanner) ScanStream(ctx context.Context, targets []string, events chan<
 
 		var newFindings []types.Finding
 		if res.Response != nil {
+			if !baselines.isHomepage(res.Request) {
+				if sig, ok := baselines.ownerSig(res.Request); ok && sig == responseSig(res.Response) {
+					res.Response.Soft404 = true
+				}
+			}
 			findings := s.analyzeResponse(ctx, res.Response)
 			res.Findings = findings
 			for _, f := range findings {
@@ -461,6 +475,7 @@ func (s *Scanner) Close() error {
 	return s.client.Close()
 }
 
+// formatTargets renders the target label used in stats/events.
 func formatTargets(targets []string) string {
 	if len(targets) == 1 {
 		return targets[0]
@@ -491,4 +506,79 @@ func (s *Scanner) legacyTLSFindings(ctx context.Context, targets []string) []typ
 		out = append(out, ProbeLegacyTLS(ctx, t)...)
 	}
 	return out
+}
+
+// baselineSet maps each scanned target to the signature of its homepage shell,
+// so a probe that merely re-served that shell (a soft-404 / SPA catch-all) can
+// be tagged before it reaches the path-dependent analyzers.
+type baselineSet struct {
+	homepage map[string]bool // the exact root-GET request URLs (the references)
+	bases    []baseEntry
+}
+
+type baseEntry struct {
+	base string // homepage URL with any trailing slash trimmed
+	sig  string // signature of the homepage shell response
+}
+
+func buildBaselines(preamble []*types.Result) baselineSet {
+	bs := baselineSet{homepage: make(map[string]bool, len(preamble))}
+	for _, res := range preamble {
+		if res == nil || res.Request == nil || res.Response == nil || res.Error != nil {
+			continue
+		}
+		bs.homepage[res.Request.URL] = true
+		bs.bases = append(bs.bases, baseEntry{
+			base: strings.TrimRight(res.Request.URL, "/"),
+			sig:  responseSig(res.Response),
+		})
+	}
+	return bs
+}
+
+// isHomepage reports whether a request IS one of the reference root GETs. The
+// homepage is the baseline itself and is never tagged Soft404 — it is analyzed
+// in full (that fetch is the fingerprint and the only honest read of the shell).
+func (bs baselineSet) isHomepage(req *types.Request) bool {
+	if req == nil {
+		return true // a response with no recorded request cannot be attributed
+	}
+	return bs.homepage[req.URL]
+}
+
+// ownerSig returns the shell signature of the target whose base is the longest
+// URL-boundary prefix of req.URL. Boundary means the remainder is empty or
+// starts with '/' or '?', so "https://a.com" never claims "https://a.com.evil".
+func (bs baselineSet) ownerSig(req *types.Request) (string, bool) {
+	if req == nil {
+		return "", false
+	}
+	best := -1
+	var sig string
+	for _, b := range bs.bases {
+		if underBase(req.URL, b.base) && len(b.base) > best {
+			best = len(b.base)
+			sig = b.sig
+		}
+	}
+	if best < 0 {
+		return "", false
+	}
+	return sig, true
+}
+
+func underBase(u, base string) bool {
+	if base == "" || !strings.HasPrefix(u, base) {
+		return false
+	}
+	rest := u[len(base):]
+	return rest == "" || rest[0] == '/' || rest[0] == '?'
+}
+
+// responseSig is the identity of a served page: status + content-type + a
+// digest of the body. A probe whose sig equals its target's homepage sig was
+// answered by the catch-all shell, not by a distinct endpoint.
+func responseSig(r *types.Response) string {
+	sum := sha256.Sum256(r.Body)
+	return fmt.Sprintf("%d|%s|%s", r.StatusCode, r.ContentType, hex.EncodeToString(sum[:]))
 }

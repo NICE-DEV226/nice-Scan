@@ -69,6 +69,14 @@ type Response struct {
 	Proto         string
 	// RedirectHops is scanner-internal observation, not report content.
 	RedirectHops []RedirectHop `json:"-"`
+	// Soft404 is scanner-internal: set by the engine when this probe's
+	// response is byte-identical (status + content-type + body) to the
+	// target's homepage. A client-side-routing SPA serves the SAME shell for
+	// every unknown path, so the requested path was never treated
+	// specially by the server — any conclusion drawn from the path or the
+	// shared shell body is false evidence. Path/body analyzers honor this
+	// flag; header/TLS analyzers ignore it (their signal is real).
+	Soft404 bool `json:"-"`
 }
 
 type Result struct {
