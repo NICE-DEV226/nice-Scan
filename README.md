@@ -207,6 +207,8 @@ Run `nice_scan <command> --help` for each command's full flag set.
 | `--header key:value` | — | Custom header, repeatable |
 | `--follow-redirects` | `true` | Follow redirects |
 | `--max-redirects <n>` | `5` | Redirect hop limit |
+| `--allow-out-of-scope` | `false` | **Turn the target boundary off.** By default the target host is a hard limit: a request aimed at another host is refused before anything goes on the wire, and a redirect that leaves it aborts (credentials were already stripped there; the probe itself is now refused too). Use this for a site whose redirects legitimately land on another domain. Passive sources (`crt.sh`, Wayback) and the OOB callback sink have their own clients and are unaffected |
+| `--block-internal` | `false` | Refuse to dial addresses that are not globally routable: loopback, RFC1918, link-local (so `169.254.169.254`), CGNAT. The name is resolved and the resolved literal is dialled, which also defeats a hostname pointing inward. Off by default — scanning your own dev server is a legitimate use. Silently disabled under a proxy, which sees the destination instead of us |
 | `-j, --json` | `false` | Machine-readable JSON output |
 | `-i, --interactive` | `false` | Live TUI dashboard |
 | `-R, --report <file>` | — | Write a detailed HTML report |

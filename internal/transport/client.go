@@ -48,6 +48,18 @@ type clientOptions struct {
 	// everywhere) — commands that know their target must always configure
 	// it.
 	credScope []string
+	// targetScope is the hard destination allow-list (scope.go): requests to
+	// any other host are refused rather than just stripped of credentials.
+	// enforceScope is set with it, so "a scope was configured" is the single
+	// definition of the boundary being active.
+	targetScope  []string
+	enforceScope bool
+	// allowPrivate keeps loopback / RFC1918 / link-local addresses dialable.
+	// True by default: scanning one's own dev server is a legitimate use.
+	allowPrivate bool
+	// resolver is only swapped by tests (withResolver) to drive the dial
+	// guard from a fixed address table.
+	resolver *net.Resolver
 	// sessionCookies enables capture/attach of target-issued cookies for
 	// authenticated workflows (off by default; runtime toggle only).
 	sessionCookies  bool
@@ -71,6 +83,7 @@ func defaultOptions() *clientOptions {
 		followRedirects: true,
 		maxRedirects:    5,
 		rateLimit:       0,
+		allowPrivate:    true,
 		dialTimeout:     10 * time.Second,
 		tlsTimeout:      10 * time.Second,
 		keepAlive:       30 * time.Second,
@@ -354,6 +367,17 @@ func NewClient(opts ...ClientOption) *Client {
 				return fmt.Errorf("unresolvable redirect host")
 			}
 
+			// A redirect is a request the caller never asked for. Under an
+			// enforced scope it may not leave the target: shedding
+			// credentials, as the rest of this callback does, protects the
+			// operator's secret but still sends the probe — its path, method
+			// and body — to somebody else's host, and reports whatever that
+			// host answers as a finding about the target.
+			if c.scopeEnforced() && !c.scopeAllows(dest) {
+				return fmt.Errorf("%w: redirect leaves the target scope (%s → %s)",
+					types.ErrOutOfScope, HostDomain(origin), HostDomain(dest))
+			}
+
 			o.mu.Lock()
 			scope := append([]string(nil), o.credScope...)
 			o.mu.Unlock()
@@ -424,10 +448,27 @@ func newTransport(o *clientOptions) *http.Transport {
 		Timeout:   o.dialTimeout,
 		KeepAlive: o.keepAlive,
 	}
+	dialCtx := dialer.DialContext
+	if !o.allowPrivate {
+		switch {
+		case o.proxy != "", envProxyActive():
+			// Under a proxy every connection goes to the proxy, so guarding
+			// this dial would only vet the proxy's own address while
+			// claiming to vet the target. Say so instead of leaving a
+			// control that looks armed and is not.
+			slog.Warn("dial-time internal-address guard disabled: a proxy hides the destination from it", "proxy", o.proxy)
+		default:
+			res := o.resolver
+			if res == nil {
+				res = net.DefaultResolver
+			}
+			dialCtx = guardedDialer(res, dialer)
+		}
+	}
 
 	tr := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           dialer.DialContext,
+		DialContext:           dialCtx,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          o.maxIdleConns,
 		MaxIdleConnsPerHost:   o.maxIdlePerHost,
@@ -457,6 +498,14 @@ func newTransport(o *clientOptions) *http.Transport {
 }
 
 func (c *Client) Do(ctx context.Context, req *types.Request) (*types.Response, error) {
+	// The destination boundary is checked before anything is put on the
+	// wire, before the rate limiter and outside the stats: a refused request
+	// is not an attempt against the target, and DoBatch's workers come
+	// through here too, so this one call gates both entry points.
+	if err := c.admit(req.URL); err != nil {
+		return nil, err
+	}
+
 	if c.rl != nil {
 		// Count only requests the limiter actually delayed, not every
 		// request sent while the limiter exists.

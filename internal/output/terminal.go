@@ -59,7 +59,7 @@ func (r *TerminalRenderer) RenderResult(res *engine.ScanResult) {
 
 	r.renderFindingsOverview(res.Findings)
 
-	r.renderEmptyState(res.Findings)
+	r.renderEmptyState(res.Findings, res.Stats)
 }
 
 // RenderFindings prints a standalone findings block for a command that produced
@@ -73,7 +73,7 @@ func (r *TerminalRenderer) RenderFindings(target string, findings []types.Findin
 		_, _ = fmt.Fprintln(os.Stdout)
 	}
 	r.renderFindingsOverview(findings)
-	r.renderEmptyState(findings)
+	r.renderEmptyState(findings, engine.ScanStats{})
 }
 
 // renderStacks shows what the target said it runs — the fingerprint-first
@@ -149,6 +149,12 @@ func (r *TerminalRenderer) renderDashboard(stats engine.ScanStats) {
 		failedLine += ValueStyle.Render("0")
 	}
 	_, _ = fmt.Fprintln(os.Stdout, failedLine)
+
+	if stats.Refused > 0 {
+		refusedLine := "  " + LabelStyle.Width(10).Render("Refused")
+		refusedLine += FailStyle.Render(fmt.Sprintf("%d  ·  never sent", stats.Refused))
+		_, _ = fmt.Fprintln(os.Stdout, refusedLine)
+	}
 
 	_, _ = fmt.Fprintln(os.Stdout, KV("Duration", stats.Duration.Round(time.Millisecond).String(), 10))
 	_, _ = fmt.Fprintln(os.Stdout)
@@ -248,12 +254,22 @@ func (r *TerminalRenderer) renderFinding(f types.Finding) {
 	_, _ = fmt.Fprintln(os.Stdout, Detail(confidence))
 }
 
-func (r *TerminalRenderer) renderEmptyState(findings []types.Finding) {
+func (r *TerminalRenderer) renderEmptyState(findings []types.Finding, stats engine.ScanStats) {
 	if len(findings) > 0 {
 		return
 	}
 
 	_, _ = fmt.Fprintln(os.Stdout)
+	if stats.Refused > 0 {
+		// The absence of findings here says nothing about the target: the
+		// checks never ran. Saying "appears clean" would turn a refusal into
+		// a guarantee.
+		_, _ = fmt.Fprintln(os.Stdout, FailStyle.Render(fmt.Sprintf(
+			"  Nothing was concluded: %d of %d requests were refused by the scope boundary or the internal-address guard.",
+			stats.Refused, stats.Total)))
+		_, _ = fmt.Fprintln(os.Stdout, MutedStyle.Render("  Re-run without --block-internal, or with --allow-out-of-scope, if that target is intended."))
+		return
+	}
 	_, _ = fmt.Fprintln(os.Stdout, MutedStyle.Render("  No findings. Target appears clean against the checks run."))
 }
 

@@ -130,6 +130,23 @@ func TestPostRunSummaryExplainsAllFailed(t *testing.T) {
 	assertSanitized(t, out)
 }
 
+// A scan the scope boundary refused is not an unreachable target: telling the
+// operator "every request failed, the target is likely down" would send them
+// to debug the wrong thing.
+func TestPostRunSummaryExplainsScopeRefusal(t *testing.T) {
+	m := NewModel(nil, []string{"example.com"})
+	m.stats = engine.ScanStats{Total: 42, Failed: 42, Refused: 42, Duration: time.Second}
+	out := m.PostRunSummary()
+
+	if containsStr(out, "Every request failed") {
+		t.Fatalf("a refused scan must not be explained as an unreachable target:\n%q", out)
+	}
+	if !containsStr(out, "refused by the scope boundary") {
+		t.Fatalf("refusal verdict missing:\n%q", out)
+	}
+	assertSanitized(t, out)
+}
+
 func TestPostRunSummaryReportsError(t *testing.T) {
 	m := NewModel(nil, []string{"example.com"})
 	m.err = fmt.Errorf("proxy refused connection")

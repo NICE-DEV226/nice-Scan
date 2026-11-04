@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -41,6 +42,12 @@ type ScanStats struct {
 	Total     int
 	Completed int
 	Failed    int
+	// Refused counts the requests the scope boundary rejected before
+	// anything went on the wire. It is separated from Failed because the two
+	// mean opposite things to the operator: "the target did not answer" and
+	// "the tool never went there". Collapsing them lets a refused scan read
+	// as a clean target.
+	Refused   int
 	Findings  int
 	Workers   int
 	StartTime time.Time
@@ -386,6 +393,9 @@ func (s *Scanner) ScanStream(ctx context.Context, targets []string, events chan<
 		s.mu.Lock()
 		if res.Error != nil {
 			s.stats.Failed++
+			if isScopeRefusal(res.Error) {
+				s.stats.Refused++
+			}
 		} else {
 			s.stats.Completed++
 		}
@@ -581,4 +591,11 @@ func underBase(u, base string) bool {
 func responseSig(r *types.Response) string {
 	sum := sha256.Sum256(r.Body)
 	return fmt.Sprintf("%d|%s|%s", r.StatusCode, r.ContentType, hex.EncodeToString(sum[:]))
+}
+
+// isScopeRefusal separates "the boundary said no" from "the target did not
+// answer". They are opposite facts about the scan, and a report that cannot
+// tell them apart lets a refused scan be read as a clean one.
+func isScopeRefusal(err error) bool {
+	return errors.Is(err, types.ErrOutOfScope) || errors.Is(err, types.ErrInternalTarget)
 }

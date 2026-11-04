@@ -118,4 +118,16 @@ type Config struct {
 	// or spawns state on the target is gated on this — a default-on scan
 	// must never create or alter assets the operator did not opt into.
 	Destructive bool
+	// EnforceScope makes the target's host a hard boundary: requests to any
+	// other host, and redirects that leave it, are refused outright instead
+	// of merely shedding credentials. On by default for target-bound
+	// commands, because a caller that is not a human reading the output —
+	// a model or a script driving the tool — must not be able to aim it
+	// elsewhere. --allow-out-of-scope turns it off.
+	EnforceScope bool
+	// BlockInternal refuses to dial addresses that are not globally
+	// routable (loopback, RFC1918, link-local including the cloud metadata
+	// address, CGNAT). Off by default: scanning one's own dev server is a
+	// legitimate use of this tool, so the operator opts in.
+	BlockInternal bool
 }
