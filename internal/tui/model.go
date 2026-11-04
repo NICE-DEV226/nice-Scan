@@ -272,6 +272,10 @@ func (m *Model) renderStats() string {
 		{"Workers", fmt.Sprintf("%d", m.stats.Workers)},
 	}
 
+	if m.stats.Refused > 0 {
+		stats = append(stats, struct{ label, value string }{"Refused", fmt.Sprintf("%d  ·  never sent", m.stats.Refused)})
+	}
+
 	if m.stats.Duration > 0 {
 		rate := float64(m.stats.Completed) / m.stats.Duration.Seconds()
 		stats = append(stats, struct{ label, value string }{"Rate", fmt.Sprintf("%.0f/s", rate)})
@@ -363,10 +367,19 @@ func (m *Model) PostRunSummary() string {
 		len(m.findings), m.stats.Duration.Round(time.Second))
 
 	if m.stats.Completed == 0 && m.stats.Total > 0 {
-		b.WriteString(mutedStyle.Render("  Every request failed — the target is likely unreachable (DNS, down, or blocking)."))
-		b.WriteString("\n")
-		b.WriteString(mutedStyle.Render("  Re-run with --verbose for per-request errors, or without -i for the standard report."))
-		b.WriteString("\n")
+		if m.stats.Refused > 0 {
+			// Not unreachable: never sent. The two readings lead the operator
+			// to opposite actions.
+			b.WriteString(mutedStyle.Render("  Nothing was concluded: those requests were refused by the scope boundary or the internal-address guard."))
+			b.WriteString("\n")
+			b.WriteString(mutedStyle.Render("  Re-run without --block-internal, or with --allow-out-of-scope, if that target is intended."))
+			b.WriteString("\n")
+		} else {
+			b.WriteString(mutedStyle.Render("  Every request failed — the target is likely unreachable (DNS, down, or blocking)."))
+			b.WriteString("\n")
+			b.WriteString(mutedStyle.Render("  Re-run with --verbose for per-request errors, or without -i for the standard report."))
+			b.WriteString("\n")
+		}
 	}
 
 	b.WriteString("\n")

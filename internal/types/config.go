@@ -12,5 +12,6 @@ func DefaultConfig() *Config {
 		MaxRedirects:    5,
 		OutputFormat:    "terminal",
 		HTTP2:           true,
+		EnforceScope:    true,
 	}
 }

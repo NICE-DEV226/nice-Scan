@@ -39,6 +39,11 @@ var (
 	interactive bool
 	reportFile  string
 	showVersion bool
+	// allowOutOfScope is the operator's escape hatch on the scope boundary
+	// (a target that legitimately redirects to a CDN, a scan by IP). Held
+	// negated because the boundary is on by default; --block-internal is the
+	// other way round and binds straight to cfg.
+	allowOutOfScope bool
 )
 
 // version is the ldflags stamp set by the release workflow; source
@@ -87,6 +92,10 @@ func main() {
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			if jsonOutput {
 				cfg.OutputFormat = "json"
+			}
+			cfg.EnforceScope = !allowOutOfScope
+			if allowOutOfScope {
+				slog.Warn("scope boundary off: requests and redirects may leave the target host")
 			}
 			// Single source of truth for --header values: populate cfg.Headers
 			// so the CLI client and the interactive shell client both honor
@@ -143,6 +152,8 @@ func main() {
 	root.PersistentFlags().StringSliceVar(&headers, "header", nil, "custom headers (key:value)")
 	root.PersistentFlags().BoolVar(&cfg.FollowRedirects, "follow-redirects", true, "follow redirects")
 	root.PersistentFlags().IntVar(&cfg.MaxRedirects, "max-redirects", 5, "max redirects to follow")
+	root.PersistentFlags().BoolVar(&allowOutOfScope, "allow-out-of-scope", false, "let requests and redirects leave the target host (default: hard scope boundary)")
+	root.PersistentFlags().BoolVar(&cfg.BlockInternal, "block-internal", false, "refuse to dial loopback, private, link-local or cloud-metadata addresses (defeats a hostname pointing inward)")
 	root.PersistentFlags().StringVarP(&reportFile, "report", "R", "", "save detailed HTML report to file")
 	root.PersistentFlags().BoolVar(&cfg.Destructive, "destructive", false, "consent to state-modifying actions (command upload/registration spawns) — modifies target state, authorized targets only")
 	root.PersistentFlags().BoolVar(&noUpdateCheck, "no-update-check", false, "disable the automatic new-release check (also honored via NICE_SCAN_NO_UPDATE_CHECK=1)")
@@ -293,14 +304,14 @@ checksum-verified only, and says so.`,
 	return cmd
 }
 
-func buildClient() *transport.Client {
-	opts := []transport.ClientOption{
+func buildClient(opts ...transport.ClientOption) *transport.Client {
+	opts = append(opts,
 		transport.WithTimeout(cfg.Timeout),
 		transport.WithRetries(cfg.Retries),
 		transport.WithFollowRedirects(cfg.FollowRedirects),
 		transport.WithMaxRedirects(cfg.MaxRedirects),
 		transport.WithVerbose(cfg.Verbose),
-	}
+	)
 
 	if cfg.RateLimit > 0 {
 		opts = append(opts, transport.WithRateLimit(cfg.RateLimit))
@@ -334,9 +345,25 @@ func parseHeaderFlags(headerLines []string) map[string]string {
 // buildClientForTarget builds the shared client bound to the command's
 // target: operator credentials (cookie/headers) only attach to the target's
 // host and its subdomains, never to third-party hosts the scan might touch.
+//
+// By default the same host is also a hard boundary (cfg.EnforceScope): a
+// request aimed elsewhere is refused before anything goes on the wire, and a
+// redirect that leaves it aborts. --allow-out-of-scope drops that and keeps
+// only the credential rule, which is what a scan of a site that redirects to
+// a CDN on another domain needs.
 func buildClientForTarget(target string) *transport.Client {
-	client := buildClient()
-	if scope := transport.HostDomain(target); scope != "" {
+	scope := transport.HostDomain(target)
+
+	var opts []transport.ClientOption
+	if scope != "" && cfg.EnforceScope {
+		opts = append(opts, transport.WithTargetScope(scope))
+	}
+	if cfg.BlockInternal {
+		opts = append(opts, transport.WithPrivateNetworkAllowed(false))
+	}
+
+	client := buildClient(opts...)
+	if scope != "" {
 		client.SetCredScope(scope)
 	}
 	return client

@@ -25,11 +25,15 @@ type JSONOutput struct {
 }
 
 type JSONStats struct {
-	Total     int    `json:"total"`
-	Completed int    `json:"completed"`
-	Failed    int    `json:"failed"`
-	Findings  int    `json:"findings"`
-	Duration  string `json:"duration"`
+	Total     int `json:"total"`
+	Completed int `json:"completed"`
+	Failed    int `json:"failed"`
+	// Refused is how many requests the scope boundary rejected. A consumer
+	// that sees Failed alone cannot tell "target unreachable" from "scan
+	// never went anywhere", and would read an empty findings list as clean.
+	Refused  int    `json:"refused"`
+	Findings int    `json:"findings"`
+	Duration string `json:"duration"`
 }
 
 type JSONFinding struct {
@@ -57,6 +61,7 @@ func (r *JSONRenderer) RenderResult(res *engine.ScanResult) {
 			Total:     res.Stats.Total,
 			Completed: res.Stats.Completed,
 			Failed:    res.Stats.Failed,
+			Refused:   res.Stats.Refused,
 			Findings:  res.Stats.Findings,
 			Duration:  res.Stats.Duration.String(),
 		},
