@@ -51,6 +51,13 @@ func (f *Fingerprinter) Analyze(ctx context.Context, resp *types.Response) []typ
 	if resp == nil {
 		return nil
 	}
+	// A probe that re-served the homepage shell (soft-404 / SPA catch-all)
+	// holds no technology signal we have not already read from the homepage
+	// itself — and its URL is one WE synthesized, so the URL signatures would
+	// match our own probe path (/graphql) and manufacture a false technology.
+	if resp.Soft404 {
+		return nil
+	}
 
 	var findings []types.Finding
 
