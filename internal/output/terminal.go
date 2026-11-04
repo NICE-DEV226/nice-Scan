@@ -62,6 +62,20 @@ func (r *TerminalRenderer) RenderResult(res *engine.ScanResult) {
 	r.renderEmptyState(res.Findings)
 }
 
+// RenderFindings prints a standalone findings block for a command that produced
+// findings directly rather than through a full engine.ScanResult (e.g. the
+// subdomain recon). It reuses the same overview + empty-state rendering as a
+// scan but skips the scan-shaped dashboard/stacks/check-grid.
+func (r *TerminalRenderer) RenderFindings(target string, findings []types.Finding) {
+	if target != "" {
+		_, _ = fmt.Fprintln(os.Stdout, Section("Target"))
+		_, _ = fmt.Fprintln(os.Stdout, KV("Domain", target, 10))
+		_, _ = fmt.Fprintln(os.Stdout)
+	}
+	r.renderFindingsOverview(findings)
+	r.renderEmptyState(findings)
+}
+
 // renderStacks shows what the target said it runs — the fingerprint-first
 // detail the probes were conditioned on. Honest fallback: when no signal
 // came back, it says the full probe set was kept instead of pretending a

@@ -26,6 +26,7 @@ const (
 	FindingHeader    FindingType = "header"
 	FindingWAF       FindingType = "waf"
 	FindingSecret    FindingType = "secret"
+	FindingSubdomain FindingType = "subdomain"
 )
 
 type Request struct {
