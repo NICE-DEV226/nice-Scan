@@ -793,12 +793,16 @@ func (f *Fingerprinter) loadSignatures() {
 			Name: "Grafana", Type: "monitoring", Category: "Monitoring",
 			Confidence: 0.7,
 			Headers:    hdr("X-Grafana-", `.+`),
-			URL:        one(`/grafana/|/grafana`),
+			// Segment-anchored: the URL matcher is a substring, so an unanchored
+			// /grafana fired on /grafana-migration, /mygrafana, etc.
+			URL: one(`/grafana(?:[/?]|$)`),
 		},
 		{
 			Name: "Prometheus", Type: "monitoring", Category: "Monitoring",
 			Confidence: 0.75,
-			URL:        one(`/metrics|/prometheus`),
+			// Segment-anchored: a substring /metrics fired "Prometheus" on any
+			// path containing it (/metrics-history, /foo/metricsproxy, …).
+			URL: one(`/(?:metrics|prometheus)(?:[/?]|$)`),
 		},
 		{
 			Name: "Heap", Type: "analytics", Category: "Analytics",
@@ -913,9 +917,12 @@ func (f *Fingerprinter) loadSignatures() {
 			// claimed the target serves a GraphQL API. Anchor to identifiers
 			// only a GraphQL server/client actually emits (the GraphiQL IDE,
 			// the application/graphql media type, Apollo/Hasura/urql/relay
-			// runtimes). The URL probe stays: landing on /graphql|/gql is an
-			// honest served-path signal.
-			URL:  one(`/graphql|/gql`),
+			// runtimes). The URL probe stays but is segment-anchored: the URL
+			// matcher is a plain substring against FinalURL, so an unanchored
+			// /graphql fired "GraphQL API" on a docs path like /api/graphql-docs.
+			// Requiring a trailing /?|end keeps a real /graphql endpoint matching
+			// while a mere "/graphql" substring does not.
+			URL:  one(`/(?:graphql|gql)(?:[/?]|$)`),
 			HTML: html(`graphiql`, `application/graphql`, `ApolloProvider`, `__APOLLO_`, `apollo-link`, `apollo-client`, `hasura`, `urql`, `relay-runtime`, `graphql-ws`),
 		},
 		{
