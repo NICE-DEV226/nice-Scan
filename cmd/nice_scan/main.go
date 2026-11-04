@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -20,6 +22,7 @@ import (
 	"github.com/NICE-DEV226/nice-Scan/internal/hacker"
 	"github.com/NICE-DEV226/nice-Scan/internal/output"
 	"github.com/NICE-DEV226/nice-Scan/internal/shell"
+	"github.com/NICE-DEV226/nice-Scan/internal/subdomain"
 	"github.com/NICE-DEV226/nice-Scan/internal/transport"
 	"github.com/NICE-DEV226/nice-Scan/internal/tui"
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
@@ -148,6 +151,7 @@ func main() {
 	root.AddCommand(auditCmd())
 	root.AddCommand(techCmd())
 	root.AddCommand(tlsCmd())
+	root.AddCommand(subdomainsCmd())
 	root.AddCommand(exploitCmd())
 	root.AddCommand(hackCmd())
 	root.AddCommand(shellCmd())
@@ -1244,6 +1248,94 @@ func tlsCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func subdomainsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "subdomains [domain]",
+		Aliases: []string{"subs"},
+		Short:   "Discover high-confidence subdomains (CT logs + DNS corroboration)",
+		Long: "Enumerate subdomains of a domain and report only those corroborated by two " +
+			"independent sources: a public Certificate-Transparency log AND a live, non-wildcard " +
+			"DNS resolution. Precision over volume — a name backed by only one source, or one that " +
+			"resolves solely to a wildcard catch-all address, is listed as unconfirmed at best.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			renderer := output.NewTerminal()
+			renderer.RenderBanner()
+
+			ctx, cancel := signalContext()
+			defer cancel()
+
+			res, err := subdomain.Discover(ctx, args[0], subdomain.Options{
+				Resolver: subdomain.NewDNSResolver(),
+				CT:       subdomain.NewCTLogSource(nil),
+			})
+			if err != nil {
+				return err
+			}
+
+			if jsonOutput {
+				b, merr := json.MarshalIndent(res, "", "  ")
+				if merr != nil {
+					return merr
+				}
+				_, _ = fmt.Fprintln(os.Stdout, string(b))
+				return nil
+			}
+
+			renderer.RenderFindings(res.Domain, subdomainFindings(res))
+			return nil
+		},
+	}
+}
+
+// subdomainFindings turns a discovery Result into reportable findings. Confirmed
+// names (both families agree on a live host) become Info findings carrying their
+// addresses and corroborating sources as evidence; unconfirmed names are folded
+// into the summary count so the operator sees the honest denominator without a
+// wall of single-source noise.
+func subdomainFindings(res *subdomain.Result) []types.Finding {
+	findings := make([]types.Finding, 0, len(res.Confirmed)+1)
+
+	wildcard := "no"
+	if res.Wildcard {
+		wildcard = "yes"
+	}
+	findings = append(findings, types.Finding{
+		Type:        types.FindingSubdomain,
+		Name:        fmt.Sprintf("Subdomain recon: %d confirmed", len(res.Confirmed)),
+		Severity:    types.SeverityInfo,
+		Description: fmt.Sprintf("%d candidates checked, %d resolved, wildcard DNS: %s", res.Candidates, res.Resolved, wildcard),
+		Confidence:  1.0, // a factual run summary, not a probabilistic claim
+		Metadata: map[string]string{
+			"domain":     res.Domain,
+			"candidates": strconv.Itoa(res.Candidates),
+			"resolved":   strconv.Itoa(res.Resolved),
+			"confirmed":  strconv.Itoa(len(res.Confirmed)),
+			"wildcard":   wildcard,
+		},
+	})
+
+	for _, rec := range res.Confirmed {
+		srcs := make([]string, 0, len(rec.Sources))
+		for _, s := range rec.Sources {
+			srcs = append(srcs, string(s))
+		}
+		findings = append(findings, types.Finding{
+			Type:        types.FindingSubdomain,
+			Name:        rec.Host,
+			Severity:    types.SeverityInfo,
+			Description: "Corroborated by CT log and a live DNS resolution",
+			Evidence:    fmt.Sprintf("%s  [%s]", strings.Join(rec.Addrs, ", "), strings.Join(srcs, "+")),
+			Confidence:  1.0,
+			Metadata: map[string]string{
+				"sources": strings.Join(srcs, ","),
+				"addrs":   strings.Join(rec.Addrs, ","),
+			},
+		})
+	}
+	return findings
 }
 
 func shellCmd() *cobra.Command {
