@@ -68,7 +68,7 @@ func (t *TokenExtractor) Analyze(ctx context.Context, resp *types.Response) []ty
 				Name:        "Bearer Token Found",
 				Severity:    types.SeverityHigh,
 				Description: "Bearer authentication token found in response",
-				Evidence:    fmt.Sprintf("Token: %s...", truncate(m[1], 30)),
+				Evidence:    fmt.Sprintf("Bearer token %s", types.RedactSecretValue(m[1])),
 				Confidence:  0.8,
 			})
 		}
@@ -83,11 +83,11 @@ func (t *TokenExtractor) Analyze(ctx context.Context, resp *types.Response) []ty
 					Name:        fmt.Sprintf("Session Cookie: %s", name),
 					Severity:    types.SeverityInfo,
 					Description: "Session cookie set by application",
-					Evidence:    fmt.Sprintf("%s=%s...", name, truncate(val, 20)),
+					Evidence:    fmt.Sprintf("%s=%s", name, types.RedactSecretValue(val)),
 					Confidence:  0.9,
 					Metadata: map[string]string{
 						"cookie": name,
-						"raw":    c,
+						"raw":    cookieShape(c),
 					},
 				})
 
@@ -98,7 +98,7 @@ func (t *TokenExtractor) Analyze(ctx context.Context, resp *types.Response) []ty
 						Name:        fmt.Sprintf("Session Cookie Missing Secure Flag: %s", name),
 						Severity:    types.SeverityMedium,
 						Description: "Session cookie transmitted over HTTPS without Secure flag — possible session hijacking via man-in-the-middle",
-						Evidence:    fmt.Sprintf("Cookie: %s (missing Secure flag on HTTPS)", c),
+						Evidence:    fmt.Sprintf("Cookie: %s (missing Secure flag on HTTPS)", cookieShape(c)),
 						Confidence:  0.9,
 					})
 				}
@@ -108,7 +108,7 @@ func (t *TokenExtractor) Analyze(ctx context.Context, resp *types.Response) []ty
 						Name:        fmt.Sprintf("Session Cookie Missing HttpOnly Flag: %s", name),
 						Severity:    types.SeverityLow,
 						Description: "Session cookie accessible via JavaScript — possible XSS-based session theft",
-						Evidence:    fmt.Sprintf("Cookie: %s (missing HttpOnly)", c),
+						Evidence:    fmt.Sprintf("Cookie: %s (missing HttpOnly)", cookieShape(c)),
 						Confidence:  0.9,
 					})
 				}
@@ -141,8 +141,9 @@ func (t *TokenExtractor) Analyze(ctx context.Context, resp *types.Response) []ty
 				Name:        p.name,
 				Severity:    p.sev,
 				Description: p.desc,
-				Evidence:    val,
-				Confidence:  p.conf,
+				// The dedup key above is the matched value; the report is not.
+				Evidence:   types.RedactSecretValue(m[1]),
+				Confidence: p.conf,
 			})
 		}
 	}
@@ -162,8 +163,11 @@ func (t *TokenExtractor) Analyze(ctx context.Context, resp *types.Response) []ty
 				Name:        "Basic Auth Credential",
 				Severity:    types.SeverityHigh,
 				Description: "Base64-encoded Basic Authentication credentials found",
-				Evidence:    truncate(m[1], 30),
-				Confidence:  0.8,
+				// 30 base64 characters decode to ~22 bytes — the whole
+				// user:password pair. A prefix of a credential is the
+				// credential.
+				Evidence:   types.RedactSecretValue(m[1]),
+				Confidence: 0.8,
 			})
 		}
 	}
@@ -280,9 +284,12 @@ func (t *TokenExtractor) analyzeJWT(raw string) types.Finding {
 		Name:        "JWT Token Decoded",
 		Severity:    sev,
 		Description: fmt.Sprintf("JSON Web Token decoded — %s", strings.Join(details, " | ")),
-		Evidence:    truncate(raw, 80),
-		Confidence:  conf,
-		Metadata:    meta,
+		// The claims are the finding and they are in Metadata; the signed
+		// token itself is a bearer credential and has no business in a
+		// report.
+		Evidence:   types.RedactSecretValue(raw),
+		Confidence: conf,
+		Metadata:   meta,
 	}
 }
 
@@ -304,6 +311,32 @@ func extractCookieValue(c string) string {
 		return kv[1]
 	}
 	return ""
+}
+
+// cookieShape returns a Set-Cookie header with ONLY its value masked. The
+// cookie name and the attributes (Path, Domain, SameSite, Secure, HttpOnly)
+// are the actionable half of the finding — the value is a live session
+// credential and must not be recopied into a report.
+func cookieShape(c string) string {
+	parts := strings.Split(strings.TrimSpace(c), ";")
+	nameValue := strings.TrimSpace(parts[0])
+	if eq := strings.IndexByte(nameValue, '='); eq >= 0 {
+		nameValue = nameValue[:eq+1] + types.RedactSecretValue(nameValue[eq+1:])
+	} else {
+		nameValue = types.RedactSecretValue(nameValue)
+	}
+	out := append([]string{nameValue}, nonEmptyAttrs(parts[1:])...)
+	return strings.Join(out, "; ")
+}
+
+func nonEmptyAttrs(attrs []string) []string {
+	out := make([]string, 0, len(attrs))
+	for _, a := range attrs {
+		if trimmed := strings.TrimSpace(a); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 // cookieAttrSet returns the lowercase attribute-name set of one Set-Cookie

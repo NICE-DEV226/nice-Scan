@@ -203,8 +203,11 @@ func findBuriedCreds(body string, reported map[string]bool) []types.Finding {
 					Name:        p.name + " (revealed by " + view.origin + ")",
 					Severity:    p.sev,
 					Description: p.desc + " — the value only appears after decoding; it was buried in the response.",
-					Evidence:    ev,
-					Confidence:  p.conf,
+					// The dedup key above is the matched value; the report
+					// is not: a credential scanner whose own output is a
+					// credential store has moved the problem, not solved it.
+					Evidence:   types.RedactSecretValue(m[1]),
+					Confidence: p.conf,
 				})
 			}
 		}
@@ -224,7 +227,7 @@ func findBuriedCreds(body string, reported map[string]bool) []types.Finding {
 			Name:        "Credential Assigned (unquoted value)",
 			Severity:    types.SeverityHigh,
 			Description: "A secret-bearing key is bound to a literal value in unquoted form (env/config/minified-JS style) — the quoted-only matcher would have missed it.",
-			Evidence:    ev,
+			Evidence:    types.RedactSecretValue(m[1]),
 			Confidence:  0.6,
 		})
 	}

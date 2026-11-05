@@ -437,7 +437,7 @@ func scanCmd() *cobra.Command {
 			}
 
 			renderer := output.NewTerminal()
-			renderer.RenderBanner()
+			renderBanner(renderer)
 
 			ctx, cancel := signalContext()
 			defer cancel()
@@ -502,7 +502,7 @@ func auditCmd() *cobra.Command {
 			)
 
 			renderer := output.NewTerminal()
-			renderer.RenderBanner()
+			renderBanner(renderer)
 
 			ctx, cancel := signalContext()
 			defer cancel()
@@ -616,7 +616,7 @@ func exploitCmd() *cobra.Command {
 			}
 
 			renderer := output.NewTerminal()
-			renderer.RenderBanner()
+			renderBanner(renderer)
 
 			ctx, cancel := signalContext()
 			defer cancel()
@@ -1140,7 +1140,7 @@ func hackCmd() *cobra.Command {
 			defer func() { _ = client.Close() }()
 
 			renderer := output.NewTerminal()
-			renderer.RenderBanner()
+			renderBanner(renderer)
 
 			if cfg.Destructive {
 				fmt.Println(lipgloss.NewStyle().Foreground(clFail).Render(
@@ -1219,7 +1219,7 @@ func techCmd() *cobra.Command {
 			target := normalizeTarget(args[0])
 
 			renderer := output.NewTerminal()
-			renderer.RenderBanner()
+			renderBanner(renderer)
 
 			client := buildClientForTarget(target)
 			defer func() { _ = client.Close() }()
@@ -1253,7 +1253,7 @@ func tlsCmd() *cobra.Command {
 			target := normalizeTarget(args[0])
 
 			renderer := output.NewTerminal()
-			renderer.RenderBanner()
+			renderBanner(renderer)
 
 			client := buildClientForTarget(target)
 			defer func() { _ = client.Close() }()
@@ -1289,7 +1289,7 @@ func subdomainsCmd() *cobra.Command {
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			renderer := output.NewTerminal()
-			renderer.RenderBanner()
+			renderBanner(renderer)
 
 			ctx, cancel := signalContext()
 			defer cancel()
@@ -1395,6 +1395,17 @@ func shellCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// renderBanner prints the decoration on stdout, except when the machine-facing
+// sink was asked for. A consumer piping `scan --json` into jq or into a model
+// gets parseable bytes or nothing: the banner is not part of the report, and
+// the version it shows is already in the JSON.
+func renderBanner(renderer *output.TerminalRenderer) {
+	if jsonOutput {
+		return
+	}
+	renderer.RenderBanner()
 }
 
 func normalizeTarget(target string) string {

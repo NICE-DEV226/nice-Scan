@@ -64,7 +64,7 @@ func (a *DataExtractionAnalyzer) Analyze(ctx context.Context, resp *types.Respon
 	var findings []types.Finding
 	body := string(resp.Body)
 
-	emails := uniqueStrings(rxEmail.FindAllString(body, -1))
+	emails := emailCandidates(body, rxDBConnection.FindAllStringIndex(body, -1))
 	emails = filterDocEmails(emails)
 	if len(emails) > 0 {
 		findings = append(findings, types.Finding{
@@ -123,7 +123,7 @@ func (a *DataExtractionAnalyzer) Analyze(ctx context.Context, resp *types.Respon
 			Name:        "API Key/Secret Found",
 			Severity:    types.SeverityCritical,
 			Description: "API key or client secret exposed in response body — third-party service compromise possible",
-			Evidence:    truncate(k, 60),
+			Evidence:    types.RedactSecretValue(k),
 			Confidence:  0.85,
 		})
 	}
@@ -134,7 +134,7 @@ func (a *DataExtractionAnalyzer) Analyze(ctx context.Context, resp *types.Respon
 			Name:        "AWS Access Key ID Leaked",
 			Severity:    types.SeverityCritical,
 			Description: "Amazon Web Services Access Key ID exposed — potential cloud account compromise",
-			Evidence:    fmt.Sprintf("AWS Key: %s", m),
+			Evidence:    fmt.Sprintf("AWS Key: %s", types.RedactSecretValue(m)),
 			Confidence:  0.9,
 		})
 	}
@@ -145,7 +145,7 @@ func (a *DataExtractionAnalyzer) Analyze(ctx context.Context, resp *types.Respon
 			Name:        "GitHub Token Leaked",
 			Severity:    types.SeverityCritical,
 			Description: "GitHub authentication token exposed — repository and code access",
-			Evidence:    truncate(m, 40),
+			Evidence:    types.RedactSecretValue(m),
 			Confidence:  0.9,
 		})
 	}
@@ -156,7 +156,7 @@ func (a *DataExtractionAnalyzer) Analyze(ctx context.Context, resp *types.Respon
 			Name:        "Slack Token Leaked",
 			Severity:    types.SeverityCritical,
 			Description: "Slack API token exposed — team communication compromise",
-			Evidence:    truncate(m, 30),
+			Evidence:    types.RedactSecretValue(m),
 			Confidence:  0.9,
 		})
 	}
@@ -167,7 +167,7 @@ func (a *DataExtractionAnalyzer) Analyze(ctx context.Context, resp *types.Respon
 			Name:        "Google API Key Leaked",
 			Severity:    types.SeverityCritical,
 			Description: "Google API key exposed — may allow unauthorized Google Cloud/API usage",
-			Evidence:    fmt.Sprintf("Key: %s...", truncate(m, 10)),
+			Evidence:    fmt.Sprintf("Key: %s", types.RedactSecretValue(m)),
 			Confidence:  0.85,
 		})
 	}
@@ -233,12 +233,18 @@ func (a *DataExtractionAnalyzer) Analyze(ctx context.Context, resp *types.Respon
 
 	dbConns := uniqueStrings(rxDBConnection.FindAllString(body, -1))
 	if len(dbConns) > 0 {
+		// The scheme, host and database name are the actionable part; the
+		// userinfo in front of them is a live database password.
+		shapes := make([]string, 0, len(dbConns))
+		for _, c := range dbConns {
+			shapes = append(shapes, truncate(types.RedactText(c), 120))
+		}
 		findings = append(findings, types.Finding{
 			Type:        types.FindingSecret,
 			Name:        "Database Connection String Leaked",
 			Severity:    types.SeverityCritical,
 			Description: "Database connection string exposed — direct database access possible",
-			Evidence:    truncate(strings.Join(dbConns, ", "), 80),
+			Evidence:    strings.Join(shapes, ", "),
 			Confidence:  0.9,
 		})
 	}
@@ -364,6 +370,31 @@ var placeholderEmailLocals = map[string]struct{}{
 
 // filterDocEmails drops addresses on reserved/placeholder domains and stub
 // local-parts so the PII finding counts real contacts, not template text.
+// emailCandidates harvests address-shaped strings, dropping any match that
+// begins inside one of the excluded byte spans. A connection string is one
+// credential from scheme to database name, and its userinfo reads perfectly
+// well as an address: reporting "r00tpass@db.internal" as a contact puts a live
+// database password into the report under a PII label.
+func emailCandidates(body string, excluded [][]int) []string {
+	var out []string
+	for _, m := range rxEmail.FindAllStringIndex(body, -1) {
+		if insideAnySpan(m, excluded) {
+			continue
+		}
+		out = append(out, body[m[0]:m[1]])
+	}
+	return uniqueStrings(out)
+}
+
+func insideAnySpan(match []int, spans [][]int) bool {
+	for _, s := range spans {
+		if match[0] >= s[0] && match[0] < s[1] {
+			return true
+		}
+	}
+	return false
+}
+
 func filterDocEmails(in []string) []string {
 	out := make([]string, 0, len(in))
 	for _, e := range in {
