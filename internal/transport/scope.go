@@ -76,7 +76,7 @@ func ipBlocked(ip net.IP) bool {
 // unit callers) working exactly as before.
 func WithTargetScope(hosts ...string) ClientOption {
 	return func(o *clientOptions) {
-		scope := normalizeScope(hosts)
+		scope := NormalizeScope(hosts)
 		o.targetScope = scope
 		o.enforceScope = len(scope) > 0
 		if len(o.credScope) == 0 {

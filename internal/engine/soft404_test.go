@@ -101,19 +101,19 @@ func TestSPACatchAllDoesNotFingerprintOrSurfaceAdmin(t *testing.T) {
 func TestResponseSigDistinguishesBodies(t *testing.T) {
 	base := &types.Response{StatusCode: 200, ContentType: "text/html", Body: []byte("hello")}
 	same := &types.Response{StatusCode: 200, ContentType: "text/html", Body: []byte("hello")}
-	if responseSig(base) != responseSig(same) {
+	if ResponseSig(base) != ResponseSig(same) {
 		t.Error("identical status+ctype+body must share a signature")
 	}
 	diffBody := &types.Response{StatusCode: 200, ContentType: "text/html", Body: []byte("hellO")}
-	if responseSig(base) == responseSig(diffBody) {
+	if ResponseSig(base) == ResponseSig(diffBody) {
 		t.Error("a different body must change the signature")
 	}
 	diffStatus := &types.Response{StatusCode: 301, ContentType: "text/html", Body: []byte("hello")}
-	if responseSig(base) == responseSig(diffStatus) {
+	if ResponseSig(base) == ResponseSig(diffStatus) {
 		t.Error("a different status must change the signature")
 	}
 	diffType := &types.Response{StatusCode: 200, ContentType: "application/json", Body: []byte("hello")}
-	if responseSig(base) == responseSig(diffType) {
+	if ResponseSig(base) == ResponseSig(diffType) {
 		t.Error("a different content-type must change the signature")
 	}
 }

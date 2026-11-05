@@ -332,10 +332,12 @@ CI is green. Contributor details and conventions are in
 ### Architecture
 
 ```
-cmd/nice_scan/     CLI entry point — Cobra commands, flag wiring
+cmd/nice_scan/     CLI entry point — Cobra commands, flag wiring, rendering choice
 internal/
   hacker/          Decision engine: planner, forward-chaining, knowledge base, actions
   engine/          Analysis modules: SQLi, XSS, CORS, headers, TLS, tokens, auth, creds
+  recon/           Evidence service: scoped client + analyzer roster -> graded findings,
+                   no rendering (the CLI, the TUI and any scripted caller drive this)
   exploit/         Exploitation modules: login, IDOR, privesc, token, session
   detect/          Shared evidence primitives: canaries and classified reflection
   fingerprint/     Technology fingerprinting (165 signatures, stack classifier)

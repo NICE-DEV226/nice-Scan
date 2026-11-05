@@ -173,6 +173,44 @@ func (s *Scanner) Scan(ctx context.Context, targets []string) *ScanResult {
 	return result
 }
 
+// Baseline performs the single honest GET a target must be read through before
+// anything is aimed at it: the homepage response, the stack classified from it,
+// and what the registered analyzers make of that one exchange, merged and
+// stamped with the same provenance a full scan uses.
+//
+// It generates no path probes. A caller deciding what to aim at NEXT needs the
+// cheapest true read of what the target is, not fifty guesses about what it
+// might have — and a response compared to nothing must not be handed a
+// differential grade, so the stamp gets an empty baseline.
+func (s *Scanner) Baseline(ctx context.Context, target string) (*types.Result, []types.Finding) {
+	req := &types.Request{Method: "GET", URL: target, Timeout: s.opts.Timeout, Origin: types.PathObserved}
+	resp, err := s.client.Do(ctx, req)
+	res := &types.Result{Target: target, Request: req, Response: resp, Error: err}
+	if err != nil || resp == nil {
+		return res, nil
+	}
+
+	s.mu.Lock()
+	s.stacks[target] = fingerprint.Classify(resp)
+	s.mu.Unlock()
+
+	findings := s.analyzeResponse(ctx, resp)
+	stampProvenance(req, resp, findings, "")
+
+	byName := make(map[string]types.Finding, len(findings))
+	var merged []types.Finding
+	for _, f := range findings {
+		if existing, ok := byName[f.Name]; ok {
+			byName[f.Name] = mergeFinding(existing, f)
+			continue
+		}
+		byName[f.Name] = f
+		merged = append(merged, f)
+	}
+	res.Findings = merged
+	return res, merged
+}
+
 // stackProbe is a path probe tagged with the server-side family it only
 // makes sense for; family "" means stack-agnostic and always fires.
 type stackProbe struct {
@@ -424,7 +462,7 @@ func (s *Scanner) ScanStream(ctx context.Context, targets []string, events chan<
 			if !baselines.isHomepage(res.Request) {
 				if sig, ok := baselines.ownerSig(res.Request); ok {
 					baselineSig = sig
-					if sig == responseSig(res.Response) {
+					if sig == ResponseSig(res.Response) {
 						res.Response.Soft404 = true
 					}
 				}
@@ -556,7 +594,7 @@ func buildBaselines(preamble []*types.Result) baselineSet {
 		bs.homepage[res.Request.URL] = true
 		bs.bases = append(bs.bases, baseEntry{
 			base: strings.TrimRight(res.Request.URL, "/"),
-			sig:  responseSig(res.Response),
+			sig:  ResponseSig(res.Response),
 		})
 	}
 	return bs
@@ -601,10 +639,10 @@ func underBase(u, base string) bool {
 	return rest == "" || rest[0] == '/' || rest[0] == '?'
 }
 
-// responseSig is the identity of a served page: status + content-type + a
+// ResponseSig is the identity of a served page: status + content-type + a
 // digest of the body. A probe whose sig equals its target's homepage sig was
 // answered by the catch-all shell, not by a distinct endpoint.
-func responseSig(r *types.Response) string {
+func ResponseSig(r *types.Response) string {
 	sum := sha256.Sum256(r.Body)
 	return fmt.Sprintf("%d|%s|%s", r.StatusCode, r.ContentType, hex.EncodeToString(sum[:]))
 }
