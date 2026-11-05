@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -162,6 +163,7 @@ func main() {
 	root.AddCommand(techCmd())
 	root.AddCommand(tlsCmd())
 	root.AddCommand(subdomainsCmd())
+	root.AddCommand(accessCmd())
 	root.AddCommand(exploitCmd())
 	root.AddCommand(hackCmd())
 	root.AddCommand(shellCmd())
@@ -1279,6 +1281,103 @@ func subdomainsCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// accessCmd is the identity differential as a command: the same URL read
+// anonymously and with a session, and only the difference reported. It is the
+// one capability whose output a caller can act on — which paths answered
+// differently is where the next, sharper comparison (a second identity, an
+// object ID) goes — and it is read-only: GETs, plus the login the operator
+// asked for.
+func accessCmd() *cobra.Command {
+	var (
+		user  string
+		pass  string
+		paths []string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "access [target]",
+		Short: "Read what one identity reaches: each path anonymously, then with a session",
+		Long: "Replay the same URL under two identities — anonymously, then with the session you " +
+			"supply (--cookie, or --user/--pass to log in through a form the target publishes) — " +
+			"and report only where the answer differs. A difference that appears and disappears " +
+			"with the presenting principal is caused by that principal, so it is graded proven. " +
+			"Whether that principal SHOULD be allowed is a different question, and this command " +
+			"does not answer it: it answers where to ask next. Read-only: GETs only.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target := normalizeTarget(args[0])
+
+			sess := recon.Session{}
+			if cfg.Cookie != "" {
+				sess.Cookie = cfg.Cookie
+			}
+			if user != "" {
+				sess.Credential = &exploit.Credential{User: user, Pass: pass, Desc: "operator-supplied"}
+			}
+			if sess.Cookie == "" && sess.Credential == nil {
+				return errors.New(`access: an identity is required — pass --cookie "name=value" or --user/--pass; with nothing to present there is no second round to compare`)
+			}
+
+			// The identity is presented per round, never globally. A client
+			// that attaches --cookie or --header to every in-scope request
+			// would hand the SAME credential to the anonymous control round,
+			// and the differential would then measure the difference between
+			// two identical requests: nothing.
+			scoped := *cfg
+			scoped.Cookie = ""
+			scoped.Headers = nil
+
+			svc, err := recon.New(recon.Options{Config: &scoped, Scope: []string{target}})
+			if err != nil {
+				return err
+			}
+			defer func() { _ = svc.Close() }()
+
+			ctx, cancel := signalContext()
+			defer cancel()
+
+			report, err := svc.VerifyAccess(ctx, target, sess, paths...)
+			if err != nil {
+				return err
+			}
+
+			if jsonOutput {
+				b, merr := json.MarshalIndent(report, "", "  ")
+				if merr != nil {
+					return merr
+				}
+				_, _ = fmt.Fprintln(os.Stdout, string(b))
+				return nil
+			}
+
+			renderer := output.NewTerminal()
+			renderBanner(renderer)
+			_, _ = fmt.Printf("  identity %s · session %s · %d paths compared in two rounds\n",
+				report.Identity, report.Session, len(report.Paths))
+			for _, p := range report.Paths {
+				mark := "  "
+				if p.Lifted {
+					mark = "→ "
+				}
+				_, _ = fmt.Printf("  %s%-28s anon %-3d → session %-3d %d bytes\n",
+					mark, p.Path, p.AnonymousStatus, p.SessionStatus, p.BodySize)
+			}
+			if len(report.Findings) == 0 {
+				_, _ = fmt.Println("  no path answered differently — nothing was shown, which is a result, not a clean target")
+			}
+			renderer.RenderFindings(target, report.Findings)
+			renderer.RenderTransportStats(svc.Stats())
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&user, "user", "", "account to log in with (needs --pass)")
+	cmd.Flags().StringVar(&pass, "pass", "", "password for --user")
+	cmd.Flags().StringSliceVar(&paths, "path", nil, "paths to compare instead of the built-in admin wordlist (repeatable)")
+
+	return cmd
 }
 
 func shellCmd() *cobra.Command {

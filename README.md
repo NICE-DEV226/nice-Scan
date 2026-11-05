@@ -169,6 +169,10 @@ nice_scan tls https://example.com
 # Targeted exploitation modules (non-destructive by default)
 nice_scan exploit https://example.com --idor 1-100 --token
 
+# Which paths answer differently to a session than to nobody (read-only)
+nice_scan access https://example.com --cookie "sid=…" --json
+nice_scan access https://example.com --user operator --pass "$PASS" --path /api/internal/metrics
+
 # Interactive REPL shell
 nice_scan shell
 ```
@@ -189,6 +193,8 @@ nice_scan hack example.com --timeout 30s -R report.html --destructive
 | `exploit <target>` | Individual exploitation modules (login, IDOR, privesc, token/session reuse) — see below |
 | `tech <target>` | Technology fingerprinting only (165 signatures) |
 | `tls <target>` | TLS/SSL analysis — ciphers, certificates, protocol versions |
+| `subdomains <domain>` | High-confidence subdomain enumeration: a name is reported only when a CT log AND a live, non-wildcard DNS answer agree |
+| `access <target>` | Identity differential — the same path read anonymously and with a session (`--cookie` or `--user`/`--pass`), reporting only where the answer changes. Read-only: GETs |
 | `shell` | Interactive REPL: run checks against one or more targets, with command history, clipboard copy, and a `consent` toggle |
 | `update` | Self-update to the latest release, checksum-verified, with the previous binary kept as `nice_scan.old` for rollback |
 
@@ -247,11 +253,12 @@ findings timeline, evidence). Extracted artifacts are written under
 `reports/<target>/` with restrictive `0700` permissions.
 
 Every finding name and evidence is run through sanitization, and plaintext
-secrets are **masked by default** (the provider prefix and the length are
-preserved, the value is not) so credentials never leak into terminal
-scrollback, JSON, or the HTML report. Masking happens where the credential is
-*found*, not only where it is printed: a truncated session token is still the
-beginning of a live session token.
+secrets are **masked by default** so credentials never leak into terminal
+scrollback, JSON, or the HTML report. What survives is a shape — a provider
+prefix for an API token, a name and a length for a session cookie — never the
+value. Masking happens where the credential is *found*, not only where it is
+printed: a truncated session token is still the beginning of a live session
+token.
 
 `--json` is the machine-facing path and prints nothing but the report — no
 banner — so it can be piped straight into `jq` or into a model. Each finding
@@ -260,6 +267,12 @@ where the engine earned one, a `prov` object naming the request, whether the
 path was observed or synthesized, and the differential the claim rests on. That
 is what lets an automated consumer rank findings without a human re-reading
 every evidence line, and it is why the same masking rules apply there.
+
+The strongest differential is `principal-differential`: the same URL replayed
+under two identities, answering differently. `access` produces it, which is why
+a lift is graded `proven` while saying nothing about authorization — a session
+reaching the surface it owns is expected behaviour. The report is a map of where
+to aim the next, sharper comparison, not a verdict.
 
 The snippet below is **illustrative** — actual findings depend on the target. It
 shows the point of the design: nice_scan records an escaped reflection but does

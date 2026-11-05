@@ -6,8 +6,8 @@
 // layer up in cmd/nice_scan was not reusable — the analyzer roster and the
 // scoped-client construction were pasted into each command, so the CLI was the
 // only possible consumer. A model, a script, a future MCP server and the TUI
-// drive the same three calls, and a service that prints is a service a model
-// cannot call.
+// drive the same calls — Baseline, Scan, VerifyAccess — and a service that
+// prints is a service a model cannot call.
 package recon
 
 import (
@@ -52,6 +52,7 @@ type Options struct {
 type Service struct {
 	client  *transport.Client
 	scanner *engine.Scanner
+	verbose bool
 }
 
 // Baseline is the cheapest true read of a target: one GET, what it served,
@@ -100,7 +101,7 @@ func New(o Options) (*Service, error) {
 	}
 	scanner.RegisterAnalyzers(analyzers...)
 
-	return &Service{client: client, scanner: scanner}, nil
+	return &Service{client: client, scanner: scanner, verbose: cfg.Verbose}, nil
 }
 
 // Scanner hands out the scanner this service is configured to run. The

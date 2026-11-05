@@ -31,6 +31,10 @@ func TestDeriveGradeRanksMethods(t *testing.T) {
 			[]EvidenceMethod{MethodExactEcho}, GradeProven},
 		{"a reaction to a value we injected is proof",
 			[]EvidenceMethod{MethodOwnProbeAttribution}, GradeProven},
+		{"an answer that changes with the presenting principal is caused by that principal",
+			[]EvidenceMethod{MethodPrincipalDifferential}, GradeProven},
+		{"a principal differential is not demoted by riding along with a shell comparison",
+			[]EvidenceMethod{MethodSoft404Baseline, MethodPrincipalDifferential}, GradeProven},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
