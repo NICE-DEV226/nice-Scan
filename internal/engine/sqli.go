@@ -61,6 +61,18 @@ func (a *SQLiAnalyzer) Analyze(ctx context.Context, resp *types.Response) []type
 					"An anchored %s error message surfaced on the scanner's own quote-break probe — the error shape is attributable to our input", db),
 				Evidence: fmt.Sprintf("DB %s: %s", db, centeredSnippet(body, idx, 100)),
 				Metadata: meta,
+				Prov: &types.Provenance{
+					RequestURL: resp.RequestURL,
+					// Two facts, not one: the message is an anchored
+					// signature of this database, and it followed the
+					// value this scan injected.
+					BaselineRef: sqliProbePayload,
+					Methods: []types.EvidenceMethod{
+						types.MethodOwnProbeAttribution,
+						types.MethodBodyPattern,
+					},
+					Grade: types.GradeProven,
+				},
 			},
 		}
 	}
@@ -75,12 +87,28 @@ func (a *SQLiAnalyzer) Analyze(ctx context.Context, resp *types.Response) []type
 				"An anchored %s error message is present on a response our probes did not trigger — backend fingerprint, not an injection claim", db),
 			Evidence: fmt.Sprintf("DB %s: %s", db, centeredSnippet(body, idx, 100)),
 			Metadata: meta,
+			Prov: &types.Provenance{
+				RequestURL: resp.RequestURL,
+				// What is proven here is only what the finding
+				// claims: this database's own anchored error text is
+				// present in the body. Nothing was compared against
+				// anything, so BaselineRef stays empty — naming a
+				// baseline that was never used would be worse than
+				// no baseline. And no injection is asserted.
+				Methods: []types.EvidenceMethod{types.MethodBodyPattern},
+				Grade:   types.GradeProven,
+			},
 		},
 	}
 }
 
+// sqliProbePayload is the quote-break value buildProbes injects into each
+// common parameter name. Naming it once lets the analyzer attribute an error
+// to it and record what the comparison was made against.
+const sqliProbePayload = "1'"
+
 // isOwnSQLiProbe decodes the request URL and recognizes the quote-break
-// probe value (`1'`) that buildProbes injects.
+// probe value that buildProbes injects.
 func isOwnSQLiProbe(resp *types.Response) bool {
 	u, err := url.Parse(resp.RequestURL)
 	if err != nil {
@@ -88,7 +116,7 @@ func isOwnSQLiProbe(resp *types.Response) bool {
 	}
 	for _, vals := range u.Query() {
 		for _, v := range vals {
-			if v == "1'" {
+			if v == sqliProbePayload {
 				return true
 			}
 		}

@@ -215,6 +215,7 @@ func (a *ExposureAnalyzer) Analyze(ctx context.Context, resp *types.Response) []
 			continue
 		}
 
+		methods := patternProofMethods(pattern)
 		findings = append(findings, types.Finding{
 			Type:        types.FindingExposure,
 			Name:        pattern.Name,
@@ -229,10 +230,35 @@ func (a *ExposureAnalyzer) Analyze(ctx context.Context, resp *types.Response) []
 				"size":        fmt.Sprintf("%d", size),
 				"verified_by": proofText(pattern),
 			},
+			Prov: &types.Provenance{
+				RequestURL: resp.RequestURL,
+				// The pattern itself is the comparison: what matched is
+				// recorded as the evidence reference, not only as prose
+				// in verified_by.
+				BaselineRef: proofText(pattern),
+				Methods:     methods,
+				Grade:       types.DeriveGrade(methods),
+			},
 		})
 	}
 
 	return findings
+}
+
+// patternProofMethods names which gate the analyzer actually passed, so the
+// finding says how it was earned instead of merely asserting it was.
+func patternProofMethods(p ExposurePattern) []types.EvidenceMethod {
+	var out []types.EvidenceMethod
+	if len(p.MagicPrefix) > 0 {
+		out = append(out, types.MethodMagicPrefix)
+	}
+	if len(p.BodyPattern) > 0 {
+		out = append(out, types.MethodBodyPattern)
+	}
+	if p.NoHTML {
+		out = append(out, types.MethodNoHTMLShape)
+	}
+	return out
 }
 
 // provesBody is the proof gate: shape, then file format, then content.

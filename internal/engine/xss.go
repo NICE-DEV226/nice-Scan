@@ -66,6 +66,17 @@ func (a *XSSAnalyzer) Analyze(ctx context.Context, resp *types.Response) []types
 			"param":  param,
 			"method": "canary-reflection-differential",
 		},
+		Prov: &types.Provenance{
+			RequestURL: resp.RequestURL,
+			// Every branch below asserts something about the
+			// reflection context, not about exploitability, and the
+			// canary proves the reflection: a value this scan made
+			// up came back through the wire. Grade describes the
+			// evidence for the claim actually made.
+			BaselineRef: a.canary,
+			Methods:     []types.EvidenceMethod{types.MethodCanaryReflection},
+			Grade:       types.GradeProven,
+		},
 	}
 	if rx.Snippet != "" {
 		base.Evidence = rx.Snippet

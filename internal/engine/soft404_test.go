@@ -70,6 +70,32 @@ func TestSPACatchAllDoesNotFingerprintOrSurfaceAdmin(t *testing.T) {
 	if names["Login Form Detected"] == 0 {
 		t.Error("the distinct real /login page must still be analyzed and its login form reported (suppression must not be blanket)")
 	}
+
+	// Provenance has to tell the two halves of the soft-404 comparison apart:
+	// the paths that only echoed the shell must name the shell signature they
+	// matched and be graded as showing nothing, and the login page — which
+	// differed from that same shell — must be graded on the differential it
+	// actually passed, not on the analyzer's own optimism.
+	for _, f := range res.Findings {
+		if f.Prov == nil {
+			t.Errorf("engine-stamped finding %q reached the report with no provenance", f.Name)
+			continue
+		}
+		if strings.HasSuffix(f.Prov.RequestURL, "/graphql") {
+			t.Errorf("a path that only echoed the shell was still reported: %+v", f)
+		}
+		if f.Name == "Login Form Detected" {
+			if f.Prov.BaselineRef == "" {
+				t.Error("the login finding must name the shell signature it differed from")
+			}
+			if got := types.GradeOf(f); got != types.GradeIndicated {
+				t.Errorf("login grade = %q, want indicated: a distinct page is a signal, not a proof", got)
+			}
+			if f.Prov.PathOrigin != types.PathSynthesized {
+				t.Errorf("path origin = %q, want synthesized: /login came off the scanner's wordlist", f.Prov.PathOrigin)
+			}
+		}
+	}
 }
 
 func TestResponseSigDistinguishesBodies(t *testing.T) {
