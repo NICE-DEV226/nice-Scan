@@ -327,17 +327,6 @@ func containsAny(haystack string, needles []string) bool {
 	return false
 }
 
-// redactSecret keeps a shape the operator can recognise in the bundle
-// without turning the report into a credential dump: first four glyphs and
-// the length. Four glyphs identify the provider prefix (AKIA, sk_l…).
-func redactSecret(s string) string {
-	prefix := s
-	if len(prefix) > 4 {
-		prefix = prefix[:4]
-	}
-	return fmt.Sprintf("%s… (%d chars)", types.Sanitize(prefix), len(s))
-}
-
 // looksLikeHTMLDocument reports whether a body is an HTML page. SPA servers
 // answer 200 with index.html for every unknown path, including /assets/app.js
 // — scanning that as JavaScript invents findings from marketing copy.
@@ -462,7 +451,7 @@ func (a *JSSecretsAction) Execute(ctx context.Context, target string, kb *Knowle
 				Severity: hit.Severity,
 				Description: fmt.Sprintf("%s matches the %s pattern in the asset body. %s.",
 					hit.Pattern, hit.Pattern, hit.Verify),
-				Evidence: fmt.Sprintf("%s at byte offset %d in %s", redactSecret(hit.Literal), hit.Offset, types.Sanitize(asset)),
+				Evidence: fmt.Sprintf("%s at byte offset %d in %s", types.RedactSecretValue(hit.Literal), hit.Offset, types.Sanitize(asset)),
 				Details: map[string]string{
 					"pattern":        hit.Pattern,
 					"asset":          asset,

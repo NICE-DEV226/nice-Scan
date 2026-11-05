@@ -220,7 +220,7 @@ func (a *SourceMapAction) Execute(ctx context.Context, target string, kb *Knowle
 						Severity: hit.Severity,
 						Description: fmt.Sprintf("The published source map embeds the original file %s, which contains a %s literal. %s.",
 							types.Sanitize(minStr(name, 120)), hit.Pattern, hit.Verify),
-						Evidence: fmt.Sprintf("%s at byte offset %d in %s (from %s)", redactSecret(hit.Literal), hit.Offset, types.Sanitize(minStr(name, 120)), types.Sanitize(mapURL)),
+						Evidence: fmt.Sprintf("%s at byte offset %d in %s (from %s)", types.RedactSecretValue(hit.Literal), hit.Offset, types.Sanitize(minStr(name, 120)), types.Sanitize(mapURL)),
 						Details: map[string]string{
 							"pattern":        hit.Pattern,
 							"source_file":    name,

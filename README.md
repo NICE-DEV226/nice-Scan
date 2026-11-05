@@ -247,8 +247,19 @@ findings timeline, evidence). Extracted artifacts are written under
 `reports/<target>/` with restrictive `0700` permissions.
 
 Every finding name and evidence is run through sanitization, and plaintext
-secrets are **masked by default** (only the length is preserved) so credentials
-never leak into terminal scrollback, JSON, or the HTML report.
+secrets are **masked by default** (the provider prefix and the length are
+preserved, the value is not) so credentials never leak into terminal
+scrollback, JSON, or the HTML report. Masking happens where the credential is
+*found*, not only where it is printed: a truncated session token is still the
+beginning of a live session token.
+
+`--json` is the machine-facing path and prints nothing but the report — no
+banner — so it can be piped straight into `jq` or into a model. Each finding
+carries a `grade` (`proven` > `corroborated` > `indicated` > `unverified`) and,
+where the engine earned one, a `prov` object naming the request, whether the
+path was observed or synthesized, and the differential the claim rests on. That
+is what lets an automated consumer rank findings without a human re-reading
+every evidence line, and it is why the same masking rules apply there.
 
 The snippet below is **illustrative** — actual findings depend on the target. It
 shows the point of the design: nice_scan records an escaped reflection but does

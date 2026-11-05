@@ -237,17 +237,21 @@ func (r *TerminalRenderer) renderFinding(f types.Finding) {
 	// The severity glyph carries the color; the finding name stays neutral
 	// ink — coloring whole finding text would dilute the one signal
 	// that matters.
+	//
+	// RedactText, not Sanitize: an evidence line that quotes a form action or
+	// an href can carry the credentials inside that URL, and a report a human
+	// reads is still a report that gets archived and pasted.
 	glyph := SeverityStyle(string(f.Severity)).Render(severitySymbols[f.Severity])
-	_, _ = fmt.Fprintln(os.Stdout, "    "+glyph+"  "+ValueStyle.Render(types.Sanitize(f.Name)))
+	_, _ = fmt.Fprintln(os.Stdout, "    "+glyph+"  "+ValueStyle.Render(types.RedactText(f.Name)))
 
 	if f.Metadata != nil {
-		if version := types.Sanitize(f.Metadata["version"]); version != "" {
+		if version := types.RedactText(f.Metadata["version"]); version != "" {
 			_, _ = fmt.Fprintln(os.Stdout, Detail("  "+FaintStyle.Render(version)))
 		}
 	}
 
 	if f.Evidence != "" {
-		_, _ = fmt.Fprintln(os.Stdout, Detail(MutedStyle.Render(r.renderEvidence(types.Sanitize(f.Evidence)))))
+		_, _ = fmt.Fprintln(os.Stdout, Detail(MutedStyle.Render(r.renderEvidence(types.RedactText(f.Evidence)))))
 	}
 
 	confidence := FaintStyle.Render(fmt.Sprintf("%.0f%% confidence", f.Confidence*100))

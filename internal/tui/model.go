@@ -130,7 +130,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if evt.Result.Response != nil {
 				entry = fmt.Sprintf("%s %s (%d)",
 					evt.Result.Duration.Round(time.Millisecond),
-					types.Sanitize(evt.Result.Target),
+					types.RedactText(evt.Result.Target),
 					evt.Result.Response.StatusCode,
 				)
 			} else {
@@ -139,7 +139,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// the whole dashboard mid-scan.
 				entry = fmt.Sprintf("%s %s (failed)",
 					evt.Result.Duration.Round(time.Millisecond),
-					types.Sanitize(evt.Result.Target),
+					types.RedactText(evt.Result.Target),
 				)
 			}
 			m.requestLog = append(m.requestLog, entry)
@@ -417,7 +417,7 @@ func (m *Model) renderFindingsSummary() string {
 
 	for _, f := range m.findings {
 		color := severityColor(string(f.Severity))
-		name := lipgloss.NewStyle().Foreground(textPrimary).Padding(0, 2).Render(types.Sanitize(f.Name))
+		name := lipgloss.NewStyle().Foreground(textPrimary).Padding(0, 2).Render(types.RedactText(f.Name))
 		// A finding may arrive with an unset severity; indexing blindly
 		// crashed the whole TUI on the summary render.
 		sevLabel := ""
@@ -425,7 +425,7 @@ func (m *Model) renderFindingsSummary() string {
 			sevLabel = strings.ToUpper(string(f.Severity[0]))
 		}
 		sev := lipgloss.NewStyle().Foreground(color).Render(sevLabel)
-		desc := mutedStyle.Padding(0, 4).Render(types.Sanitize(f.Description))
+		desc := mutedStyle.Padding(0, 4).Render(types.RedactText(f.Description))
 
 		fmt.Fprintf(&b, "  %s  %s\n", sev, name)
 		fmt.Fprintf(&b, "%s\n", desc)

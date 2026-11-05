@@ -41,12 +41,19 @@ func TestAPITokenWithValueIsLeak(t *testing.T) {
 		`{"api_key": "sk-live-a1b2c3d4e5f6g7h8"}`))
 	var found bool
 	for _, f := range fs {
-		if strings.Contains(f.Name, "API Key") && strings.Contains(f.Evidence, "sk-live") {
+		if !strings.Contains(f.Name, "API Key") {
+			continue
+		}
+		// The report must keep the shape that identifies the secret (the sk-l
+		// provider prefix, the length) and drop the value: the first 30
+		// characters of a key are the beginning of a live key.
+		if strings.Contains(f.Evidence, "sk-l") &&
+			!strings.Contains(f.Evidence, "a1b2c3d4e5f6g7h8") {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("a real key=value must surface with the value as evidence: %+v", fs)
+		t.Errorf("a real key=value must surface with a redacted value as evidence: %+v", fs)
 	}
 }
 
@@ -73,5 +80,57 @@ func TestCookieAttrSetTokenizesAttributes(t *testing.T) {
 		if set["samesite"] != c.wantSameSite {
 			t.Errorf("%q samesite=%v want %v", c.setCookie, set["samesite"], c.wantSameSite)
 		}
+	}
+}
+
+func TestCookieShapeMasksValueAndKeepsAttributes(t *testing.T) {
+	const live = "Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8"
+	shape := cookieShape("sid=" + live + "; Path=/; Secure; SameSite=Lax")
+	if strings.Contains(shape, live) {
+		t.Errorf("cookieShape leaked the session value: %q", shape)
+	}
+	for _, fact := range []string{"sid=", "Path=/", "Secure", "SameSite=Lax"} {
+		if !strings.Contains(shape, fact) {
+			t.Errorf("cookieShape dropped %q — the attributes are the actionable half: %q", fact, shape)
+		}
+	}
+}
+
+// The flag findings are the reason the shape exists: they must state which
+// attributes the header carries without carrying a live session token.
+func TestCookieFlagFindingsKeepAttributesWithoutTheValue(t *testing.T) {
+	const live = "Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8"
+	resp := respFromBody("")
+	resp.Headers = http.Header{"Set-Cookie": []string{"sid=" + live + "; Path=/; SameSite=Lax"}}
+	te := NewTokenExtractor()
+	fs := te.Analyze(context.Background(), resp)
+
+	var shape string
+	var flags int
+	for _, f := range fs {
+		if r, ok := f.Metadata["raw"]; ok {
+			shape = r
+		}
+		if strings.Contains(f.Name, "Missing Secure") || strings.Contains(f.Name, "Missing HttpOnly") {
+			flags++
+			if strings.Contains(f.Evidence, live) {
+				t.Errorf("%s shipped the live cookie value: %q", f.Name, f.Evidence)
+			}
+			if !strings.Contains(f.Evidence, "SameSite=Lax") {
+				t.Errorf("%s dropped the attributes a triager needs: %q", f.Name, f.Evidence)
+			}
+		}
+	}
+	if flags != 2 {
+		t.Fatalf("flag findings = %d, want the Secure and HttpOnly pair", flags)
+	}
+	if shape == "" {
+		t.Fatal("a session cookie finding must record the header shape")
+	}
+	if strings.Contains(shape, live) {
+		t.Errorf("metadata.raw shipped the live session value: %q", shape)
+	}
+	if !strings.Contains(shape, "Path=/") {
+		t.Errorf("metadata.raw = %q, want the attributes kept", shape)
 	}
 }
