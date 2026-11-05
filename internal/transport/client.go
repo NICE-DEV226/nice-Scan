@@ -127,7 +127,7 @@ func WithHeaders(h map[string]string) ClientOption {
 func (c *Client) SetCredScope(domains ...string) {
 	c.opts.mu.Lock()
 	defer c.opts.mu.Unlock()
-	c.opts.credScope = normalizeScope(domains)
+	c.opts.credScope = NormalizeScope(domains)
 }
 
 // credsAllowedFor reports whether a request URL may carry the operator's
@@ -179,10 +179,14 @@ func WithCookie(c string) ClientOption {
 // credentials (cookie + configured headers). Domains are registrable hosts:
 // the scope matches the host itself and any of its subdomains.
 func WithCredScope(domains []string) ClientOption {
-	return func(o *clientOptions) { o.credScope = normalizeScope(domains) }
+	return func(o *clientOptions) { o.credScope = NormalizeScope(domains) }
 }
 
-func normalizeScope(domains []string) []string {
+// NormalizeScope reduces caller-supplied hosts to the bare lowercase hosts a
+// scope is matched against, dropping anything that names no host. It is
+// exported so a caller can fail closed on an allow-list that turned out empty,
+// instead of building a client whose scope silently means "anywhere".
+func NormalizeScope(domains []string) []string {
 	out := make([]string, 0, len(domains))
 	for _, d := range domains {
 		d = strings.ToLower(HostDomain(d))

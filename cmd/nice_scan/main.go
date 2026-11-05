@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -21,8 +20,8 @@ import (
 	"github.com/NICE-DEV226/nice-Scan/internal/fingerprint"
 	"github.com/NICE-DEV226/nice-Scan/internal/hacker"
 	"github.com/NICE-DEV226/nice-Scan/internal/output"
+	"github.com/NICE-DEV226/nice-Scan/internal/recon"
 	"github.com/NICE-DEV226/nice-Scan/internal/shell"
-	"github.com/NICE-DEV226/nice-Scan/internal/subdomain"
 	"github.com/NICE-DEV226/nice-Scan/internal/transport"
 	"github.com/NICE-DEV226/nice-Scan/internal/tui"
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
@@ -305,27 +304,7 @@ checksum-verified only, and says so.`,
 }
 
 func buildClient(opts ...transport.ClientOption) *transport.Client {
-	opts = append(opts,
-		transport.WithTimeout(cfg.Timeout),
-		transport.WithRetries(cfg.Retries),
-		transport.WithFollowRedirects(cfg.FollowRedirects),
-		transport.WithMaxRedirects(cfg.MaxRedirects),
-		transport.WithVerbose(cfg.Verbose),
-	)
-
-	if cfg.RateLimit > 0 {
-		opts = append(opts, transport.WithRateLimit(cfg.RateLimit))
-	}
-	if cfg.Proxy != "" {
-		opts = append(opts, transport.WithProxy(cfg.Proxy))
-	}
-	if cfg.Cookie != "" {
-		opts = append(opts, transport.WithCookie(cfg.Cookie))
-	}
-	if len(cfg.Headers) > 0 {
-		opts = append(opts, transport.WithHeaders(cfg.Headers))
-	}
-
+	opts = append(transport.OptionsFromConfig(cfg), opts...)
 	return transport.NewClient(opts...)
 }
 
@@ -369,6 +348,19 @@ func buildClientForTarget(target string) *transport.Client {
 	return client
 }
 
+// newService binds the command's target to a scoped reconnaissance service.
+// The scope is that one host: everything the tool sends is aimed there, and a
+// caller that is not a human reading the output cannot steer it elsewhere.
+// Passing analyzers narrows the run to one capability (tech, tls); leaving them
+// nil takes the default roster.
+func newService(target string, analyzers ...engine.Analyzer) (*recon.Service, error) {
+	return recon.New(recon.Options{
+		Config:    cfg,
+		Scope:     []string{target},
+		Analyzers: analyzers,
+	})
+}
+
 // validateProxy rejects malformed --proxy values up front. The transport
 // used to log-and-ignore them, silently sending direct traffic while the
 // operator believed a tunnel was active.
@@ -400,24 +392,12 @@ func scanCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := normalizeTarget(args[0])
 
-			client := buildClientForTarget(target)
-			defer func() { _ = client.Close() }()
-
-			scanner := engine.NewScanner(cfg, client)
-			scanner.RegisterAnalyzers(
-				fingerprint.New(),
-				engine.NewHeaderAnalyzer(),
-				engine.NewTLSAnalyzer(),
-				engine.NewExposureAnalyzer(),
-				engine.NewSQLiAnalyzer(),
-				engine.NewXSSAnalyzer(scanner.XSSCanary()),
-				engine.NewCORSAnalyzer(),
-				engine.NewHTTPMethodsAnalyzer(),
-				engine.NewTokenExtractor(),
-				engine.NewAuthAnalyzer(),
-				engine.NewPrivilegeEscalationAnalyzer(),
-				engine.NewDataExtractionAnalyzer(),
-			)
+			svc, err := newService(target)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = svc.Close() }()
+			scanner := svc.Scanner()
 
 			if interactive {
 				model := tui.NewModel(scanner, []string{target})
@@ -448,7 +428,7 @@ func scanCmd() *cobra.Command {
 				renderer.RenderJSON(result)
 			} else {
 				renderer.RenderResult(result)
-				renderer.RenderTransportStats(client.Stats())
+				renderer.RenderTransportStats(svc.Stats())
 			}
 
 			if reportFile != "" {
@@ -482,24 +462,11 @@ func auditCmd() *cobra.Command {
 				reportFile = "audit_report.html"
 			}
 
-			client := buildClientForTarget(target)
-			defer func() { _ = client.Close() }()
-
-			scanner := engine.NewScanner(cfg, client)
-			scanner.RegisterAnalyzers(
-				fingerprint.New(),
-				engine.NewHeaderAnalyzer(),
-				engine.NewTLSAnalyzer(),
-				engine.NewExposureAnalyzer(),
-				engine.NewSQLiAnalyzer(),
-				engine.NewXSSAnalyzer(scanner.XSSCanary()),
-				engine.NewCORSAnalyzer(),
-				engine.NewHTTPMethodsAnalyzer(),
-				engine.NewTokenExtractor(),
-				engine.NewAuthAnalyzer(),
-				engine.NewPrivilegeEscalationAnalyzer(),
-				engine.NewDataExtractionAnalyzer(),
-			)
+			svc, err := newService(target)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = svc.Close() }()
 
 			renderer := output.NewTerminal()
 			renderBanner(renderer)
@@ -507,10 +474,10 @@ func auditCmd() *cobra.Command {
 			ctx, cancel := signalContext()
 			defer cancel()
 
-			result := scanner.Scan(ctx, []string{target})
+			result := svc.Scanner().Scan(ctx, []string{target})
 
 			renderer.RenderResult(result)
-			renderer.RenderTransportStats(client.Stats())
+			renderer.RenderTransportStats(svc.Stats())
 
 			if reportFile != "" {
 				report := engine.GenerateReport(result)
@@ -1221,16 +1188,16 @@ func techCmd() *cobra.Command {
 			renderer := output.NewTerminal()
 			renderBanner(renderer)
 
-			client := buildClientForTarget(target)
-			defer func() { _ = client.Close() }()
-
-			scanner := engine.NewScanner(cfg, client)
-			scanner.RegisterAnalyzer(fingerprint.New())
+			svc, err := newService(target, fingerprint.New())
+			if err != nil {
+				return err
+			}
+			defer func() { _ = svc.Close() }()
 
 			ctx, cancel := signalContext()
 			defer cancel()
 
-			result := scanner.Scan(ctx, []string{target})
+			result := svc.Scanner().Scan(ctx, []string{target})
 
 			if jsonOutput {
 				renderer.RenderJSON(result)
@@ -1255,16 +1222,16 @@ func tlsCmd() *cobra.Command {
 			renderer := output.NewTerminal()
 			renderBanner(renderer)
 
-			client := buildClientForTarget(target)
-			defer func() { _ = client.Close() }()
-
-			scanner := engine.NewScanner(cfg, client)
-			scanner.RegisterAnalyzer(engine.NewTLSAnalyzer())
+			svc, err := newService(target, engine.NewTLSAnalyzer())
+			if err != nil {
+				return err
+			}
+			defer func() { _ = svc.Close() }()
 
 			ctx, cancel := signalContext()
 			defer cancel()
 
-			result := scanner.Scan(ctx, []string{target})
+			result := svc.Scanner().Scan(ctx, []string{target})
 
 			if jsonOutput {
 				renderer.RenderJSON(result)
@@ -1294,10 +1261,7 @@ func subdomainsCmd() *cobra.Command {
 			ctx, cancel := signalContext()
 			defer cancel()
 
-			res, err := subdomain.Discover(ctx, args[0], subdomain.Options{
-				Resolver: subdomain.NewDNSResolver(),
-				CT:       subdomain.NewCTLogSource(nil),
-			})
+			res, err := recon.DiscoverSubdomains(ctx, args[0])
 			if err != nil {
 				return err
 			}
@@ -1311,69 +1275,10 @@ func subdomainsCmd() *cobra.Command {
 				return nil
 			}
 
-			renderer.RenderFindings(res.Domain, subdomainFindings(res))
+			renderer.RenderFindings(res.Domain, recon.SubdomainFindings(res))
 			return nil
 		},
 	}
-}
-
-// subdomainFindings turns a discovery Result into reportable findings. Confirmed
-// names (both families agree on a live host) become Info findings carrying their
-// addresses and corroborating sources as evidence; unconfirmed names are folded
-// into the summary count so the operator sees the honest denominator without a
-// wall of single-source noise.
-func subdomainFindings(res *subdomain.Result) []types.Finding {
-	findings := make([]types.Finding, 0, len(res.Confirmed)+1)
-
-	wildcard := "no"
-	if res.Wildcard {
-		wildcard = "yes"
-	}
-	findings = append(findings, types.Finding{
-		Type:        types.FindingSubdomain,
-		Name:        fmt.Sprintf("Subdomain recon: %d confirmed", len(res.Confirmed)),
-		Severity:    types.SeverityInfo,
-		Description: fmt.Sprintf("%d candidates checked, %d resolved, wildcard DNS: %s", res.Candidates, res.Resolved, wildcard),
-		Confidence:  1.0, // a factual run summary, not a probabilistic claim
-		Metadata: map[string]string{
-			"domain":     res.Domain,
-			"candidates": strconv.Itoa(res.Candidates),
-			"resolved":   strconv.Itoa(res.Resolved),
-			"confirmed":  strconv.Itoa(len(res.Confirmed)),
-			"wildcard":   wildcard,
-		},
-	})
-
-	for _, rec := range res.Confirmed {
-		srcs := make([]string, 0, len(rec.Sources))
-		for _, s := range rec.Sources {
-			srcs = append(srcs, string(s))
-		}
-		findings = append(findings, types.Finding{
-			Type:        types.FindingSubdomain,
-			Name:        rec.Host,
-			Severity:    types.SeverityInfo,
-			Description: "Corroborated by CT log and a live DNS resolution",
-			Evidence:    fmt.Sprintf("%s  [%s]", strings.Join(rec.Addrs, ", "), strings.Join(srcs, "+")),
-			Confidence:  1.0,
-			Metadata: map[string]string{
-				"sources": strings.Join(srcs, ","),
-				"addrs":   strings.Join(rec.Addrs, ","),
-			},
-			Prov: &types.Provenance{
-				PathOrigin: types.PathObserved,
-				// Two independent families had to agree, and the DNS
-				// half only counts when the address differs from the
-				// wildcard catch-all. Recording which exclusion made
-				// the corroboration possible is the point: on a
-				// wildcarded namespace "it resolved" is worthless.
-				Methods:     []types.EvidenceMethod{types.MethodCrossSourceCorroboration},
-				BaselineRef: "wildcard-dns:" + wildcard,
-				Grade:       types.GradeCorroborated,
-			},
-		})
-	}
-	return findings
 }
 
 func shellCmd() *cobra.Command {
