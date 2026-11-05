@@ -250,6 +250,7 @@ func (s *Scanner) buildProbes(target string, st fingerprint.Stack) []*types.Requ
 		URL:     baseURL + "/",
 		Headers: map[string]string{"Origin": corsProbeOrigin},
 		Timeout: s.opts.Timeout,
+		Origin:  types.PathObserved,
 	})
 
 	// HTTP Methods probe
@@ -257,11 +258,13 @@ func (s *Scanner) buildProbes(target string, st fingerprint.Stack) []*types.Requ
 		Method:  "OPTIONS",
 		URL:     baseURL + "/",
 		Timeout: s.opts.Timeout,
+		Origin:  types.PathObserved,
 	})
 
-	// SQLi probes — common parameter names
+	// SQLi probes — common parameter names. The value is the same constant
+	// the analyzer matches against, so the probe and its attribution cannot
+	// drift apart.
 	sqliParams := []string{"id", "q", "search", "page", "name", "user", "cat", "prod", "order", "pid"}
-	sqliPayload := "1'"
 
 	// XSS probes — canary-tagged reflection shapes. The XSS analyzer
 	// renders opinions only when this scan's canary comes back through
@@ -272,6 +275,7 @@ func (s *Scanner) buildProbes(target string, st fingerprint.Stack) []*types.Requ
 				Method:  "GET",
 				URL:     baseURL + "/?" + p + "=" + url.QueryEscape(xp.Value),
 				Timeout: s.opts.Timeout,
+				Origin:  types.PathObserved,
 			})
 		}
 	}
@@ -279,9 +283,22 @@ func (s *Scanner) buildProbes(target string, st fingerprint.Stack) []*types.Requ
 	for _, p := range sqliParams {
 		reqs = append(reqs, &types.Request{
 			Method:  "GET",
-			URL:     baseURL + "/?" + p + "=" + url.QueryEscape(sqliPayload),
+			URL:     baseURL + "/?" + p + "=" + url.QueryEscape(sqliProbePayload),
 			Timeout: s.opts.Timeout,
+			Origin:  types.PathObserved,
 		})
+	}
+
+	// Nothing in this function came from the target: every path and every
+	// parameter name is the scanner's own hypothesis. Stamping that here, on
+	// the way out, is what keeps a hypothesis from being reported with the
+	// same confidence as something the site advertised. A probe anchored on
+	// the operator's own path (the root, or the target with a query added)
+	// keeps PathObserved: the guess there is the parameter, not the path.
+	for _, r := range reqs {
+		if r.Origin == "" {
+			r.Origin = types.PathSynthesized
+		}
 	}
 
 	return reqs
@@ -345,7 +362,7 @@ func (s *Scanner) ScanStream(ctx context.Context, targets []string, events chan<
 			continue
 		default:
 		}
-		rootReq := &types.Request{Method: "GET", URL: target, Timeout: s.opts.Timeout}
+		rootReq := &types.Request{Method: "GET", URL: target, Timeout: s.opts.Timeout, Origin: types.PathObserved}
 		start := time.Now()
 		resp, err := s.client.Do(ctx, rootReq)
 		res := &types.Result{Target: target, Request: rootReq, Response: resp, Error: err, Duration: time.Since(start)}
@@ -403,23 +420,22 @@ func (s *Scanner) ScanStream(ctx context.Context, targets []string, events chan<
 
 		var newFindings []types.Finding
 		if res.Response != nil {
+			baselineSig := ""
 			if !baselines.isHomepage(res.Request) {
-				if sig, ok := baselines.ownerSig(res.Request); ok && sig == responseSig(res.Response) {
-					res.Response.Soft404 = true
+				if sig, ok := baselines.ownerSig(res.Request); ok {
+					baselineSig = sig
+					if sig == responseSig(res.Response) {
+						res.Response.Soft404 = true
+					}
 				}
 			}
 			findings := s.analyzeResponse(ctx, res.Response)
+			stampProvenance(res.Request, res.Response, findings, baselineSig)
 			res.Findings = findings
 			for _, f := range findings {
 				key := f.Name
 				if existing, ok := findingMap[key]; ok {
-					if existing.Evidence != f.Evidence {
-						existing.Evidence = existing.Evidence + " | " + f.Evidence
-					}
-					if f.Confidence > existing.Confidence {
-						existing.Confidence = f.Confidence
-					}
-					findingMap[key] = existing
+					findingMap[key] = mergeFinding(existing, f)
 				} else {
 					findingMap[key] = f
 					newFindings = append(newFindings, f)
@@ -598,4 +614,81 @@ func responseSig(r *types.Response) string {
 // tell them apart lets a refused scan be read as a clean one.
 func isScopeRefusal(err error) bool {
 	return errors.Is(err, types.ErrOutOfScope) || errors.Is(err, types.ErrInternalTarget)
+}
+
+// stampProvenance records, for every finding an analyzer returned from one
+// response, the exchange that produced it, whether the scanner or the target
+// named the path, and what the response was compared against.
+//
+// It happens here rather than inside the analyzers because this is the one
+// place that holds all three facts at once. An analyzer knows what it saw;
+// only the loop knows which probe it was answering and whether that probe was
+// a wordlist guess.
+func stampProvenance(req *types.Request, resp *types.Response, findings []types.Finding, baselineSig string) {
+	for i := range findings {
+		if findings[i].Prov == nil {
+			findings[i].Prov = &types.Provenance{}
+		}
+		p := findings[i].Prov
+
+		if p.RequestURL == "" {
+			if req != nil && req.URL != "" {
+				p.RequestURL = req.URL
+			} else {
+				p.RequestURL = resp.RequestURL
+			}
+		}
+		if p.RequestMethod == "" && req != nil {
+			p.RequestMethod = req.Method
+		}
+		if p.PathOrigin == "" && req != nil {
+			p.PathOrigin = req.Origin
+		}
+
+		if resp.Soft404 {
+			p.AddMethod(types.MethodSoft404Baseline)
+			if p.BaselineRef == "" {
+				p.BaselineRef = baselineSig
+			}
+			// Byte-identical to the shared shell: the server never routed
+			// this path, so nothing about it was shown. Recording the
+			// comparison is useful to a consumer; letting it count as
+			// support for the finding would be the opposite.
+			if p.Grade != types.GradeProven {
+				p.Grade = types.GradeUnverified
+			}
+		} else if baselineSig != "" {
+			// The other half of the same comparison, and the half that
+			// used to be thrown away: this response was measured against
+			// the target's own shell and DIFFERED, so the server did route
+			// this path. That is a real signal and no artifact — exactly
+			// what GradeIndicated is for.
+			p.AddMethod(types.MethodBaselineDifferential)
+			if p.BaselineRef == "" {
+				p.BaselineRef = baselineSig
+			}
+		}
+		// Only a recorded differential earns a grade. Leaving it unset keeps
+		// an un-migrated analyzer's finding readable through the Confidence
+		// ladder instead of silently demoting it to unverified.
+		if p.Grade == "" && len(p.Methods) > 0 {
+			p.Grade = types.DeriveGrade(p.Methods)
+		}
+	}
+}
+
+// mergeFinding folds a repeat report of the same finding name into the record
+// already held. Evidence accumulates (it is per-probe text), confidence takes
+// the max, and provenance merges by rank so the probe that actually proved the
+// finding keeps its identity instead of being overwritten by whichever
+// duplicate arrived second.
+func mergeFinding(existing, incoming types.Finding) types.Finding {
+	if existing.Evidence != incoming.Evidence {
+		existing.Evidence = existing.Evidence + " | " + incoming.Evidence
+	}
+	if incoming.Confidence > existing.Confidence {
+		existing.Confidence = incoming.Confidence
+	}
+	existing.Prov = types.MergeProvenance(existing.Prov, incoming.Prov)
+	return existing
 }

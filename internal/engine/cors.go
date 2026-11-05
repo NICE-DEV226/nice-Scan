@@ -87,6 +87,15 @@ func (a *CORSAnalyzer) Analyze(ctx context.Context, resp *types.Response) []type
 				"acac":   "true",
 				"origin": corsProbeOrigin,
 			},
+			Prov: &types.Provenance{
+				RequestURL: resp.RequestURL,
+				// The value the SERVER echoed is the thing we compared
+				// against: this scan supplied it, so the answer is about
+				// our probe, not about a header that happens to be present.
+				BaselineRef: corsProbeOrigin,
+				Methods:     []types.EvidenceMethod{types.MethodExactEcho},
+				Grade:       types.GradeProven,
+			},
 		}}
 
 	case echoesProbe:
@@ -102,6 +111,12 @@ func (a *CORSAnalyzer) Analyze(ctx context.Context, resp *types.Response) []type
 			Metadata: map[string]string{
 				"aco":    aco,
 				"origin": corsProbeOrigin,
+			},
+			Prov: &types.Provenance{
+				RequestURL:  resp.RequestURL,
+				BaselineRef: corsProbeOrigin,
+				Methods:     []types.EvidenceMethod{types.MethodExactEcho},
+				Grade:       types.GradeProven,
 			},
 		}}
 

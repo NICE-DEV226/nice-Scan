@@ -1360,6 +1360,17 @@ func subdomainFindings(res *subdomain.Result) []types.Finding {
 				"sources": strings.Join(srcs, ","),
 				"addrs":   strings.Join(rec.Addrs, ","),
 			},
+			Prov: &types.Provenance{
+				PathOrigin: types.PathObserved,
+				// Two independent families had to agree, and the DNS
+				// half only counts when the address differs from the
+				// wildcard catch-all. Recording which exclusion made
+				// the corroboration possible is the point: on a
+				// wildcarded namespace "it resolved" is worthless.
+				Methods:     []types.EvidenceMethod{types.MethodCrossSourceCorroboration},
+				BaselineRef: "wildcard-dns:" + wildcard,
+				Grade:       types.GradeCorroborated,
+			},
 		})
 	}
 	return findings

@@ -36,7 +36,11 @@ type Request struct {
 	Body    []byte
 	Timeout time.Duration
 
-	Metadata map[string]any
+	// Origin records who came up with this URL. The engine stamps it, and a
+	// finding's Provenance carries it through, so "the target links to this"
+	// and "our wordlist named this" stay distinguishable all the way to the
+	// report instead of collapsing into one 200-okay conclusion.
+	Origin PathOrigin
 }
 
 // RedirectHop records one hop of an internally-followed redirect chain:
@@ -96,6 +100,12 @@ type Finding struct {
 	Evidence    string            `json:"evidence,omitempty"`
 	Confidence  float64           `json:"confidence"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
+	// Prov is how the finding was earned: which exchange, which differential,
+	// compared against what. A pointer with omitempty so an analyzer that has
+	// not been migrated yet is unchanged on the wire — and so adopting it in
+	// one analyzer cannot silently promote a hand-written Confidence into a
+	// proof claimed for all the others.
+	Prov *Provenance `json:"prov,omitempty"`
 }
 
 type Config struct {
