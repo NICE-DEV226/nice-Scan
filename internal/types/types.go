@@ -27,6 +27,11 @@ const (
 	FindingWAF       FindingType = "waf"
 	FindingSecret    FindingType = "secret"
 	FindingSubdomain FindingType = "subdomain"
+	// FindingAccess is a capability read: what one identity was shown where
+	// another was refused. It is not an authorization verdict — reaching an
+	// admin surface with a valid admin session is expected behaviour, and the
+	// claim worth reporting is only the difference itself.
+	FindingAccess FindingType = "access"
 )
 
 type Request struct {

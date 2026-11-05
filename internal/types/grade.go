@@ -49,6 +49,12 @@ const (
 	// baseline the tool learned first (a login attempt against junk-POST
 	// responses).
 	MethodBaselineDifferential EvidenceMethod = "baseline-differential"
+	// MethodPrincipalDifferential: the SAME request, replayed under two
+	// identities, produced two different answers. Unlike
+	// MethodBaselineDifferential — where a distinct page only proves it is
+	// not the catch-all shell — a difference that appears and disappears
+	// with the presenting principal is caused by that principal.
+	MethodPrincipalDifferential EvidenceMethod = "principal-differential"
 	// MethodHeaderDerived: the claim comes from response headers, which a
 	// soft-404 shell cannot fake — a real, single-source signal.
 	MethodHeaderDerived EvidenceMethod = "header-derived"
@@ -115,13 +121,17 @@ func (p *Provenance) AddMethod(m EvidenceMethod) {
 	p.Methods = append(p.Methods, m)
 }
 
-// proofMethods recognise the artifact, not just the shape of a reply.
+// proofMethods are the mechanisms whose signal cannot come from chance or
+// from a shared catch-all page: the artifact itself recognised, a value this
+// scan injected and got back, or a difference that only appears when a
+// principal presents itself.
 var proofMethods = map[EvidenceMethod]bool{
-	MethodMagicPrefix:         true,
-	MethodBodyPattern:         true,
-	MethodExactEcho:           true,
-	MethodCanaryReflection:    true,
-	MethodOwnProbeAttribution: true,
+	MethodMagicPrefix:           true,
+	MethodBodyPattern:           true,
+	MethodExactEcho:             true,
+	MethodCanaryReflection:      true,
+	MethodOwnProbeAttribution:   true,
+	MethodPrincipalDifferential: true,
 }
 
 // DeriveGrade is the single ranking rule: proof first, then corroboration,
