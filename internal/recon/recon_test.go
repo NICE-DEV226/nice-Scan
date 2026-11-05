@@ -14,20 +14,21 @@ import (
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
 
-// catchAll answers every path with the same shell — what a client-side-routing
-// SPA does, and the case the soft-404 baseline exists to defeat.
-func catchAll(hits *int32, body string) http.Handler {
+const spaShell = `<!doctype html><html><head><title>VANSTORE</title></head>
+<body><form action="/admin/login" method="post"><input name="username"><input type="password" name="password"></form>
+<script src="/static/chart.js"></script></body></html>`
+
+// catchAll answers every path with the shell above — what a client-side-routing
+// SPA does, and the case the soft-404 baseline exists to defeat. It counts hits
+// so a caller can assert what a call actually put on the wire.
+func catchAll(hits *int32) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt32(hits, 1)
 		w.Header().Set("Server", "nginx/1.25.1")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(body))
+		_, _ = w.Write([]byte(spaShell))
 	})
 }
-
-const spaShell = `<!doctype html><html><head><title>VANSTORE</title></head>
-<body><form action="/admin/login" method="post"><input name="username"><input type="password" name="password"></form>
-<script src="/static/chart.js"></script></body></html>`
 
 func TestNewFailsClosedWithoutAScope(t *testing.T) {
 	for _, scope := range [][]string{nil, {}, {""}, {"  "}} {
@@ -46,7 +47,7 @@ func TestNewFailsClosedWithoutAScope(t *testing.T) {
 // shell signature and the grade of every claim it makes.
 func TestBaselineIsOneGETAndCarriesTheGrade(t *testing.T) {
 	var hits int32
-	srv := httptest.NewServer(catchAll(&hits, spaShell))
+	srv := httptest.NewServer(catchAll(&hits))
 	defer srv.Close()
 
 	svc, err := New(Options{Config: types.DefaultConfig(), Scope: []string{srv.URL}})
@@ -95,7 +96,7 @@ func TestBaselineIsOneGETAndCarriesTheGrade(t *testing.T) {
 // next move on what the target said it runs rather than on a guess.
 func TestBaselineClassifiesTheStackFromTheSameResponse(t *testing.T) {
 	var hits int32
-	srv := httptest.NewServer(catchAll(&hits, spaShell))
+	srv := httptest.NewServer(catchAll(&hits))
 	defer srv.Close()
 
 	svc, err := New(Options{Config: types.DefaultConfig(), Scope: []string{srv.URL}})
@@ -118,11 +119,11 @@ func TestBaselineClassifiesTheStackFromTheSameResponse(t *testing.T) {
 // this is the one a script or a model calls.
 func TestScanCannotBeAimedOutsideItsScope(t *testing.T) {
 	var victimHits int32
-	victim := httptest.NewServer(catchAll(&victimHits, spaShell))
+	victim := httptest.NewServer(catchAll(&victimHits))
 	defer victim.Close()
 
 	var targetHits int32
-	target := httptest.NewServer(catchAll(&targetHits, spaShell))
+	target := httptest.NewServer(catchAll(&targetHits))
 	defer target.Close()
 
 	svc, err := New(Options{Config: types.DefaultConfig(), Scope: []string{target.URL}})
@@ -152,7 +153,7 @@ func TestScanCannotBeAimedOutsideItsScope(t *testing.T) {
 // what makes `scan` and `audit` the same operation instead of two copies.
 func TestScanRegistersTheDefaultRoster(t *testing.T) {
 	var hits int32
-	srv := httptest.NewServer(catchAll(&hits, spaShell))
+	srv := httptest.NewServer(catchAll(&hits))
 	defer srv.Close()
 
 	svc, err := New(Options{Config: types.DefaultConfig(), Scope: []string{srv.URL}})
@@ -183,7 +184,7 @@ func TestScanRegistersTheDefaultRoster(t *testing.T) {
 // filtering a full scan's findings afterwards.
 func TestAnalyzersOptionNarrowsTheRoster(t *testing.T) {
 	var hits int32
-	srv := httptest.NewServer(catchAll(&hits, spaShell))
+	srv := httptest.NewServer(catchAll(&hits))
 	defer srv.Close()
 
 	svc, err := New(Options{
