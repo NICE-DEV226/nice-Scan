@@ -686,14 +686,15 @@ func (c *Client) execute(ctx context.Context, req *types.Request) (*types.Respon
 	wireStart := time.Now()
 	httpResp, err := c.http.Do(httpReq)
 	if err != nil {
-		// One attempt is guarded by two timers set to the same duration: the
-		// per-attempt context deadline and the transport's own response-header
-		// timeout. Whichever wins the race decides which error net/http hands
-		// back, so the classification has to read the error and not only the
-		// context. Reading only the context let a timed-out request surface as
-		// ErrRequestFailed whenever the transport won — the same slow host
-		// read as "unreachable" on some attempts and "timeout" on others,
-		// forking both the report and the retry policy (isRetryable).
+		// One attempt is guarded by two timers: the per-attempt context
+		// deadline and the transport's own response-header timeout (both
+		// equal unless the request overrides its budget). Whichever wins the
+		// race decides which error net/http hands back, so the classification
+		// has to read the error and not only the context. Reading only the
+		// context let a timed-out request surface as ErrRequestFailed whenever
+		// the transport won — the same slow host read as "unreachable" on
+		// some attempts and "timeout" on others, forking both the report and
+		// the retry policy (isRetryable).
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
 			return nil, fmt.Errorf("%w after %s: %w", types.ErrTimeout, timeout, err)

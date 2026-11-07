@@ -121,6 +121,34 @@ func TestConnectionRefusedIsNotClassifiedAsTimeout(t *testing.T) {
 	}
 }
 
+// The transport timer winning the race is the case the fix exists for:
+// ResponseHeaderTimeout fires while the per-request context is still alive,
+// so the context carries no deadline signal at all. The error itself has to
+// be read — this test fails with ErrRequestFailed without that read.
+func TestResponseHeaderTimeoutIsClassifiedAsTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(2 * time.Second):
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+
+	// Client budget (transport timer) 50ms; request budget 5s. The
+	// transport fires first and the context stays alive.
+	client := NewClient(WithRetries(0), WithTimeout(50*time.Millisecond))
+	defer func() { _ = client.Close() }()
+
+	_, err := client.Do(context.Background(), &types.Request{
+		Method:  "GET",
+		URL:     srv.URL,
+		Timeout: 5 * time.Second,
+	})
+	if !errors.Is(err, types.ErrTimeout) {
+		t.Fatalf("a response-header timeout must read as ErrTimeout, got %v", err)
+	}
+}
+
 // A timeout is one condition, so it gets one retry decision: an idempotent
 // GET that times out is retried with a fresh per-attempt budget. If the
 // verdict were allowed to fall back to ErrRequestFailed whenever the
