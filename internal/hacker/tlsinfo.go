@@ -51,8 +51,17 @@ func (a *TLSInspectorAction) Execute(ctx context.Context, target string, kb *Kno
 	dialCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 
-	state, verifyErr := dialTLSInspect(dialCtx, host, port)
+	state, verifyErr := dialTLSInspect(dialCtx, client, host, port)
 	if state == nil {
+		if errors.Is(verifyErr, types.ErrOutOfScope) || errors.Is(verifyErr, types.ErrInternalTarget) {
+			return ActionResult{Findings: []Finding{{
+				Type:        "tls_refused",
+				Name:        fmt.Sprintf("TLS inspection refused: %s:%s", host, port),
+				Severity:    SevInfo,
+				Description: "The scope boundary refused this host — certificate and protocol posture are NOT verified",
+				Evidence:    types.Sanitize(verifyErr.Error()),
+			}}}
+		}
 		reason := "handshake failed"
 		if verifyErr != nil {
 			reason = types.Sanitize(verifyErr.Error())
@@ -83,46 +92,50 @@ func (a *TLSInspectorAction) Execute(ctx context.Context, target string, kb *Kno
 // fails, one unverified retry so the certificate metadata is still
 // collectable. A protocol-version rejection is retried at the TLS 1.0
 // floor to expose servers that still only speak legacy TLS.
-func dialTLSInspect(ctx context.Context, host, port string) (*tls.ConnectionState, error) {
-	state, err := tlsHandshake(ctx, host, port, false, 0)
+func dialTLSInspect(ctx context.Context, client *transport.Client, host, port string) (*tls.ConnectionState, error) {
+	state, err := tlsHandshake(ctx, client, host, port, false, 0)
 	if err == nil {
 		return state, nil
 	}
 
 	if isProtocolVersionError(err) {
-		if legacyState, legacyErr := tlsHandshake(ctx, host, port, false, tls.VersionTLS10); legacyErr == nil {
+		if legacyState, legacyErr := tlsHandshake(ctx, client, host, port, false, tls.VersionTLS10); legacyErr == nil {
 			return legacyState, nil
 		}
 	}
 
 	// Unverified retry: collect cert facts, keep the original
 	// verification error for the findings.
-	unverifiedState, unverifiedErr := tlsHandshake(ctx, host, port, true, 0)
+	unverifiedState, unverifiedErr := tlsHandshake(ctx, client, host, port, true, 0)
 	if unverifiedErr != nil {
 		return nil, err
 	}
 	return unverifiedState, err
 }
 
-func tlsHandshake(ctx context.Context, host, port string, insecure bool, minVersion uint16) (*tls.ConnectionState, error) {
-	dialer := &tls.Dialer{
-		NetDialer: &net.Dialer{Timeout: 8 * time.Second},
-		Config: &tls.Config{
-			ServerName:         host,
-			InsecureSkipVerify: insecure,
-			MinVersion:         minVersion,
-		},
+// tlsHandshake dials through the transport's boundary — the same scope and
+// private-network rules as an HTTP request — then wraps the vetted connection.
+// It never resolves the name a second time; the dial target is the literal
+// address the boundary approved.
+func tlsHandshake(ctx context.Context, client *transport.Client, host, port string, insecure bool, minVersion uint16) (*tls.ConnectionState, error) {
+	if client == nil {
+		return nil, fmt.Errorf("tls inspection: no scoped transport client")
 	}
-	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, port))
+	raw, err := client.DialContext(ctx, "tcp", net.JoinHostPort(host, port))
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = conn.Close() }()
-
-	tlsConn, ok := conn.(*tls.Conn)
-	if !ok {
-		return nil, fmt.Errorf("unexpected connection type %T", conn)
+	tlsConn := tls.Client(raw, &tls.Config{
+		ServerName:         host,
+		InsecureSkipVerify: insecure,
+		MinVersion:         minVersion,
+	})
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		_ = raw.Close()
+		return nil, err
 	}
+	defer func() { _ = tlsConn.Close() }()
+
 	state := tlsConn.ConnectionState()
 	return &state, nil
 }

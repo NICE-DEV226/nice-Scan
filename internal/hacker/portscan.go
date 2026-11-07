@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/NICE-DEV226/nice-Scan/internal/transport"
+	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
 
 type PortScanAction struct{}
@@ -54,8 +55,35 @@ func (a *PortScanAction) Execute(ctx context.Context, target string, kb *Knowled
 		ports = ports[:maxPorts]
 	}
 
+	// Vet every host once, through the same boundary an HTTP request takes:
+	// a host outside the scope, or one that resolves to an internal address
+	// under --block-internal, is refused before a single SYN. A refusal is
+	// reported, not silently turned into a clean-looking scan.
+	type vettedHost struct {
+		host string
+		ips  []net.IP
+	}
+	var vetted []vettedHost
+	var refused []Finding
+	for _, host := range hosts {
+		if client == nil {
+			refused = append(refused, refusedProbeFinding(host, "no scoped transport client"))
+			continue
+		}
+		ips, err := client.ProbeHost(ctx, host)
+		if err != nil {
+			refused = append(refused, refusedProbeFinding(host, types.Sanitize(err.Error())))
+			continue
+		}
+		vetted = append(vetted, vettedHost{host: host, ips: ips})
+	}
+	if len(vetted) == 0 {
+		return ActionResult{Findings: refused}
+	}
+
 	type scanTarget struct {
 		host string
+		addr string
 		port int
 	}
 
@@ -63,6 +91,7 @@ func (a *PortScanAction) Execute(ctx context.Context, target string, kb *Knowled
 	results := make(chan Finding, 100)
 
 	var wg sync.WaitGroup
+	var seenOpen sync.Map
 	numWorkers := 20
 
 	for i := 0; i < numWorkers; i++ {
@@ -76,8 +105,7 @@ func (a *PortScanAction) Execute(ctx context.Context, target string, kb *Knowled
 				default:
 				}
 
-				addr := net.JoinHostPort(t.host, strconv.Itoa(t.port))
-				conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+				conn, err := net.DialTimeout("tcp", t.addr, 2*time.Second)
 				if err != nil {
 					continue
 				}
@@ -85,17 +113,22 @@ func (a *PortScanAction) Execute(ctx context.Context, target string, kb *Knowled
 				// probe connection carries no operator signal.
 				_ = conn.Close()
 
+				key := fmt.Sprintf("%s|%d", t.host, t.port)
+				if _, loaded := seenOpen.LoadOrStore(key, struct{}{}); loaded {
+					continue
+				}
+
 				service := guessService(t.port)
 				results <- Finding{
 					Type:        "open_port",
 					Name:        fmt.Sprintf("Open port: %s/%d (%s)", t.host, t.port, service),
 					Severity:    classifyPortSeverity(t.port),
 					Description: fmt.Sprintf("Port %d open on %s — %s", t.port, t.host, service),
-					Evidence:    addr,
+					Evidence:    t.addr,
 				}
 
 				kb.AddEndpoint(Endpoint{
-					Path:        addr,
+					Path:        t.addr,
 					Method:      "TCP",
 					Status:      0,
 					ContentType: service,
@@ -105,14 +138,20 @@ func (a *PortScanAction) Execute(ctx context.Context, target string, kb *Knowled
 	}
 
 	go func() {
-		for _, host := range hosts {
-			for _, port := range ports {
-				select {
-				case <-ctx.Done():
-					close(targets)
-					return
-				default:
-					targets <- scanTarget{host, port}
+		for _, vh := range vetted {
+			for _, ip := range vh.ips {
+				for _, port := range ports {
+					select {
+					case <-ctx.Done():
+						close(targets)
+						return
+					default:
+						targets <- scanTarget{
+							host: vh.host,
+							addr: net.JoinHostPort(ip.String(), strconv.Itoa(port)),
+							port: port,
+						}
+					}
 				}
 			}
 		}
@@ -128,8 +167,22 @@ func (a *PortScanAction) Execute(ctx context.Context, target string, kb *Knowled
 	for f := range results {
 		findings = append(findings, f)
 	}
+	findings = append(findings, refused...)
 
 	return ActionResult{Findings: findings}
+}
+
+// refusedProbeFinding records a host the boundary would not let the scanner
+// touch, so a report never reads "nothing open" when the truth is "nothing
+// was probed".
+func refusedProbeFinding(host, reason string) Finding {
+	return Finding{
+		Type:        "probe_refused",
+		Name:        "Port scan refused: " + host,
+		Severity:    SevInfo,
+		Description: "The scope boundary refused this host — its ports were NOT tested",
+		Evidence:    reason,
+	}
 }
 
 func extractHosts(kb *Knowledge, target string) []string {

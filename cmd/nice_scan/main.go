@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/url"
 	"os"
@@ -303,11 +304,6 @@ checksum-verified only, and says so.`,
 	return cmd
 }
 
-func buildClient(opts ...transport.ClientOption) *transport.Client {
-	opts = append(transport.OptionsFromConfig(cfg), opts...)
-	return transport.NewClient(opts...)
-}
-
 // parseHeaderFlags converts "Key: value" flag repeats into a header map,
 // placing everything before the first colon as the key.
 func parseHeaderFlags(headerLines []string) map[string]string {
@@ -319,33 +315,6 @@ func parseHeaderFlags(headerLines []string) map[string]string {
 		}
 	}
 	return out
-}
-
-// buildClientForTarget builds the shared client bound to the command's
-// target: operator credentials (cookie/headers) only attach to the target's
-// host and its subdomains, never to third-party hosts the scan might touch.
-//
-// By default the same host is also a hard boundary (cfg.EnforceScope): a
-// request aimed elsewhere is refused before anything goes on the wire, and a
-// redirect that leaves it aborts. --allow-out-of-scope drops that and keeps
-// only the credential rule, which is what a scan of a site that redirects to
-// a CDN on another domain needs.
-func buildClientForTarget(target string) *transport.Client {
-	scope := transport.HostDomain(target)
-
-	var opts []transport.ClientOption
-	if scope != "" && cfg.EnforceScope {
-		opts = append(opts, transport.WithTargetScope(scope))
-	}
-	if cfg.BlockInternal {
-		opts = append(opts, transport.WithPrivateNetworkAllowed(false))
-	}
-
-	client := buildClient(opts...)
-	if scope != "" {
-		client.SetCredScope(scope)
-	}
-	return client
 }
 
 // newService binds the command's target to a scoped reconnaissance service.
@@ -1120,33 +1089,59 @@ func hackCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := normalizeTarget(args[0])
 
-			client := buildClientForTarget(target)
-			defer func() { _ = client.Close() }()
+			svc, err := hacker.NewService(hacker.ServiceOptions{
+				Config: cfg,
+				Scope:  []string{transport.HostDomain(target)},
+				Target: target,
+			}, defaultHackActions(cfg)...)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = svc.Close() }()
 
 			renderer := output.NewTerminal()
 			renderBanner(renderer)
 
 			if cfg.Destructive {
-				fmt.Println(lipgloss.NewStyle().Foreground(clFail).Render(
+				warning := lipgloss.NewStyle().Foreground(clFail).Render(
 					"  ⚠ destructive mode — state-modifying actions enabled (cmd injection, shell upload, credential spray, data dumps)",
-				))
+				)
+				if jsonOutput {
+					// stdout carries one JSON document; the warning still
+					// has to reach the operator.
+					fmt.Fprintln(os.Stderr, warning)
+				} else {
+					fmt.Println(warning)
+				}
 			}
 
-			brain := hacker.NewBrain(target, client, defaultHackActions(cfg)...)
-			// Destructive modules are always registered; consent is enforced
-			// at dispatch, so runtime-spawned ones are covered too.
-			brain.AppendAction(&hacker.CMDInjectAction{}, &hacker.UploadAction{})
-			brain.SetDestructive(cfg.Destructive)
-			brain.AppendAction(&hacker.GraphQLAction{},
+			// The extras are always registered; consent is enforced at
+			// dispatch, so runtime-spawned actions are covered too.
+			svc.Brain().AppendAction(&hacker.CMDInjectAction{}, &hacker.UploadAction{})
+			svc.Brain().AppendAction(&hacker.GraphQLAction{},
 				&hacker.S3Action{Proxy: cfg.Proxy},
 				hacker.NewOOBAction(),
 			)
+			svc.Brain().SetOutput(os.Stdout)
+			if jsonOutput {
+				// A machine caller gets one JSON document on stdout and
+				// nothing else: progress lines would corrupt the stream.
+				svc.Brain().SetOutput(io.Discard)
+			}
 
 			ctx, cancel := signalContext()
 			defer cancel()
 
-			report := brain.Run(ctx)
-			brain.RenderReport(report)
+			report := svc.Run(ctx)
+			if jsonOutput {
+				data, err := hacker.RenderJSONReport(report)
+				if err != nil {
+					return fmt.Errorf("failed to encode JSON report: %w", err)
+				}
+				fmt.Println(string(data))
+			} else {
+				svc.RenderReport(report, os.Stdout)
+			}
 
 			if reportFile != "" {
 				html := hacker.RenderHTMLReport(report)
@@ -1155,8 +1150,10 @@ func hackCmd() *cobra.Command {
 				if err := os.WriteFile(reportFile, []byte(html), 0600); err != nil {
 					return fmt.Errorf("failed to write HTML report: %w", err)
 				}
-				fmt.Println()
-				fmt.Println(output.MutedStyle.Render("  HTML report saved: ") + output.ValueStyle.Render(reportFile))
+				if !jsonOutput {
+					fmt.Println()
+					fmt.Println(output.MutedStyle.Render("  HTML report saved: ") + output.ValueStyle.Render(reportFile))
+				}
 			}
 
 			return nil
@@ -1175,22 +1172,7 @@ func hackCmd() *cobra.Command {
 // Destructive — LoginBrute included — stay in the registry but are
 // withheld and reported unless the operator granted --destructive.
 func defaultHackActions(cfg *types.Config) []hacker.Action {
-	return []hacker.Action{
-		&hacker.PassiveReconAction{Proxy: cfg.Proxy},
-		&hacker.CrawlAction{},
-		&hacker.FuzzAction{},
-		&hacker.SmartHeadersAction{},
-		&hacker.TLSInspectorAction{},
-		&hacker.FormIntegrityAction{},
-		&hacker.PortScanAction{},
-		&hacker.LoginBruteAction{},
-		&hacker.JSSecretsAction{},
-		&hacker.SourceMapAction{},
-		&hacker.XSSAction{},
-		&hacker.SQLiAction{},
-		&hacker.JWTForgeAction{},
-		&hacker.LFIAction{},
-	}
+	return hacker.DefaultActions(cfg)
 }
 
 func techCmd() *cobra.Command {

@@ -76,9 +76,9 @@ type Analyzer interface {
 - Terminal (LipGloss-styled tables and severity indicators)
 - JSON (CI/CD-friendly structured output)
 
-## Service Boundary (`internal/recon`, `internal/exploit`)
+## Service Boundary (`internal/recon`, `internal/exploit`, `internal/hacker`)
 
-The CLI is an adapter, not the only consumer. Two packages own the decisions
+The CLI is an adapter, not the only consumer. Three packages own the decisions
 that make a run safe, so a script, the TUI or a model inherits them instead of
 copying the command's code:
 
@@ -93,13 +93,20 @@ copying the command's code:
   `ExploitPasswordReset`) return `ErrConsentRequired` before they build a
   request, so a refusal costs the target zero bytes. `BruteforceLogin` with a
   single credential is the operator's explicit attempt and is not a spray.
+- `hacker.NewService` does the same for the autonomous chain: the same scope
+  contract, the same config-derived client, consent taken from the same
+  `Config.Destructive`, and a default writer of `io.Discard`. The brain's
+  dispatch gate withholds destructive actions unless consent is present, on
+  every path (planner, spawned actions, chains executed outside the planner)
+  and names them in the report as withheld.
 
 | Decision | Where it lives | Fail-closed behaviour |
 |---|---|---|
 | Where requests may go | `transport.WithTargetScope` (destination allow-list + dial guard) | no scope → `ErrNoScope`, refused request counted apart from a failure |
-| Whether state may change | `exploit.Options.Consent` ← `Config.Destructive` | no consent → `ErrConsentRequired`, no request sent |
+| Whether state may change | `exploit.Options.Consent` ← `Config.Destructive`; `Brain` dispatch gate | no consent → `ErrConsentRequired` / action withheld, no request sent |
+| Whether a raw probe may dial | `transport.ProbeHost` + `Client.DialContext` | refused host → `probe_refused` / `tls_refused` finding, literal dial only |
 | What a finding means | `types.Provenance` + `types.GradeOf` | a hand-written confidence can reach *indicated*, never *proven* |
-| What a machine receives | `types.RedactFinding` + JSON sink | credential-shaped values masked at the source |
+| What a machine receives | `types.RedactFinding`, `hacker.RenderJSONReport` + JSON sink | credential-shaped values masked at the source |
 
 ## Concurrency Model
 

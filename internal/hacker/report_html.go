@@ -149,6 +149,10 @@ func RenderHTMLReport(r *Report) string {
     <h2>Findings</h2>
 `)
 		for _, f := range r.Findings {
+			// The HTML report leaves the machine and lands in a browser:
+			// remote text is redacted here exactly as in the JSON sink,
+			// not merely escaped.
+			f = redactFinding(f)
 			sev := string(f.Severity)
 			fmt.Fprintf(&buf,
 				`    <div class="finding %s">
@@ -183,7 +187,7 @@ func RenderHTMLReport(r *Report) string {
       <div class="desc">Source: %s</div>
     </div>
 `,
-				html.EscapeString(c.Username), html.EscapeString(types.MaskSecret(c.Password)), valid,
+				html.EscapeString(types.RedactText(c.Username)), html.EscapeString(types.MaskSecret(c.Password)), valid,
 				html.EscapeString(c.Source),
 			)
 		}

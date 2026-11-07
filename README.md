@@ -246,6 +246,30 @@ zero bytes.
 \* An operator-supplied credential is not sprayed at the target beyond the single
 attempt; automatic exploitation of *discovered* leaked credentials is consent-gated.
 
+## The `hack` chain
+
+`hack` is the autonomous path: a planner picks the next action from the
+evidence it has and chains forward. It runs through `hacker.NewService`, which
+owns the same two decisions as `exploit`: an explicit target scope (refused
+with `ErrNoScope`), a client built from the operator's config (`EnforceScope`,
+`BlockInternal`, proxy, rate limit), and consent read from
+`Config.Destructive`.
+
+Destructive modules stay registered so the report can name them as **withheld**
+— at the planner dispatch point, on runtime-spawned actions, and on chains that
+execute outside the planner. A chain the gate skips is listed, not silently
+dropped.
+
+The non-HTTP probes obey the same boundary: `transport.ProbeHost` vets a host
+once (scope first, then resolve + private-network guard) and the port scanner
+and TLS inspector dial the vetted literal, never the name. A refused host
+becomes a `probe_refused` / `tls_refused` finding, so a report never reads
+"nothing open" when the truth is "nothing was probed".
+
+`hack -j` emits one JSON document on stdout with no progress lines; findings go
+through the same redaction rule as the JSON engine sink, and credentials are
+masked (username filtered, password replaced by its length).
+
 ## Output and reporting
 
 `hack` and `audit` render a terminal report grouped by severity, with a

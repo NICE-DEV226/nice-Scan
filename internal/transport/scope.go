@@ -114,12 +114,10 @@ func (c *Client) scopeEnforced() bool {
 // covers the host itself and its subdomains, and the subdomain test requires
 // the dot boundary, so "example.com" never admits "evilexample.com".
 // An unparseable URL is refused: the boundary fails closed.
-func (c *Client) scopeAllows(rawURL string) bool {
-	c.opts.mu.Lock()
-	scope := c.opts.targetScope
-	c.opts.mu.Unlock()
-
-	host := HostDomain(rawURL)
+// hostAllowed is the pure allow-list rule for a bare host: an entry covers
+// the host itself and its subdomains, on the dot boundary.
+func hostAllowed(host string, scope []string) bool {
+	host = strings.ToLower(host)
 	if host == "" {
 		return false
 	}
@@ -129,6 +127,18 @@ func (c *Client) scopeAllows(rawURL string) bool {
 		}
 	}
 	return false
+}
+
+func (c *Client) scopeAllows(rawURL string) bool {
+	c.opts.mu.Lock()
+	scope := c.opts.targetScope
+	c.opts.mu.Unlock()
+
+	host := HostDomain(rawURL)
+	if host == "" {
+		return false
+	}
+	return hostAllowed(host, scope)
 }
 
 // admit is the single gate every outbound request passes through. Do calls
@@ -211,4 +221,77 @@ func guardedDialer(res *net.Resolver, d *net.Dialer) func(ctx context.Context, n
 		}
 		return nil, lastErr
 	}
+}
+
+// ProbeHost vets a non-HTTP probe destination — a TCP port scan, a TLS
+// handshake — once, before any connection: the host must be inside the
+// destination allow-list, and when the private-network guard is on, none of
+// its resolved addresses may be internal. The returned literals are the
+// addresses the caller must dial, so a second lookup cannot rebind the name
+// to an address that was never vetted.
+func (c *Client) ProbeHost(ctx context.Context, host string) ([]net.IP, error) {
+	c.opts.mu.Lock()
+	enforced := c.opts.enforceScope
+	scope := append([]string(nil), c.opts.targetScope...)
+	allowPrivate := c.opts.allowPrivate
+	res := c.opts.resolver
+	c.opts.mu.Unlock()
+
+	if enforced && !hostAllowed(host, scope) {
+		return nil, fmt.Errorf("%w: %s", types.ErrOutOfScope, host)
+	}
+
+	if res == nil {
+		res = net.DefaultResolver
+	}
+	ips, err := res.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("probe: resolve %s: %w", host, err)
+	}
+
+	out := make([]net.IP, 0, len(ips))
+	var blocked []string
+	for _, ia := range ips {
+		if !allowPrivate && ipBlocked(ia.IP) {
+			blocked = append(blocked, ia.IP.String())
+			continue
+		}
+		out = append(out, ia.IP)
+	}
+	if len(out) > 0 {
+		return out, nil
+	}
+	if len(blocked) > 0 {
+		return nil, fmt.Errorf("%w: %s resolves to %s", types.ErrInternalTarget, host, strings.Join(blocked, ", "))
+	}
+	return nil, fmt.Errorf("probe: no address for %s", host)
+}
+
+// DialContext is the boundary for a connection the HTTP client does not make.
+// It applies the destination allow-list and the private-network guard, then
+// connects to a vetted literal instead of re-resolving the name.
+func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("probe dial: bad address %q: %w", addr, err)
+	}
+	ips, err := c.ProbeHost(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+
+	c.opts.mu.Lock()
+	timeout := c.opts.dialTimeout
+	c.opts.mu.Unlock()
+	dialer := &net.Dialer{Timeout: timeout}
+
+	var lastErr error
+	for _, ip := range ips {
+		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
 }
