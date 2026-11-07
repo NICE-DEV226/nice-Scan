@@ -222,12 +222,20 @@ Run `nice_scan <command> --help` for each command's full flag set.
 Non-destructive by default. Modules that modify target state refuse to run
 without `--destructive`.
 
+The boundary is enforced in the package, not only by the flags: `exploit.NewService`
+refuses to exist without an explicit target scope and takes consent from
+`Config.Destructive` (the `--destructive` flag), so a script, the shell or a model
+driving the library inherits the destination allow-list and the consent gate
+instead of copying the CLI's checks. The state-changing entry points return
+`ErrConsentRequired` **before** they build a request — a refusal costs the target
+zero bytes.
+
 | Flag | Module | Consent |
 |---|---|---|
 | `--idor <start-end>` | IDOR enumeration with a **per-endpoint modal baseline** (only referents that differ from their *own* endpoint are flagged) | no |
 | `--token` | Token/session reuse on protected endpoints — tokens are **harvested from the target**; nothing is invented, and an empty harvest is reported honestly | no |
 | `--session` | Session cookie hardening on login surfaces (`Secure`/`HttpOnly`, ID entropy). Fixation needs a credentialed login and is reported as *not tested* | no |
-| `--reset` | Password-reset flows — user enumeration split and token leaks | no |
+| `--reset` | Password-reset flows — user enumeration split and token leaks; sends live mail and can mint tokens | **yes** |
 | `--access` | Replays admin paths anonymously vs. with the session — a **differential** access check; reports real gains or states plainly that nothing was verified | no |
 | `--creds user:pass` | Attempt a specific credential pair, then attach the session to `--access` verification | no\* |
 | `--login` | Credential spray against login forms, verdict differential vs. a junk baseline | **yes** |

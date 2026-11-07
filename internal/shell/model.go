@@ -539,7 +539,19 @@ func (m *Model) exec(cmd string, target string, o runOpts) tea.Cmd {
 			lines = append(m.renderStacks(result.Stacks), m.renderFindings(result.Findings, result.Stats)...)
 
 		case "exploit":
-			exp := exploit.New(m.client, exploit.Options{Target: target, Verbose: m.cfg.Verbose})
+			// The exploit service owns the boundary: scope and consent from
+			// the operator's config, a client of its own. A target the shell
+			// could not turn into a scope is refused before any module runs.
+			exp, err := exploit.NewService(exploit.ServiceOptions{
+				Config: m.cfg,
+				Scope:  []string{scope},
+				Target: target,
+			})
+			if err != nil {
+				lines = append(lines, output.WarnStyle.Render("  exploit refused: "+err.Error()))
+				break
+			}
+			defer func() { _ = exp.Close() }()
 			if o.cookie != "" {
 				exp.SetAuthCookie(o.cookie, "shell --cookie")
 			}
@@ -569,19 +581,23 @@ func (m *Model) exec(cmd string, target string, o runOpts) tea.Cmd {
 						}
 					}
 				default:
-					loginResults := exp.BruteforceLogin(ctx, target, exploit.CommonCredentials)
-					reqs += len(loginResults)
-					valid := 0
-					for _, r := range loginResults {
-						if r.Success {
-							valid++
-							expLines = append(expLines, loginRow(r))
-							if r.SetCookie != "" && exp.AttachHarvestedSession(r.SetCookie, "login "+r.Username) {
-								expLines = append(expLines, output.MutedStyle.Render("  ✓ valid credential — session captured (cookie "+exploit.ShortCookie(r.SetCookie)+"), --access will use it"))
+					loginResults, loginErr := exp.BruteforceLogin(ctx, target, exploit.CommonCredentials)
+					if loginErr != nil {
+						expLines = append(expLines, output.WarnStyle.Render("  login refused: "+loginErr.Error()))
+					} else {
+						reqs += len(loginResults)
+						valid := 0
+						for _, r := range loginResults {
+							if r.Success {
+								valid++
+								expLines = append(expLines, loginRow(r))
+								if r.SetCookie != "" && exp.AttachHarvestedSession(r.SetCookie, "login "+r.Username) {
+									expLines = append(expLines, output.MutedStyle.Render("  ✓ valid credential — session captured (cookie "+exploit.ShortCookie(r.SetCookie)+"), --access will use it"))
+								}
 							}
 						}
+						expLines = append(expLines, output.MutedStyle.Render(fmt.Sprintf("  %d credential pair(s) tested — %d valid", len(loginResults), valid)))
 					}
-					expLines = append(expLines, output.MutedStyle.Render(fmt.Sprintf("  %d credential pair(s) tested — %d valid", len(loginResults), valid)))
 				}
 				expLines = append(expLines, "")
 			} else {
@@ -619,23 +635,27 @@ func (m *Model) exec(cmd string, target string, o runOpts) tea.Cmd {
 			// Role / Privilege Escalation (differential, consent-gated).
 			if m.cfg.Destructive {
 				expLines = append(expLines, output.Section("Role / Privilege Escalation"))
-				roleResults := exp.RoleTampering(ctx, target)
-				reqs += len(roleResults)
-				found := false
-				for _, r := range roleResults {
-					if !r.Success {
-						continue
+				roleResults, roleErr := exp.RoleTampering(ctx, target)
+				if roleErr != nil {
+					expLines = append(expLines, output.WarnStyle.Render("  role module refused: "+roleErr.Error()))
+				} else {
+					reqs += len(roleResults)
+					found := false
+					for _, r := range roleResults {
+						if !r.Success {
+							continue
+						}
+						found = true
+						expLines = append(expLines, lipgloss.NewStyle().Foreground(clCoral).Padding(0, 4).Render(
+							fmt.Sprintf("  ✓ %s=%s %s → %d", types.Sanitize(r.Parameter), types.Sanitize(r.Value), r.Method, r.StatusCode),
+						))
+						if len(expLines) > 20 {
+							break
+						}
 					}
-					found = true
-					expLines = append(expLines, lipgloss.NewStyle().Foreground(clCoral).Padding(0, 4).Render(
-						fmt.Sprintf("  ✓ %s=%s %s → %d", types.Sanitize(r.Parameter), types.Sanitize(r.Value), r.Method, r.StatusCode),
-					))
-					if len(expLines) > 20 {
-						break
+					if !found {
+						expLines = append(expLines, output.MutedStyle.Render("  — no role parameter affected privilege over the control round"))
 					}
-				}
-				if !found {
-					expLines = append(expLines, output.MutedStyle.Render("  — no role parameter affected privilege over the control round"))
 				}
 				expLines = append(expLines, "")
 			}

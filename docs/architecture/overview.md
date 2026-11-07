@@ -76,6 +76,31 @@ type Analyzer interface {
 - Terminal (LipGloss-styled tables and severity indicators)
 - JSON (CI/CD-friendly structured output)
 
+## Service Boundary (`internal/recon`, `internal/exploit`)
+
+The CLI is an adapter, not the only consumer. Two packages own the decisions
+that make a run safe, so a script, the TUI or a model inherits them instead of
+copying the command's code:
+
+- `recon.New` builds a target-scoped client, registers the analyzer roster and
+  returns graded findings. It fails closed when no scope is given and renders
+  nothing — a service that prints is a service a model cannot call.
+- `exploit.NewService` does the same for the active modules: an explicit scope
+  (the target must be inside it), a client built from the operator's config
+  (timeout, rate-limit, proxy, `EnforceScope`, `BlockInternal`), and consent
+  read from `Config.Destructive`. The state-changing entry points
+  (`BruteforceLogin` spray, `RoleTampering`, `RegisterAccount`,
+  `ExploitPasswordReset`) return `ErrConsentRequired` before they build a
+  request, so a refusal costs the target zero bytes. `BruteforceLogin` with a
+  single credential is the operator's explicit attempt and is not a spray.
+
+| Decision | Where it lives | Fail-closed behaviour |
+|---|---|---|
+| Where requests may go | `transport.WithTargetScope` (destination allow-list + dial guard) | no scope → `ErrNoScope`, refused request counted apart from a failure |
+| Whether state may change | `exploit.Options.Consent` ← `Config.Destructive` | no consent → `ErrConsentRequired`, no request sent |
+| What a finding means | `types.Provenance` + `types.GradeOf` | a hand-written confidence can reach *indicated*, never *proven* |
+| What a machine receives | `types.RedactFinding` + JSON sink | credential-shaped values masked at the source |
+
 ## Concurrency Model
 
 The worker pool pattern:

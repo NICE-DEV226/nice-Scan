@@ -566,14 +566,19 @@ func exploitCmd() *cobra.Command {
 				accessVerify = true
 			}
 
-			client := buildClientForTarget(target)
-			defer func() { _ = client.Close() }()
-
-			opts := exploit.Options{
-				Target:  target,
-				Verbose: cfg.Verbose,
+			// The exploit package owns the boundary the command used to
+			// duplicate: a target-scoped client and consent from the flags.
+			// NewService fails closed on an empty scope, so there is no path
+			// here that builds an unscoped exploiter.
+			exp, err := exploit.NewService(exploit.ServiceOptions{
+				Config: cfg,
+				Scope:  []string{target},
+				Target: target,
+			})
+			if err != nil {
+				return err
 			}
-			exp := exploit.New(client, opts)
+			defer func() { _ = exp.Close() }()
 
 			// A session the operator already holds (from their own browser,
 			// burp, previous run) makes every authenticated differential in this
@@ -645,7 +650,10 @@ func exploitCmd() *cobra.Command {
 
 			if runLogin {
 				fmt.Println(output.Section("Login Bruteforce"))
-				results := exp.BruteforceLogin(ctx, target, creds)
+				results, err := exp.BruteforceLogin(ctx, target, creds)
+				if err != nil {
+					return fmt.Errorf("login module: %w", err)
+				}
 
 				var valid []exploit.LoginAttempt
 				var notable []exploit.LoginAttempt
@@ -748,7 +756,10 @@ func exploitCmd() *cobra.Command {
 
 			if runRole {
 				fmt.Println(output.Section("Role / Privilege Escalation"))
-				results := exp.RoleTampering(ctx, target)
+				results, err := exp.RoleTampering(ctx, target)
+				if err != nil {
+					return fmt.Errorf("role module: %w", err)
+				}
 
 				var lifts []exploit.RoleResult
 				for _, r := range results {
@@ -919,7 +930,10 @@ func exploitCmd() *cobra.Command {
 
 			if runRegister {
 				fmt.Println(output.Section("Account Registration"))
-				results := exp.RegisterAccount(ctx, target)
+				results, err := exp.RegisterAccount(ctx, target)
+				if err != nil {
+					return fmt.Errorf("register module: %w", err)
+				}
 				for _, r := range results {
 					cl := clMuted
 					status := "✗"
@@ -948,7 +962,10 @@ func exploitCmd() *cobra.Command {
 
 			if runReset {
 				fmt.Println(output.Section("Password Reset"))
-				results := exp.ExploitPasswordReset(ctx, target)
+				results, err := exp.ExploitPasswordReset(ctx, target)
+				if err != nil {
+					return fmt.Errorf("reset module: %w", err)
+				}
 				vuln := 0
 				for _, r := range results {
 					if !r.Vulnerable {
