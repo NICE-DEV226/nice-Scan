@@ -686,6 +686,18 @@ func (c *Client) execute(ctx context.Context, req *types.Request) (*types.Respon
 	wireStart := time.Now()
 	httpResp, err := c.http.Do(httpReq)
 	if err != nil {
+		// One attempt is guarded by two timers set to the same duration: the
+		// per-attempt context deadline and the transport's own response-header
+		// timeout. Whichever wins the race decides which error net/http hands
+		// back, so the classification has to read the error and not only the
+		// context. Reading only the context let a timed-out request surface as
+		// ErrRequestFailed whenever the transport won — the same slow host
+		// read as "unreachable" on some attempts and "timeout" on others,
+		// forking both the report and the retry policy (isRetryable).
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			return nil, fmt.Errorf("%w after %s: %w", types.ErrTimeout, timeout, err)
+		}
 		select {
 		case <-ctx.Done():
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -819,6 +831,15 @@ func isRetryable(err error, resp *types.Response) bool {
 		return false
 	}
 	if errors.Is(err, types.ErrRateLimited) {
+		return true
+	}
+	// A timeout is one condition under two labels: execute wraps the
+	// per-attempt context deadline as ErrTimeout, and the transport's own
+	// response-header timeout as ErrTimeout too — but a raw
+	// context.DeadlineExceeded can still escape from the backoff wait.
+	// Classifying only the latter made the retry policy depend on which
+	// timer won the race.
+	if errors.Is(err, types.ErrTimeout) {
 		return true
 	}
 	if errors.Is(err, context.DeadlineExceeded) {

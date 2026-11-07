@@ -3,8 +3,10 @@ package transport
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -91,6 +93,74 @@ func TestCallerContextCancelStillReturnsContextError(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("cancelled context did not unblock the request")
+	}
+}
+
+// A refused connection is not a timeout. Classifying a timeout from the error
+// rather than from the context must not swallow every dial failure: a dead
+// target has to keep reading as unreachable, not as slow.
+func TestConnectionRefusedIsNotClassifiedAsTimeout(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		t.Fatalf("close listener: %v", err)
+	}
+
+	client := NewClient(WithRetries(0), WithTimeout(2*time.Second))
+	defer func() { _ = client.Close() }()
+
+	_, err = client.Do(context.Background(), &types.Request{Method: "GET", URL: "http://" + addr})
+	if errors.Is(err, types.ErrTimeout) {
+		t.Fatalf("a refused connection must not read as a timeout: %v", err)
+	}
+	if !errors.Is(err, types.ErrRequestFailed) {
+		t.Fatalf("want ErrRequestFailed, got %v", err)
+	}
+}
+
+// A timeout is one condition, so it gets one retry decision: an idempotent
+// GET that times out is retried with a fresh per-attempt budget. If the
+// verdict were allowed to fall back to ErrRequestFailed whenever the
+// transport timer won the race, the same slow host would be retried or
+// dropped depending on scheduling — the intermittency this fix removes.
+func TestIdempotentTimeoutIsRetried(t *testing.T) {
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		select {
+		case <-time.After(2 * time.Second):
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+
+	client := NewClient(WithRetries(1), WithRetryWait(5*time.Millisecond, 10*time.Millisecond))
+	defer func() { _ = client.Close() }()
+
+	_, err := client.Do(context.Background(), &types.Request{
+		Method:  "GET",
+		URL:     srv.URL,
+		Timeout: 100 * time.Millisecond,
+	})
+	if !errors.Is(err, types.ErrTimeout) {
+		t.Fatalf("want ErrTimeout through retries, got %v", err)
+	}
+	if !errors.Is(err, types.ErrMaxRetries) {
+		t.Fatalf("want ErrMaxRetries after exhausting the budget, got %v", err)
+	}
+
+	// Count asynchronously: the transport can report cancellation before
+	// the handler goroutine has even started.
+	waitUntil := time.Now().Add(2 * time.Second)
+	for hits.Load() < 2 && time.Now().Before(waitUntil) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond) // grace: a third attempt would land here
+	if got := hits.Load(); got != 2 {
+		t.Fatalf("idempotent timeout must be retried exactly once: %d attempt(s), want 2", got)
 	}
 }
 
