@@ -44,6 +44,12 @@ var (
 	// negated because the boundary is on by default; --block-internal is the
 	// other way round and binds straight to cfg.
 	allowOutOfScope bool
+	// sarifFile is the CI sink: "-" writes SARIF 2.1.0 to stdout so a
+	// pipeline can pipe it straight to an upload step.
+	sarifFile string
+	// failOnSeverity gates the exit code for CI: a scan that finds
+	// anything at or above it exits non-zero, like grep -q.
+	failOnSeverity string
 )
 
 // version is the ldflags stamp set by the release workflow; source
@@ -111,6 +117,12 @@ func main() {
 				slog.Error("invalid --proxy", "error", err)
 				os.Exit(2)
 			}
+			// A typo'd severity would silently never gate — reject it
+			// before the scan runs rather than after.
+			if failOnSeverity != "" && !output.ValidSeverity(failOnSeverity) {
+				slog.Error("invalid --fail-on-severity", "value", failOnSeverity, "want", "info|low|medium|high|critical")
+				os.Exit(2)
+			}
 			notifyNewRelease(cmd)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -155,6 +167,8 @@ func main() {
 	root.PersistentFlags().BoolVar(&allowOutOfScope, "allow-out-of-scope", false, "let requests and redirects leave the target host (default: hard scope boundary)")
 	root.PersistentFlags().BoolVar(&cfg.BlockInternal, "block-internal", false, "refuse to dial loopback, private, link-local or cloud-metadata addresses (defeats a hostname pointing inward)")
 	root.PersistentFlags().StringVarP(&reportFile, "report", "R", "", "save detailed HTML report to file")
+	root.PersistentFlags().StringVar(&sarifFile, "sarif", "", "write SARIF 2.1.0 report to file ('-' for stdout) — scan/audit, for CI pipelines")
+	root.PersistentFlags().StringVar(&failOnSeverity, "fail-on-severity", "", "exit non-zero when a finding at or above this severity exists (info|low|medium|high|critical)")
 	root.PersistentFlags().BoolVar(&cfg.Destructive, "destructive", false, "consent to state-modifying actions (command upload/registration spawns) — modifies target state, authorized targets only")
 	root.PersistentFlags().BoolVar(&noUpdateCheck, "no-update-check", false, "disable the automatic new-release check (also honored via NICE_SCAN_NO_UPDATE_CHECK=1)")
 
@@ -412,7 +426,7 @@ func scanCmd() *cobra.Command {
 				fmt.Println(output.MutedStyle.Render("  Report saved: ") + output.ValueStyle.Render(reportFile))
 			}
 
-			return nil
+			return emitCIOutputs(result)
 		},
 	}
 }
@@ -460,9 +474,31 @@ func auditCmd() *cobra.Command {
 				fmt.Println(output.MutedStyle.Render("  Full audit report: ") + output.ValueStyle.Render(reportFile))
 			}
 
-			return nil
+			return emitCIOutputs(result)
 		},
 	}
+}
+
+// emitCIOutputs runs the pipeline-facing sinks after every human-facing
+// one: --sarif writes the SARIF 2.1.0 document, --fail-on-severity turns
+// the finding set into a gate exit code. An error here is a real failure —
+// a pipeline that asked for SARIF and got none must not pass silently.
+func emitCIOutputs(res *engine.ScanResult) error {
+	if sarifFile != "" {
+		if err := output.WriteSARIFFile(sarifFile, res, version); err != nil {
+			return fmt.Errorf("failed to write SARIF report: %w", err)
+		}
+		if sarifFile != "-" {
+			fmt.Println(output.MutedStyle.Render("  SARIF report saved: ") + output.ValueStyle.Render(sarifFile))
+		}
+	}
+	if failOnSeverity != "" {
+		min := types.Severity(strings.ToLower(failOnSeverity))
+		if n, _ := output.SeverityAtOrAbove(res.Findings, min); n > 0 {
+			return fmt.Errorf("fail-on-severity %s: %d finding(s) at or above %s", failOnSeverity, n, min)
+		}
+	}
+	return nil
 }
 
 func exploitCmd() *cobra.Command {
