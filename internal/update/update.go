@@ -575,6 +575,23 @@ func IsComparable(v string) bool {
 	return ok
 }
 
+// BaseVersion extracts the comparable release base from a pseudo-version:
+// "v0.3.7-0.20261108170834-ca4579d3bdee" → "v0.3.7". A `go install
+// @latest` build is stamped with the pseudo-version of main's head, so
+// its base IS the release it descends from — comparing releases against
+// that base is meaningful even though the build itself is not a release.
+// Returns ok=false when no vX.Y.Z prefix exists.
+func BaseVersion(v string) (string, bool) {
+	base := v
+	if i := strings.IndexByte(base, '-'); i >= 0 {
+		base = base[:i]
+	}
+	if _, ok := parseTriple(base); !ok {
+		return "", false
+	}
+	return base, true
+}
+
 // cacheEntry is the persisted update-check record.
 type cacheEntry struct {
 	Checked time.Time `json:"checked"`

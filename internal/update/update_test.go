@@ -385,6 +385,27 @@ func TestIsNewerTable(t *testing.T) {
 	}
 }
 
+func TestBaseVersion(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+		ok   bool
+	}{
+		{"v0.3.7", "v0.3.7", true},
+		{"v0.3.7-0.20261108170834-ca4579d3bdee", "v0.3.7", true}, // go install @latest pseudo-version
+		{"v0.3.7-0.20261108170834-ca4579d3bdee+dirty", "v0.3.7", true},
+		{"dev", "", false},
+		{"", "", false},
+		{"v0.3", "", false},
+	}
+	for _, tc := range cases {
+		got, ok := BaseVersion(tc.in)
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("BaseVersion(%q) = %q,%v want %q,%v", tc.in, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
 func TestCheckCacheRoundTripAndFreshness(t *testing.T) {
 	dir := t.TempDir()
 	cacheTestDir = dir

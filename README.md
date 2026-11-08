@@ -118,15 +118,13 @@ export PATH="$PATH:$(go env GOPATH)/bin"
 ### From source with Go (1.24+)
 
 ```bash
-go install github.com/NICE-DEV226/nice-Scan/cmd/nice_scan@latest
+go install github.com/NICE-DEV226/nice-Scan/cmd/nice_scan@v0.3.7
 ```
 
-`go install` resolves the newest release tag itself. To pin an exact, audited
-version (recommended), name the tag instead of `latest`:
-
-```bash
-go install github.com/NICE-DEV226/nice-Scan/cmd/nice_scan@v0.3.4
-```
+**Pin the tag, not `@latest`.** `@latest` resolves main's head commit, which
+stamps a pseudo-version (`v0.3.7-0.2026…-hash`) — `nice_scan update` then has
+no release to compare against and refuses without `--force`, so you would be
+reinstalling by hand forever. A tagged install self-updates normally.
 
 ### Windows (PowerShell 7+)
 

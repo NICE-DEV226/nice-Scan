@@ -211,6 +211,18 @@ var noUpdateCheck bool
 // budget, silent fail-open: the CLI must never break or slow a session
 // over an advisory. Dev builds (source trees) never get compared —
 // their version carries no registry meaning.
+// comparableReleaseVersion resolves the release version a build can be
+// compared against: the strict tag for release binaries, or the base of a
+// pseudo-version for `go install @latest` builds (main's head descends
+// from the last tag, so its base IS the meaningful comparison point).
+// ok=false only for truly unversioned builds ("dev").
+func comparableReleaseVersion(v string) (string, bool) {
+	if update.IsComparable(v) {
+		return v, true
+	}
+	return update.BaseVersion(v)
+}
+
 func notifyNewRelease(cmd *cobra.Command) {
 	if showVersion || noUpdateCheck || os.Getenv("NICE_SCAN_NO_UPDATE_CHECK") == "1" {
 		return
@@ -218,8 +230,8 @@ func notifyNewRelease(cmd *cobra.Command) {
 	if cmd != nil && cmd.Name() == "update" {
 		return // the update command performs its own, fresher check
 	}
-	current := displayVersion()
-	if !update.IsComparable(current) {
+	current, ok := comparableReleaseVersion(displayVersion())
+	if !ok {
 		return // dev trees: pseudo-versions carry no registry meaning
 	}
 
@@ -261,6 +273,7 @@ checksum-verified only, and says so.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			current := displayVersion()
+			cmpVersion, comparable := comparableReleaseVersion(current)
 
 			ctx, cancel := signalContext()
 			defer cancel()
@@ -272,29 +285,31 @@ checksum-verified only, and says so.`,
 			}
 
 			if checkOnly {
-				if !update.IsComparable(current) {
+				if !comparable {
 					fmt.Printf("  Latest release: %s — running %q (non-release build, no comparison)\n", rel.TagName, current)
 					return nil
 				}
-				if update.IsNewer(rel.TagName, current) {
-					fmt.Printf("  Update available: %s (running v%s)\n", rel.TagName, current)
+				if update.IsNewer(rel.TagName, cmpVersion) {
+					fmt.Printf("  Update available: %s (running %s)\n", rel.TagName, current)
 				} else {
-					fmt.Printf("  Up to date: v%s\n", current)
+					fmt.Printf("  Up to date: %s\n", current)
 				}
 				update.StoreCheck(rel.TagName)
 				return nil
 			}
 
-			if !update.IsComparable(current) && !force {
+			if !comparable && !force {
 				return fmt.Errorf("running %q (non-release build): version comparison is meaningless here — use --force to replace it with %s", current, rel.TagName)
 			}
-			if update.IsComparable(current) && !update.IsNewer(rel.TagName, current) {
-				fmt.Printf("  Up to date: v%s (latest release %s)\n", current, rel.TagName)
+			if comparable && !update.IsNewer(rel.TagName, cmpVersion) {
+				fmt.Printf("  Up to date: %s (latest release %s)\n", current, rel.TagName)
 				update.StoreCheck(rel.TagName)
 				return nil
 			}
-			if !update.IsComparable(current) {
+			if !comparable {
 				fmt.Printf("  Installing %s over the non-release build %q\n", rel.TagName, current)
+			} else if cmpVersion != current {
+				fmt.Printf("  Updating dev build %q (base %s) to release %s\n", current, cmpVersion, rel.TagName)
 			}
 
 			assets, err := client.Assets(ctx, rel, runtime.GOOS, runtime.GOARCH)
