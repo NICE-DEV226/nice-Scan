@@ -12,20 +12,19 @@ import (
 
 // RenderHTMLReport builds a self-contained, single-file HTML report.
 //
-// Architecture (three layers):
+// Architecture (two layers):
 //
-//  1. Tailwind CSS (CDN) — utility-first layout library. No build step, no
-//     external asset to ship: the <script> processes every utility class
-//     present in the generated markup at render time.
-//  2. Custom <style> — brand design tokens + component base styles. Tokens
+//  1. Custom <style> — brand design tokens + component base styles. Tokens
 //     mirror internal/output/ui.go so the terminal and HTML reports share
 //     one visual language (same accent, same semantic severities).
-//  3. Semantic HTML5 — header/main/section, definition lists for meta data,
+//  2. Semantic HTML5 — header/main/section, definition lists for meta data,
 //     tables for tabular evidence, ARIA labels everywhere.
 //
-// The output is a standalone file: open it offline, print it, or archive it —
-// the layout survives Tailwind not loading because every component has its
-// own base CSS class.
+// The output is a standalone file: open it offline, print it, or archive it.
+// No third-party script or stylesheet is referenced — an earlier revision
+// pulled Tailwind and Google Fonts from CDNs, which meant a pentest report
+// full of sensitive findings was rendered by code the CDN could change at
+// any time, and which broke completely without network access.
 func RenderHTMLReport(r *Report) string {
 	var buf bytes.Buffer
 
@@ -35,10 +34,6 @@ func RenderHTMLReport(r *Report) string {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NICE HACKER — Attack Report</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://cdn.tailwindcss.com"></script>
 <style>
   /* ========================================================================
      Design tokens — shared with internal/output/ui.go (terminal design system)
@@ -92,6 +87,7 @@ func RenderHTMLReport(r *Report) string {
   section.rs-section:last-child { margin-bottom: 0; }
   .rs-section-title { color: var(--ds-accent); font-size: 1.125rem; font-weight: 600; margin: 0 0 1rem 0; padding-bottom: 0.5rem; border-bottom: 1px solid var(--ds-line); display: flex; align-items: center; gap: 0.5rem; }
   .rs-section-note { color: var(--ds-muted); font-size: 0.8125rem; margin-bottom: 1rem; }
+  .rs-code { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.8125rem; background: rgba(255,255,255,0.05); padding: 0.125rem 0.25rem; border-radius: 4px; }
 
   /* Severity chip */
   .rs-sev { display: inline-block; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.15rem 0.5rem; border-radius: 9999px; }
@@ -357,7 +353,7 @@ func RenderHTMLReport(r *Report) string {
 	if len(r.PendingDestructive) > 0 {
 		buf.WriteString(`  <section class="rs-section" aria-labelledby="withheld-heading">
     <h2 id="withheld-heading" class="rs-section-title">🔒 Withheld — consent required</h2>
-    <p class="rs-section-note">Modules that met their evidence requirements but write to or bulk-read the target. Run with <code class="bg-white/5 px-1 py-0.5 rounded">--destructive</code> to execute them.</p>
+    <p class="rs-section-note">Modules that met their evidence requirements but write to or bulk-read the target. Run with <code class="rs-code">--destructive</code> to execute them.</p>
     <div class="rs-withheld">`)
 		for _, name := range r.PendingDestructive {
 			fmt.Fprintf(&buf,

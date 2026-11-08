@@ -2,6 +2,8 @@ package hacker
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -33,6 +35,12 @@ type OOBServer struct {
 	listener  net.Listener
 	port      int
 	running   bool
+	// token gates the callback endpoint: on a wildcard bind any host that
+	// can route to the port could otherwise POST forged "blind" hits and
+	// manufacture OOB evidence. It travels in the URL path, not a query
+	// parameter, so report redaction (which masks token= values) does not
+	// hide it from the operator who needs the usable URL.
+	token string
 }
 
 type OOBRequest struct {
@@ -48,9 +56,21 @@ type OOBRequest struct {
 func NewOOBAction() *OOBAction {
 	return &OOBAction{
 		server: &OOBServer{
-			port: 9999,
+			port:  9999,
+			token: newOOBToken(),
 		},
 	}
+}
+
+// newOOBToken returns a per-session bearer for the callback endpoint.
+func newOOBToken() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand failure is effectively unreachable; degrade to a
+		// still-unique value rather than disabling the gate.
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
 }
 
 func (a *OOBAction) Metadata() ActionMetadata {
@@ -115,7 +135,7 @@ func (a *OOBAction) Execute(ctx context.Context, target string, kb *Knowledge, c
 		}
 	}
 
-	oobURL := fmt.Sprintf("http://%s:%d/callback", advertisedHost, a.server.port)
+	oobURL := fmt.Sprintf("http://%s:%d/cb/%s", advertisedHost, a.server.port, a.server.token)
 
 	go func() {
 		<-ctx.Done()
@@ -124,7 +144,7 @@ func (a *OOBAction) Execute(ctx context.Context, target string, kb *Knowledge, c
 
 	// The callback URL is scanner infrastructure, not a secret captured on
 	// the target: it must not flip has_secret or drive risk scoring.
-	kb.AddScannerState(fmt.Sprintf("OOB callback URL: %s?token={target_id}", oobURL))
+	kb.AddScannerState(fmt.Sprintf("OOB callback URL: %s", oobURL))
 
 	return ActionResult{
 		Findings: []Finding{
@@ -233,6 +253,13 @@ func (s *OOBServer) Start(ctx context.Context, bind string) error {
 
 	go func() {
 		_ = http.Serve(s.listener, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Reject unauthenticated callbacks before touching the body:
+			// anything without this session's token is not target evidence.
+			if r.URL.Path != "/cb/"+s.token {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+
 			// Enforce a hard cap on body size regardless of client behaviour.
 			body, _ := io.ReadAll(io.LimitReader(r.Body, oobMaxBodySize))
 			_ = r.Body.Close() // request body fully consumed

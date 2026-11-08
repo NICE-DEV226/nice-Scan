@@ -98,9 +98,22 @@ func TestOOBServerBoundedAndLoopbackPost(t *testing.T) {
 		t.Fatalf("must bind loopback, got %s", addr)
 	}
 
+	cbPath := "/cb/" + srv.token
+
+	// Unauthenticated hits must be refused before they can become evidence.
+	resp, err := http.Post(fmt.Sprintf("http://%s/cb", addr), "text/plain", strings.NewReader("x"))
+	if err != nil {
+		t.Fatalf("unauthenticated probe: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("missing token must be refused, got %d", resp.StatusCode)
+	}
+
 	// Callback flood well past the cap: storage stays bounded.
 	for i := 0; i < 1010; i++ {
-		resp, err := http.Post(fmt.Sprintf("http://%s/cb?flood", addr), "text/plain", strings.NewReader(strings.Repeat("A", 64)))
+		resp, err := http.Post(fmt.Sprintf("http://%s%s?flood", addr, cbPath), "text/plain", strings.NewReader(strings.Repeat("A", 64)))
 		if err != nil {
 			t.Fatalf("callback %d: %v", i, err)
 		}
@@ -114,7 +127,7 @@ func TestOOBServerBoundedAndLoopbackPost(t *testing.T) {
 	// Body cap: a 5 MiB POST must be truncated at oobMaxBodySize, not
 	// buffered whole.
 	huge := strings.Repeat("B", oobMaxBodySize+1024*1024)
-	resp, err := http.Post(fmt.Sprintf("http://%s/huge", addr), "application/octet-stream", strings.NewReader(huge))
+	resp, err = http.Post(fmt.Sprintf("http://%s%s", addr, cbPath), "application/octet-stream", strings.NewReader(huge))
 	if err != nil {
 		t.Fatalf("huge callback: %v", err)
 	}
@@ -135,7 +148,7 @@ func TestOOBServerBoundedAndLoopbackPost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), `"Path":"/huge"`) {
+	if !strings.Contains(string(b), `"Path":"`+cbPath+`"`) {
 		t.Errorf("callback record malformed: %s", b)
 	}
 }
