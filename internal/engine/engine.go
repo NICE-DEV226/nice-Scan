@@ -535,6 +535,9 @@ func (s *Scanner) buildRequests(targets []string) []*types.Request {
 		st := s.stacks[target]
 		s.mu.Unlock()
 		reqs = append(reqs, s.buildProbes(target, st)...)
+		if s.opts != nil && s.opts.OpenAPIPath != "" {
+			reqs = append(reqs, s.loadOpenAPIRequests(target, s.opts.OpenAPIPath)...)
+		}
 	}
 	return reqs
 }

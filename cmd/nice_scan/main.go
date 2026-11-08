@@ -180,6 +180,7 @@ func main() {
 	root.PersistentFlags().StringVar(&cfg.IdentityB, "identity-b", "", "private identifier of user B for the BOLA differential")
 	root.PersistentFlags().StringArrayVar(&sessionA, "session-a", nil, "session A header, 'Name: value' (repeatable, e.g. --session-a 'Cookie: sid=A')")
 	root.PersistentFlags().StringArrayVar(&sessionB, "session-b", nil, "session B header, 'Name: value' (repeatable)")
+	root.PersistentFlags().StringVar(&cfg.OpenAPIPath, "openapi", "", "OpenAPI 3.x spec file (JSON/YAML) — declared paths become scan probes (read-only methods only)")
 	root.PersistentFlags().BoolVar(&cfg.Destructive, "destructive", false, "consent to state-modifying actions (command upload/registration spawns) — modifies target state, authorized targets only")
 	root.PersistentFlags().BoolVar(&noUpdateCheck, "no-update-check", false, "disable the automatic new-release check (also honored via NICE_SCAN_NO_UPDATE_CHECK=1)")
 

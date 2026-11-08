@@ -216,6 +216,7 @@ Run `nice_scan <command> --help` for each command's full flag set.
 | `--fail-on-severity <sev>` | — | Exit non-zero when a finding at or above `info\|low\|medium\|high\|critical` exists — CI gate |
 | `--identity-a <id>` / `--identity-b <id>` | — | Private identifiers (email/internal id — never public usernames) for the two-session BOLA differential |
 | `--session-a <hdr>` / `--session-b <hdr>` | — | Per-session header, `Name: value`, repeatable (e.g. `--session-a 'Cookie: sid=A'`). All four flags together arm the cross-session object-access check |
+| `--openapi <file>` | — | OpenAPI 3.x spec (JSON/YAML) — declared paths become scan probes for SPA/API coverage. Read-only methods only (GET/HEAD/OPTIONS); path params → `1`, required query params → `test`; capped at 150 probes |
 | `-v, --verbose` | `false` | Verbose output |
 | `--destructive` | `false` | **Consent to state-modifying actions** (login spray, role tamper, registration, discovered-credential attempts). Required to enable them; targets must be authorized |
 | `--no-update-check` | `false` | Disable the automatic new-release check (also `NICE_SCAN_NO_UPDATE_CHECK=1`) |

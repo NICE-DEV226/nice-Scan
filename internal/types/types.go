@@ -153,4 +153,9 @@ type Config struct {
 	// over --cookie/--header for the same key.
 	SessionA map[string]string
 	SessionB map[string]string
+	// OpenAPIPath points at an OpenAPI 3.x document (JSON or YAML). When
+	// set, its declared paths become additional scan probes — grey-box
+	// coverage for SPAs and APIs a crawler cannot reach. Only read-only
+	// methods are ever replayed.
+	OpenAPIPath string
 }
