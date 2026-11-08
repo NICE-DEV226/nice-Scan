@@ -54,6 +54,40 @@ security_tool/
 
 ---
 
+## 0. Les trois plans — frontière assumée
+
+Le projet repose sur trois pipelines aux rôles distincts. Les confondre
+est la source historique de trous de scope et de garde-fous contournés ;
+la règle est simple :
+
+| Plan | Commande | Rôle | Findings |
+|---|---|---|---|
+| `engine` | `scan`, `audit`, `tech`, `tls`, `subdomains` | **Couverture** : surface, configuration, exposition. Chaque réponse est analysée par des analyseurs et notée d'une provenance (prouvé / corroboré / indiqué). | `types.Finding` — gradés |
+| `hacker` | `hack` | **Preuve** : planner déterministe par forward-chaining sur capabilities *vérifiées* ; chaque action doit rapporter une exécution observée (marqueur, écho, différentiel). | `hacker.Finding` — actions à preuve |
+| `exploit` | `exploit` | **Exploitation ciblée** : modules pilotés (login, IDOR, privesc, registration, session/token) via le service `recon`. | Findings service |
+
+Règles qui en découlent :
+
+- **`scan` suffit pour ~80 % des cas** : fingerprint, headers, TLS,
+  expositions, BOLA deux-sessions, endpoints JS et OpenAPI y sont tous
+  couverts. `hack` est l'option *deep* (XSS/SQLi/LFI/JWT forgés, OOB,
+  chaîne d'exploitation).
+- **Le JS-surface vit dans `engine`** (`jssurface.go`) : la phase 1.5 lit
+  les `<script src>` de la homepage déjà fetchée, télécharge ≤5 bundles
+  same-origin et injecte les littéraux de chemins comme sondes GET.
+  `hacker` réutilise le MÊME extracteur (`detect.ExtractJSPaths`) — une
+  seule grammaire, pas deux qui dérivent.
+- **`exploit` vs `hack`** : `exploit` est le mode *scripté* — l'opérateur
+  choisit les modules et l'ordre ; `hack` est le mode *autonome borné* —
+  le planner choisit. Les deux passent par le même transport (scope,
+  `--block-internal`, credentials par origine) et le même consentement
+  `--destructive`. La différence est le contrôle, pas la sécurité.
+- **La provenance est la monnaie du projet** : un endpoint "déclaré"
+  (spec OpenAPI, littéral JS) est de la surface à tester, jamais un
+  finding. Un finding exige une exécution observée.
+
+---
+
 ## 1. Couche Transport (`internal/transport/`)
 
 ### Technique : Client HTTP avec pool de connexions, retry et rate-limiting

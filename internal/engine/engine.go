@@ -33,8 +33,12 @@ type Scanner struct {
 	// stacks holds the per-target server-side profile classified from the
 	// homepage BEFORE any path probe fires; buildProbes conditions on it.
 	stacks map[string]fingerprint.Stack
-	stats  ScanStats
-	mu     sync.Mutex
+	// jsPaths holds the endpoint literals harvested from same-origin JS
+	// bundles during phase 1.5 — populated by discoverJSSurface, consumed
+	// by buildRequests, per target.
+	jsPaths map[string][]string
+	stats   ScanStats
+	mu      sync.Mutex
 }
 
 type ScanStats struct {
@@ -79,10 +83,11 @@ type StackReport struct {
 
 func NewScanner(cfg *types.Config, client *transport.Client) *Scanner {
 	return &Scanner{
-		client: client,
-		opts:   cfg,
-		canary: detect.NewCanary(),
-		stacks: map[string]fingerprint.Stack{},
+		client:  client,
+		opts:    cfg,
+		canary:  detect.NewCanary(),
+		stacks:  map[string]fingerprint.Stack{},
+		jsPaths: map[string][]string{},
 	}
 }
 
@@ -423,6 +428,11 @@ func (s *Scanner) ScanStream(ctx context.Context, targets []string, events chan<
 	// Soft404 so path/body analyzers refuse to draw conclusions from it.
 	baselines := buildBaselines(preamble)
 
+	// Phase 1.5: JS surface. The homepage bodies in preamble already name
+	// the bundles; a bounded fetch of each turns SPA route literals into
+	// ordinary probes before the worker pool starts.
+	s.discoverJSSurface(ctx, preamble)
+
 	reqs := s.buildRequests(targets)
 
 	s.mu.Lock()
@@ -535,11 +545,25 @@ func (s *Scanner) buildRequests(targets []string) []*types.Request {
 		st := s.stacks[target]
 		s.mu.Unlock()
 		reqs = append(reqs, s.buildProbes(target, st)...)
+		reqs = append(reqs, s.jsSurfaceRequests(target)...)
 		if s.opts != nil && s.opts.OpenAPIPath != "" {
 			reqs = append(reqs, s.loadOpenAPIRequests(target, s.opts.OpenAPIPath)...)
 		}
 	}
-	return reqs
+	// Dedupe by method+URL: a JS literal can name a path the wordlist
+	// already probes, and an OpenAPI path can repeat — one request per
+	// address is enough.
+	seen := make(map[string]bool, len(reqs))
+	out := reqs[:0]
+	for _, r := range reqs {
+		key := r.Method + " " + r.URL
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, r)
+	}
+	return out
 }
 
 func (s *Scanner) Close() error {

@@ -3,6 +3,8 @@ package hacker
 import (
 	"strings"
 	"testing"
+
+	"github.com/NICE-DEV226/nice-Scan/internal/detect"
 )
 
 func TestExtractJSEndpoints(t *testing.T) {
@@ -53,8 +55,8 @@ func TestExtractJSEndpointsDedupAndCap(t *testing.T) {
 		sb.WriteString("'/api/ep" + strings.Repeat("x", i%7) + "'")
 	}
 	got := extractJSEndpoints(sb.String(), "https://t.example")
-	if len(got) > jsEndpointMax {
-		t.Fatalf("cap exceeded: %d > %d", len(got), jsEndpointMax)
+	if len(got) > detect.JSPathMax {
+		t.Fatalf("cap exceeded: %d > %d", len(got), detect.JSPathMax)
 	}
 	seen := map[string]bool{}
 	for _, u := range got {
