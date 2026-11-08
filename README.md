@@ -207,19 +207,35 @@ nice_scan hack example.com --timeout 30s -R report.html --destructive
 
 ## Commands
 
-| Command | Description |
-|---|---|
-| `hack <target>` | Autonomous chain — reconnaissance, fingerprinting, validation, and forward-chaining, with optional HTML report |
-| `scan <target>` | Standard reconnaissance scan — headers, TLS, fingerprint, endpoints |
-| `audit <target>` | Deep scan: forces verbose output, details every module, and writes an HTML report by default |
-| `exploit <target>` | Individual exploitation modules (login, IDOR, privesc, token/session reuse) — see below |
-| `tech <target>` | Technology fingerprinting only (165 signatures) |
-| `tls <target>` | TLS/SSL analysis — ciphers, certificates, protocol versions |
-| `subdomains <domain>` | Passive subdomain enumeration (crt.sh, Wayback, GitHub dorks) — zero requests to the target |
-| `shell` | Interactive REPL: run checks against one or more targets, with command history, clipboard copy, and a `consent` toggle |
-| `update` | Self-update to the latest release, checksum-verified, with the previous binary kept as `nice_scan.old` for rollback |
+| Command | What it does | Example |
+|---|---|---|
+| `hack <target>` | Autonomous bounded chain — recon, fingerprint, validation, forward-chaining on verified capabilities, OOB blind detection. `--destructive` unlocks state-changing actions | `nice_scan hack https://app.example.com -R report.html` |
+| `scan <target>` | Standard scan — fingerprint, headers, TLS, exposures, JS-bundle surface discovery, OpenAPI-guided probes, two-session BOLA | `nice_scan scan https://app.example.com --openapi spec.yaml --sarif out.sarif` |
+| `audit <target>` | Everything `scan` does plus verbose module detail and a written HTML report | `nice_scan audit https://app.example.com` |
+| `exploit <target>` | Individual modules — `--login` (differential credential verdicts), `--idor`, `--privesc`, `--register`, `--reset`, `--session`, `--token`. State-changing modules refuse without `--destructive` | `nice_scan exploit https://app.example.com --login --destructive` |
+| `tech <target>` | Technology fingerprinting only (165 signatures) | `nice_scan tech https://app.example.com` |
+| `tls <target>` | TLS analysis — negotiated version, certificate SANs/issuer | `nice_scan tls app.example.com` |
+| `subdomains <domain>` | Passive enumeration via crt.sh, Wayback, GitHub dorks — zero requests to the target | `nice_scan subdomains example.com` |
+| `shell` | Interactive REPL across targets — history, consent toggle, scope enforced per command | `nice_scan shell` |
+| `update` | Self-update, checksum-verified, previous binary kept as `nice_scan.old` | `nice_scan update` |
 
-Run `nice_scan <command> --help` for each command's full flag set.
+**Authenticated differential (BOLA/IDOR):** give `scan` two identities and
+sessions and it replays object URLs under both, reporting only on a positive
+identity marker — never on "both got 200":
+
+```bash
+nice_scan scan https://app.example.com \
+  --identity-a "alice@example.com" --identity-b "bob@example.com" \
+  --session-a "Cookie: sid=A" --session-b "Cookie: sid=B"
+```
+
+**Grey-box spec:** point `scan` at an OpenAPI 3.x document (JSON or YAML) and
+its declared paths become probes — SPA/API routes a crawler cannot reach.
+Read-only methods only; capped at 150 probes.
+
+**CI gate:** `--sarif` emits SARIF 2.1.0 for GitHub Code Scanning / GitLab /
+Azure DevOps; `--fail-on-severity` exits non-zero at or above a threshold.
+A composite GitHub Action ships at the repo root (`action.yml`).
 
 ## Global flags
 
