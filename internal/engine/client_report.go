@@ -11,16 +11,14 @@ import (
 )
 
 // RenderClientHTML produces the deliverable a pentester hands to a client:
-// executive summary, scope and methodology, findings ordered by severity
-// with their proof and a remediation line, and an evidence-grade legend.
+// cover block, executive summary, scope & methodology, numbered findings
+// (F-001…) each carrying severity, confidence, provenance grade, the proof
+// exchange and a remediation line, then a footer disclaimer.
 //
-// It is deliberately a DIFFERENT document from RenderHTML: that one is the
-// operator's technical record (every probe, every stack read); this one is
-// the report that leaves the building. Every finding still goes through
-// RedactFinding — a client report must not leak credentials either.
-//
-// Print-friendly CSS: "Save as PDF" from a browser produces a clean
-// deliverable without shipping a PDF engine.
+// Design discipline: this is a printed document first. Restrained palette
+// (ink + one accent + severity codes), no gradients, no emoji, serif
+// headlines over a clean sans body, findings that survive page breaks.
+// Every finding passes through RedactFinding; the file keeps 0600.
 func (r *Report) RenderClientHTML() string {
 	var b strings.Builder
 	esc := func(s string) string { return html.EscapeString(s) }
@@ -37,123 +35,284 @@ func (r *Report) RenderClientHTML() string {
 		return findings[i].Name < findings[j].Name
 	})
 
-	b.WriteString(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+	b.WriteString(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Security Assessment — `)
 	b.WriteString(esc(r.Target))
-	b.WriteString(`</title><style>
-@page { margin: 18mm; }
-body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-       color: #1a1a1a; max-width: 860px; margin: 0 auto; padding: 32px 24px;
-       line-height: 1.55; font-size: 14px; }
-h1 { font-size: 26px; margin: 0 0 4px; }
-h2 { font-size: 18px; margin: 32px 0 12px; border-bottom: 2px solid #333; padding-bottom: 6px; }
-h3 { font-size: 15px; margin: 20px 0 6px; }
-.meta { color: #555; font-size: 13px; margin-bottom: 24px; }
-.score { display: inline-block; padding: 8px 18px; border-radius: 6px;
-         font-weight: 700; font-size: 16px; }
-.score-critical { background: #7f1d1d; color: #fff; }
-.score-high { background: #b45309; color: #fff; }
-.score-medium { background: #a16207; color: #fff; }
-.score-low { background: #3f6212; color: #fff; }
-.score-clean { background: #166534; color: #fff; }
-table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13px; }
-th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; vertical-align: top; }
-th { background: #f0f0f0; }
-.sev { font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: .04em; }
-.s-critical { color: #b91c1c; } .s-high { color: #c2410c; }
-.s-medium { color: #a16207; } .s-low { color: #4d7c0f; }
-.s-info { color: #57534e; }
-.grade { font-size: 11px; background: #e7e5e4; border-radius: 3px; padding: 1px 6px; }
-.proof { background: #f6f6f4; border-left: 3px solid #a8a29e; padding: 8px 12px;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 12px; white-space: pre-wrap; word-break: break-word; }
-.finding { page-break-inside: avoid; margin-bottom: 22px; }
-.remediation { color: #444; font-style: italic; }
-ul.tight { margin: 6px 0; padding-left: 22px; }
-.footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid #ccc;
-          color: #777; font-size: 12px; }
-@media print { body { padding: 0; } h2 { page-break-after: avoid; }
-               .finding { page-break-inside: avoid; } }
-</style></head><body>`)
+	b.WriteString(`</title>
+<style>
+:root {
+  --ink: #1c1a17;
+  --ink-soft: #4a463f;
+  --ink-faint: #8a857a;
+  --rule: #d8d4c8;
+  --paper: #fdfcf8;
+  --accent: #8c2f1b;
+  --sev-critical: #8c2f1b;
+  --sev-high: #a05a12;
+  --sev-medium: #7a6210;
+  --sev-low: #4d6b2f;
+  --sev-info: #5c5648;
+}
+* { box-sizing: border-box; }
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body {
+  font-family: "Helvetica Neue", Helvetica, Arial, "Segoe UI", sans-serif;
+  color: var(--ink); background: var(--paper);
+  max-width: 800px; margin: 0 auto; padding: 48px 40px 64px;
+  font-size: 13.5px; line-height: 1.6;
+}
+h1, h2, h3 { font-family: Georgia, "Times New Roman", serif; font-weight: 600; }
+h1 { font-size: 30px; letter-spacing: -0.01em; margin: 0 0 2px; }
+h2 {
+  font-size: 17px; margin: 40px 0 4px; padding-bottom: 8px;
+  border-bottom: 2px solid var(--ink);
+}
+h2 .num { color: var(--ink-faint); font-family: Georgia, serif; font-size: 13px;
+          letter-spacing: .12em; text-transform: uppercase; margin-right: 10px; }
+h3 { font-size: 14.5px; margin: 26px 0 6px; }
+.sub { color: var(--ink-faint); font-size: 12px; letter-spacing: .04em;
+       text-transform: uppercase; }
 
-	// ── Cover / executive summary ──────────────────────────────────────
-	b.WriteString(`<h1>Security Assessment Report</h1>`)
-	b.WriteString(`<div class="meta">`)
-	fmt.Fprintf(&b, "<strong>Target:</strong> %s<br>", esc(r.Target))
-	fmt.Fprintf(&b, "<strong>Date:</strong> %s<br>",
-		r.ScanTime.Format("2006-01-02 15:04 MST"))
-	fmt.Fprintf(&b, "<strong>Duration:</strong> %s &middot; <strong>Requests:</strong> %d (%d failed)<br>",
-		r.Duration.Round(time.Second), r.TotalReqs, r.FailedReqs)
-	b.WriteString("</div>")
+/* ── Cover block ─────────────────────────────────────────── */
+.cover {
+  border-top: 5px solid var(--accent);
+  padding-top: 18px; margin-bottom: 28px;
+}
+.cover .doc-kind { color: var(--accent); font-size: 11px; font-weight: 700;
+                   letter-spacing: .18em; text-transform: uppercase; }
+.meta-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 1px; background: var(--rule); border: 1px solid var(--rule);
+  margin: 22px 0 0;
+}
+.meta-grid > div { background: var(--paper); padding: 10px 12px; }
+.meta-grid dt { font-size: 10px; text-transform: uppercase; letter-spacing: .1em;
+                color: var(--ink-faint); margin-bottom: 2px; }
+.meta-grid dd { margin: 0; font-size: 13px; font-weight: 600; }
 
-	scoreClass := "score-clean"
+/* ── Risk banner ─────────────────────────────────────────── */
+.risk {
+  display: flex; align-items: baseline; gap: 14px;
+  border: 1px solid var(--rule); padding: 14px 18px; margin: 24px 0;
+}
+.risk .label { font-size: 11px; text-transform: uppercase; letter-spacing: .12em;
+               color: var(--ink-faint); }
+.risk .verdict { font-family: Georgia, serif; font-size: 20px; font-weight: 700; }
+.risk .score { margin-left: auto; font-size: 12px; color: var(--ink-soft); }
+.r-critical { border-left: 4px solid var(--sev-critical); }
+.r-critical .verdict { color: var(--sev-critical); }
+.r-high { border-left: 4px solid var(--sev-high); }
+.r-high .verdict { color: var(--sev-high); }
+.r-medium { border-left: 4px solid var(--sev-medium); }
+.r-medium .verdict { color: var(--sev-medium); }
+.r-low { border-left: 4px solid var(--sev-low); }
+.r-low .verdict { color: var(--sev-low); }
+.r-clean { border-left: 4px solid var(--sev-low); }
+.r-clean .verdict { color: var(--sev-low); }
+
+/* ── Severity table ──────────────────────────────────────── */
+table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 12.5px; }
+th {
+  text-align: left; font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: .08em; color: var(--ink-faint); font-weight: 600;
+  padding: 6px 10px; border-bottom: 2px solid var(--ink);
+}
+td { padding: 7px 10px; border-bottom: 1px solid var(--rule); }
+td.num { font-variant-numeric: tabular-nums; text-align: right; }
+.sev-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+           margin-right: 7px; vertical-align: 1px; }
+.dot-critical { background: var(--sev-critical); }
+.dot-high { background: var(--sev-high); }
+.dot-medium { background: var(--sev-medium); }
+.dot-low { background: var(--sev-low); }
+.dot-info { background: var(--sev-info); }
+
+/* ── Findings ────────────────────────────────────────────── */
+.finding { margin: 0 0 30px; }
+.finding .fid {
+  font-family: Georgia, serif; font-size: 12px; color: var(--ink-faint);
+  letter-spacing: .08em; margin-right: 8px;
+}
+.finding h3 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.finding h3 .sev {
+  font-family: "Helvetica Neue", sans-serif; font-size: 10px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase;
+}
+.finding .sev.s-critical { color: var(--sev-critical); }
+.finding .sev.s-high { color: var(--sev-high); }
+.finding .sev.s-medium { color: var(--sev-medium); }
+.finding .sev.s-low { color: var(--sev-low); }
+.finding .sev.s-info { color: var(--sev-info); }
+.finding .grade {
+  font-size: 10px; color: var(--ink-faint); border: 1px solid var(--rule);
+  padding: 1px 7px; letter-spacing: .06em; text-transform: uppercase;
+}
+.finding .desc { color: var(--ink-soft); margin: 6px 0 10px; }
+.evidence {
+  border-left: 3px solid var(--accent); background: #f6f4ee;
+  padding: 10px 14px; font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11.5px; line-height: 1.55; white-space: pre-wrap;
+  word-break: break-word; margin: 8px 0;
+}
+.evidence .ev-label {
+  display: block; font-family: "Helvetica Neue", sans-serif;
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: .12em;
+  color: var(--accent); margin-bottom: 4px;
+}
+.remediation {
+  border: 1px solid var(--rule); border-left: 3px solid var(--sev-low);
+  background: #faf9f4; padding: 9px 13px; font-size: 12.5px;
+  color: var(--ink-soft); margin-top: 10px;
+}
+.remediation b { color: var(--ink); font-weight: 600; }
+.req-ref { font-size: 11.5px; color: var(--ink-faint); margin-top: 6px; }
+.req-ref code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px; }
+
+ul.tight { margin: 8px 0; padding-left: 20px; }
+ul.tight li { margin: 4px 0; }
+
+.footer {
+  margin-top: 48px; padding-top: 14px; border-top: 1px solid var(--rule);
+  color: var(--ink-faint); font-size: 11px; line-height: 1.55;
+}
+.footer strong { color: var(--ink-soft); }
+
+@page { margin: 16mm; }
+@media print {
+  body { padding: 0; max-width: none; font-size: 11.5px; }
+  h2 { page-break-after: avoid; }
+  .finding { page-break-inside: avoid; }
+  .cover, .risk, table { page-break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="doc-kind">Security Assessment Report</div>
+  <h1>Web Application Security Review</h1>
+  <div class="sub">`)
+	b.WriteString(esc(r.Target))
+	b.WriteString(`</div>
+  <dl class="meta-grid">
+    <div><dt>Target</dt><dd>` + esc(hostOnly(r.Target)) + `</dd></div>
+    <div><dt>Assessment date</dt><dd>` + r.ScanTime.Format("2006-01-02") + `</dd></div>
+    <div><dt>Duration</dt><dd>` + r.Duration.Round(time.Second).String() + `</dd></div>
+    <div><dt>Requests issued</dt><dd>` + fmt.Sprint(r.TotalReqs) + `</dd></div>
+  </dl>
+</div>
+
+<div class="risk `)
+	riskClass := "r-clean"
 	switch {
 	case r.Summary.Critical > 0:
-		scoreClass = "score-critical"
+		riskClass = "r-critical"
 	case r.Summary.High > 0:
-		scoreClass = "score-high"
+		riskClass = "r-high"
 	case r.Summary.Medium > 0:
-		scoreClass = "score-medium"
+		riskClass = "r-medium"
 	case r.Summary.Total > 0:
-		scoreClass = "score-low"
+		riskClass = "r-low"
 	}
-	fmt.Fprintf(&b, `<div class="score %s">%s</div>`, scoreClass, esc(r.Summary.Risk))
-	b.WriteString(`<p>Overall risk score: <strong>` + esc(r.Summary.Score) + `</strong></p>`)
+	b.WriteString(riskClass)
+	b.WriteString(`"><span class="label">Overall risk</span><span class="verdict">`)
+	b.WriteString(esc(r.Summary.Risk))
+	b.WriteString(`</span><span class="score">score ` + esc(r.Summary.Score) + `</span></div>
 
-	b.WriteString(`<h2>Summary</h2><table><tr>
-<th>Critical</th><th>High</th><th>Medium</th><th>Low</th><th>Info</th><th>Total</th></tr><tr>
-<td>` + fmt.Sprint(r.Summary.Critical) + `</td><td>` + fmt.Sprint(r.Summary.High) +
-		`</td><td>` + fmt.Sprint(r.Summary.Medium) + `</td><td>` + fmt.Sprint(r.Summary.Low) +
-		`</td><td>` + fmt.Sprint(r.Summary.Info) + `</td><td><strong>` +
-		fmt.Sprint(r.Summary.Total) + `</strong></td></tr></table>`)
+<h2><span class="num">01</span>Findings overview</h2>
+<table>
+<tr><th>Severity</th><th>Findings</th></tr>`)
+	sevRows := []struct {
+		name  string
+		count int
+		dot   string
+	}{
+		{"Critical", r.Summary.Critical, "dot-critical"},
+		{"High", r.Summary.High, "dot-high"},
+		{"Medium", r.Summary.Medium, "dot-medium"},
+		{"Low", r.Summary.Low, "dot-low"},
+		{"Informational", r.Summary.Info, "dot-info"},
+	}
+	for _, row := range sevRows {
+		if row.count == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, `<tr><td><span class="sev-dot %s"></span>%s</td><td class="num">%d</td></tr>`,
+			row.dot, row.name, row.count)
+	}
+	fmt.Fprintf(&b, `<tr><td><strong>Total</strong></td><td class="num"><strong>%d</strong></td></tr></table>`, r.Summary.Total)
 
-	// ── Methodology ────────────────────────────────────────────────────
-	b.WriteString(`<h2>Scope &amp; Methodology</h2><ul class="tight">
+	b.WriteString(`<h2><span class="num">02</span>Scope &amp; methodology</h2>
+<ul class="tight">
 <li><strong>Target:</strong> ` + esc(r.Target) + `</li>
-<li><strong>Method:</strong> automated grey-box assessment — crawling, technology fingerprinting, header/TLS configuration analysis, and targeted exposure probing</li>
-<li><strong>Constraint:</strong> destination scope enforced at the transport layer; out-of-scope hosts refused</li>
-<li><strong>Evidence standard:</strong> every finding carries a provenance grade — <em>proven</em> (artifact recognized), <em>corroborated</em> (independent sources agree), <em>indicated</em> (single real signal)</li>
-<li><strong>Requests issued:</strong> ` + fmt.Sprint(r.TotalReqs) + `</li></ul>`)
+<li><strong>Method:</strong> automated grey-box assessment — surface crawling, technology fingerprinting, transport-security analysis, and targeted exposure probing</li>
+<li><strong>Boundary:</strong> destination scope enforced at the transport layer; requests to out-of-scope hosts are refused</li>
+<li><strong>Evidence standard:</strong> every finding carries a provenance grade — <em>proven</em> (artifact recognized), <em>corroborated</em> (independent signals agree), <em>indicated</em> (single real signal)</li>
+<li><strong>Requests issued:</strong> ` + fmt.Sprint(r.TotalReqs) + ` (` + fmt.Sprint(r.FailedReqs) + ` failed)</li>
+</ul>`)
 
-	// ── Findings ───────────────────────────────────────────────────────
-	b.WriteString(`<h2>Findings</h2>`)
+	b.WriteString(`<h2><span class="num">03</span>Detailed findings</h2>`)
 	if len(findings) == 0 {
 		b.WriteString(`<p>No findings. The assessed surface showed no issues within the scanner's coverage.</p>`)
 	} else {
 		for i, f := range findings {
 			f = types.RedactFinding(f)
-			grade := ""
-			if f.Prov != nil && f.Prov.Grade != "" {
-				grade = fmt.Sprintf(` <span class="grade">%s</span>`, esc(string(f.Prov.Grade)))
-			}
+			fid := fmt.Sprintf("F-%03d", i+1)
 			sevClass := "s-" + strings.ToLower(string(f.Severity))
-			fmt.Fprintf(&b, `<div class="finding"><h3>%d. %s <span class="sev %s">%s</span>%s</h3>`,
-				i+1, esc(f.Name), sevClass, esc(string(f.Severity)), grade)
+			fmt.Fprintf(&b, `<div class="finding"><h3><span class="fid">%s</span>%s <span class="sev %s">%s</span>`,
+				fid, esc(f.Name), sevClass, esc(string(f.Severity)))
+			if f.Prov != nil && f.Prov.Grade != "" {
+				fmt.Fprintf(&b, ` <span class="grade">%s</span>`, esc(string(f.Prov.Grade)))
+			}
+			if f.Confidence > 0 {
+				fmt.Fprintf(&b, ` <span class="grade">%.0f%% confidence</span>`, f.Confidence*100)
+			}
+			b.WriteString(`</h3>`)
 			if f.Description != "" {
-				b.WriteString(`<p>` + esc(f.Description) + `</p>`)
+				b.WriteString(`<p class="desc">` + esc(f.Description) + `</p>`)
 			}
 			if f.Evidence != "" {
-				b.WriteString(`<div class="proof">` + esc(f.Evidence) + `</div>`)
+				b.WriteString(`<div class="evidence"><span class="ev-label">Evidence</span>` + esc(f.Evidence) + `</div>`)
 			}
 			if f.Prov != nil && f.Prov.RequestURL != "" {
-				b.WriteString(`<p><small>Exercised at: <code>` +
-					esc(f.Prov.RequestMethod+" "+f.Prov.RequestURL) + `</code></small></p>`)
+				fmt.Fprintf(&b, `<p class="req-ref">Exercised at <code>%s %s</code></p>`,
+					esc(f.Prov.RequestMethod), esc(f.Prov.RequestURL))
 			}
 			if rem := remediationFor(f); rem != "" {
-				b.WriteString(`<p class="remediation"><strong>Remediation:</strong> ` + esc(rem) + `</p>`)
+				b.WriteString(`<div class="remediation"><b>Remediation.</b> ` + esc(rem) + `</div>`)
 			}
 			b.WriteString(`</div>`)
 		}
 	}
 
-	// ── Footer ─────────────────────────────────────────────────────────
 	b.WriteString(`<div class="footer">
-<p>Generated by <strong>nice-Scan</strong> — an evidence-first security scanner.
-Findings are reported with their proof; nothing is asserted without observed evidence.
-This report reflects automated testing at the stated date and does not replace a full manual penetration test.</p>
-</div></body></html>`)
+<p><strong>About this report.</strong> Generated by <strong>nice-Scan</strong>, an evidence-first
+security scanner: findings are reported with their proof — nothing is asserted without
+observed evidence, and unproven signals stay out of the risk score. Automated testing
+reflects the state of the target at the stated date and does not replace a full manual
+penetration test.</p>
+</div>
+</body>
+</html>`)
 
 	return b.String()
+}
+
+// hostOnly strips the scheme for the cover grid — the full URL stays in
+// the methodology section where precision matters.
+func hostOnly(target string) string {
+	if i := strings.Index(target, "://"); i >= 0 {
+		rest := target[i+3:]
+		if j := strings.IndexAny(rest, "/?#"); j >= 0 {
+			return rest[:j]
+		}
+		return rest
+	}
+	return target
 }
 
 // remediationFor maps the finding type to the standard fix guidance a
