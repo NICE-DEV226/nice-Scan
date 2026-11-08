@@ -38,6 +38,7 @@ var (
 	jsonOutput  bool
 	interactive bool
 	reportFile  string
+	clientFile  string
 	showVersion bool
 	// allowOutOfScope is the operator's escape hatch on the scope boundary
 	// (a target that legitimately redirects to a CDN, a scan by IP). Held
@@ -174,6 +175,7 @@ func main() {
 	root.PersistentFlags().BoolVar(&allowOutOfScope, "allow-out-of-scope", false, "let requests and redirects leave the target host (default: hard scope boundary)")
 	root.PersistentFlags().BoolVar(&cfg.BlockInternal, "block-internal", false, "refuse to dial loopback, private, link-local or cloud-metadata addresses (defeats a hostname pointing inward)")
 	root.PersistentFlags().StringVarP(&reportFile, "report", "R", "", "save detailed HTML report to file")
+	root.PersistentFlags().StringVar(&clientFile, "client-report", "", "save client-facing assessment report (standalone, print-to-PDF ready) to file")
 	root.PersistentFlags().StringVar(&sarifFile, "sarif", "", "write SARIF 2.1.0 report to file ('-' for stdout) — scan/audit, for CI pipelines")
 	root.PersistentFlags().StringVar(&failOnSeverity, "fail-on-severity", "", "exit non-zero when a finding at or above this severity exists (info|low|medium|high|critical)")
 	root.PersistentFlags().StringVar(&cfg.IdentityA, "identity-a", "", "private identifier of user A (email/internal id — never a public username) for the BOLA differential")
@@ -436,6 +438,16 @@ func scanCmd() *cobra.Command {
 				}
 				fmt.Println()
 				fmt.Println(output.MutedStyle.Render("  Report saved: ") + output.ValueStyle.Render(reportFile))
+			}
+
+			if clientFile != "" {
+				report := engine.GenerateReport(result)
+				// Same 0600 rule as --report: the document embeds scan
+				// evidence even though it is written for the client.
+				if err := os.WriteFile(clientFile, []byte(report.RenderClientHTML()), 0600); err != nil {
+					return fmt.Errorf("failed to write client report: %w", err)
+				}
+				fmt.Println(output.MutedStyle.Render("  Client report saved: ") + output.ValueStyle.Render(clientFile))
 			}
 
 			return emitCIOutputs(result)

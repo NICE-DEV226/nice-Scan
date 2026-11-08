@@ -212,6 +212,7 @@ Run `nice_scan <command> --help` for each command's full flag set.
 | `-j, --json` | `false` | Machine-readable JSON output |
 | `-i, --interactive` | `false` | Live TUI dashboard |
 | `-R, --report <file>` | — | Write a detailed HTML report |
+| `--client-report <file>` | — | Write a client-facing assessment report (executive summary, findings with proof + remediation, print-to-PDF ready). Same 0600 permissions |
 | `--sarif <file>` | — | Write a SARIF 2.1.0 report (`-` for stdout) — feeds GitHub Code Scanning, GitLab and Azure DevOps; `scan`/`audit` only |
 | `--fail-on-severity <sev>` | — | Exit non-zero when a finding at or above `info\|low\|medium\|high\|critical` exists — CI gate |
 | `--identity-a <id>` / `--identity-b <id>` | — | Private identifiers (email/internal id — never public usernames) for the two-session BOLA differential |
