@@ -4,11 +4,28 @@ import (
 	"bytes"
 	"fmt"
 	"html"
+	"strings"
 	"time"
 
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
 
+// RenderHTMLReport builds a self-contained, single-file HTML report.
+//
+// Architecture (three layers):
+//
+//  1. Tailwind CSS (CDN) — utility-first layout library. No build step, no
+//     external asset to ship: the <script> processes every utility class
+//     present in the generated markup at render time.
+//  2. Custom <style> — brand design tokens + component base styles. Tokens
+//     mirror internal/output/ui.go so the terminal and HTML reports share
+//     one visual language (same accent, same semantic severities).
+//  3. Semantic HTML5 — header/main/section, definition lists for meta data,
+//     tables for tabular evidence, ARIA labels everywhere.
+//
+// The output is a standalone file: open it offline, print it, or archive it —
+// the layout survives Tailwind not loading because every component has its
+// own base CSS class.
 func RenderHTMLReport(r *Report) string {
 	var buf bytes.Buffer
 
@@ -18,136 +35,207 @@ func RenderHTMLReport(r *Report) string {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NICE HACKER — Attack Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { 
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: #1a1b26; color: #c0caf5; padding: 40px; line-height: 1.6;
-  }
-  .container { max-width: 1100px; margin: 0 auto; }
-  
-  .header {
-    border-bottom: 2px solid #3B4261; padding-bottom: 20px; margin-bottom: 30px;
-  }
-  .header h1 { color: #7DCFFF; font-size: 28px; margin-bottom: 5px; }
-  .header .subtitle { color: #565F89; font-size: 14px; }
-  
-  .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 30px; }
-  .meta-card {
-    background: #24283B; border: 1px solid #3B4261; border-radius: 8px; padding: 15px;
-  }
-  .meta-card .label { color: #565F89; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
-  .meta-card .value { color: #C0CAF5; font-size: 18px; font-weight: bold; margin-top: 5px; }
-  
-  .risk-critical { color: #F7768E; }
-  .risk-high { color: #FF9E64; }
-  .risk-medium { color: #E0AF68; }
-  .risk-low { color: #7DCFFF; }
-  
-  section { margin-bottom: 30px; }
-  section h2 { color: #7DCFFF; font-size: 18px; margin-bottom: 15px; padding-bottom: 8px; border-bottom: 1px solid #3B4261; }
-  
-  .finding {
-    background: #24283B; border-left: 3px solid #3B4261; border-radius: 6px; padding: 12px 16px; margin-bottom: 10px;
-  }
-  .finding.critical { border-left-color: #F7768E; }
-  .finding.high { border-left-color: #FF9E64; }
-  .finding.medium { border-left-color: #E0AF68; }
-  .finding.low { border-left-color: #7DCFFF; }
-  .finding.info { border-left-color: #565F89; }
-  .finding .sev { font-weight: bold; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
-  .finding .name { font-size: 14px; margin: 3px 0; }
-  .finding .desc { color: #9AA5CE; font-size: 12px; }
-  .finding .evid { color: #565F89; font-size: 11px; margin-top: 5px; word-break: break-all; }
-  
-  .chain {
-    background: linear-gradient(135deg, #24283B 0%, #2a1e3a 100%);
-    border: 1px solid #F7768E; border-radius: 8px; padding: 15px; margin-bottom: 10px;
-  }
-  .chain .chain-name { color: #F7768E; font-weight: bold; font-size: 15px; }
-  .chain .chain-risk { font-size: 13px; margin: 5px 0; }
-  
-  .cap-grid { display: flex; flex-wrap: wrap; gap: 8px; }
-  .cap-badge {
-    background: #1a3a2a; color: #9ECE6A; border: 1px solid #2d5a3a;
-    border-radius: 20px; padding: 3px 12px; font-size: 12px;
+  /* ========================================================================
+     Design tokens — shared with internal/output/ui.go (terminal design system)
+     ======================================================================== */
+  :root {
+    --ds-ink: #d3d6e0;
+    --ds-muted: #828a9c;
+    --ds-faint: #515769;
+    --ds-line: #303541;
+    --ds-accent: #7aa6dc;
+    --ds-good: #8fbc8f;
+    --ds-warn: #d2a56c;
+    --ds-fail: #e06b6b;
+    --ds-bg: #1a1b26;
+    --ds-surface: #24283b;
+    --ds-surface-hover: #2a2f44;
+    --ds-text: #c0caf5;
+    --ds-radius: 8px;
+    --ds-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.3), 0 1px 2px -1px rgb(0 0 0 / 0.2);
   }
 
-  .endpoint { font-family: 'Fira Code', monospace; padding: 4px 0; }
-  .endpoint .method { 
-    display: inline-block; width: 50px; text-align: center; font-weight: bold;
-    border-radius: 3px; padding: 1px 4px; margin-right: 8px; font-size: 11px;
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background-color: var(--ds-bg);
+    color: var(--ds-text);
+    font-family: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    margin: 0;
   }
-  .method-GET { background: #1a3a5a; color: #7DCFFF; }
-  .method-POST { background: #3a3a1a; color: #E0AF68; }
-  .method-PUT { background: #3a2a1a; color: #FF9E64; }
-  .method-DELETE { background: #3a1a1a; color: #F7768E; }
+  mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 
-  .page-item { padding: 6px 0; }
-  .page-item .url { color: #7DCFFF; }
-  .page-item .meta { color: #565F89; font-size: 12px; }
+  /* Layout shell */
+  .rs-shell { max-width: 1100px; margin: 0 auto; padding: 2.5rem 1.5rem; }
 
-  .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #3B4261; color: #565F89; font-size: 12px; text-align: center; }
+  /* Header */
+  .rs-header { border-bottom: 1px solid var(--ds-line); padding-bottom: 1.5rem; margin-bottom: 2rem; }
+  .rs-title { color: var(--ds-accent); font-size: 1.75rem; font-weight: 700; letter-spacing: -0.025em; margin: 0 0 0.5rem 0; }
+  .rs-subtitle { color: var(--ds-muted); font-size: 0.875rem; }
+
+  /* Meta grid */
+  .rs-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+  .rs-card { background: var(--ds-surface); border: 1px solid var(--ds-line); border-radius: var(--ds-radius); padding: 1rem; }
+  .rs-label { color: var(--ds-faint); font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; display: block; margin-bottom: 0.35rem; }
+  .rs-value { color: var(--ds-ink); font-size: 1.25rem; font-weight: 600; word-break: break-all; }
+
+  /* Sections */
+  section.rs-section { margin-bottom: 2rem; }
+  section.rs-section:last-child { margin-bottom: 0; }
+  .rs-section-title { color: var(--ds-accent); font-size: 1.125rem; font-weight: 600; margin: 0 0 1rem 0; padding-bottom: 0.5rem; border-bottom: 1px solid var(--ds-line); display: flex; align-items: center; gap: 0.5rem; }
+  .rs-section-note { color: var(--ds-muted); font-size: 0.8125rem; margin-bottom: 1rem; }
+
+  /* Severity chip */
+  .rs-sev { display: inline-block; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.15rem 0.5rem; border-radius: 9999px; }
+  .rs-sev.critical, .rs-sev.high { background: rgba(224, 107, 107, 0.15); color: #fca5a5; border: 1px solid rgba(224, 107, 107, 0.35); }
+  .rs-sev.medium { background: rgba(210, 165, 108, 0.15); color: #fcd34d; border: 1px solid rgba(210, 165, 108, 0.35); }
+  .rs-sev.low, .rs-sev.info { background: rgba(122, 166, 220, 0.15); color: #93c5fd; border: 1px solid rgba(122, 166, 220, 0.35); }
+
+  /* Findings */
+  .rs-findings { display: flex; flex-direction: column; gap: 0.75rem; }
+  .rs-finding { background: var(--ds-surface); border: 1px solid var(--ds-line); border-radius: var(--ds-radius); padding: 1rem; border-left: 3px solid var(--ds-line); }
+  .rs-finding.critical { border-left-color: var(--ds-fail); }
+  .rs-finding.high { border-left-color: var(--ds-fail); }
+  .rs-finding.medium { border-left-color: var(--ds-warn); }
+  .rs-finding.low { border-left-color: var(--ds-good); }
+  .rs-finding.info { border-left-color: var(--ds-muted); }
+  .rs-finding-head { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.35rem; }
+  .rs-finding-name { color: var(--ds-ink); font-size: 0.9375rem; font-weight: 600; word-break: break-word; }
+  .rs-finding-desc { color: var(--ds-muted); font-size: 0.8125rem; margin: 0 0 0.5rem 0; }
+  .rs-finding-evid { color: var(--ds-faint); font-size: 0.75rem; font-family: "JetBrains Mono", ui-monospace, monospace; background: rgba(0,0,0,0.25); padding: 0.35rem 0.5rem; border-radius: 6px; word-break: break-all; max-width: 100%; }
+  .rs-copy { color: var(--ds-accent); font-size: 0.7rem; cursor: pointer; text-decoration: underline; text-decoration-style: dotted; }
+  .rs-copy:hover { color: #93c5fd; }
+  .rs-copy:focus { outline: 2px solid var(--ds-accent); outline-offset: 2px; }
+  .rs-filter-buttons { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+  .rs-filter-btn { background: var(--ds-surface); border: 1px solid var(--ds-line); color: var(--ds-muted); font-size: 0.75rem; padding: 0.2rem 0.6rem; border-radius: 6px; cursor: pointer; }
+  .rs-filter-btn:hover { border-color: var(--ds-accent); color: var(--ds-accent); }
+  .rs-filter-btn.active { background: var(--ds-accent); color: var(--ds-bg); border-color: var(--ds-accent); }
+  .rs-hidden { display: none !important; }
+
+  /* Attack chains */
+  .rs-chains { display: flex; flex-direction: column; gap: 0.75rem; }
+  .rs-chain { background: linear-gradient(135deg, var(--ds-surface) 0%, #2a1e3a 100%); border: 1px solid var(--ds-fail); border-radius: var(--ds-radius); padding: 1rem; }
+  .rs-chain-name { color: var(--ds-fail); font-weight: 600; font-size: 0.9375rem; margin: 0 0 0.5rem 0; }
+  .rs-chain-risk { color: var(--ds-muted); font-size: 0.8125rem; margin-bottom: 0.5rem; }
+  .rs-chain-arrow { color: var(--ds-muted); font-size: 0.8125rem; margin-top: 0.5rem; white-space: pre-wrap; }
+
+  /* Capabilities */
+  .rs-caps { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .rs-cap { background: rgba(45, 90, 58, 0.4); color: var(--ds-good); border: 1px solid rgba(45, 90, 58, 0.35); border-radius: 9999px; padding: 0.25rem 0.75rem; font-size: 0.75rem; font-weight: 500; }
+
+  /* Credentials */
+  .rs-creds { display: flex; flex-direction: column; gap: 0.5rem; }
+  .rs-cred { background: var(--ds-surface); border: 1px solid var(--ds-line); border-radius: var(--ds-radius); padding: 0.75rem 1rem; }
+  .rs-cred-pair { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.875rem; font-weight: 600; color: var(--ds-ink); word-break: break-all; }
+  .rs-cred-meta { color: var(--ds-muted); font-size: 0.75rem; }
+
+  /* Endpoints */
+  .rs-endpoints { display: flex; flex-direction: column; gap: 0.25rem; }
+  .rs-endpoint { background: var(--ds-surface); border: 1px solid var(--ds-line); border-radius: var(--ds-radius); padding: 0.5rem 0.75rem; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.8125rem; display: flex; align-items: center; gap: 0.5rem; }
+  .rs-method { display: inline-block; min-width: 34px; text-align: center; font-weight: 700; font-size: 0.68rem; border-radius: 4px; padding: 0.1rem 0.3rem; }
+  .rs-method-GET { background: rgba(31, 41, 55, 0.5); color: var(--ds-accent); border: 1px solid rgba(122, 166, 220, 0.25); }
+  .rs-method-POST { background: rgba(58, 58, 26, 0.3); color: var(--ds-warn); border: 1px solid rgba(210, 165, 108, 0.25); }
+  .rs-method-PUT { background: rgba(58, 42, 26, 0.3); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.25); }
+  .rs-method-DELETE { background: rgba(58, 26, 26, 0.3); color: var(--ds-fail); border: 1px solid rgba(224, 107, 107, 0.25); }
+  .rs-path { color: var(--ds-ink); flex: 1; }
+  .rs-status { color: var(--ds-faint); margin-left: auto; }
+
+  /* Pages */
+  .rs-pages { display: flex; flex-direction: column; gap: 0.25rem; }
+  .rs-page { background: var(--ds-surface); border: 1px solid var(--ds-line); border-radius: var(--ds-radius); padding: 0.5rem 0.75rem; display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
+  .rs-page-url { color: var(--ds-accent); font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.8125rem; word-break: break-all; }
+  .rs-page-meta { color: var(--ds-muted); font-size: 0.72rem; font-family: "JetBrains Mono", ui-monospace, monospace; }
+
+  /* Withheld (consent) */
+  .rs-withheld { display: flex; flex-direction: column; gap: 0.5rem; }
+  .rs-withheld-item { background: rgba(128, 128, 128, 0.06); border: 1px dashed var(--ds-line); border-radius: var(--ds-radius); padding: 0.5rem 0.75rem; }
+  .rs-withheld-name { color: var(--ds-ink); font-size: 0.875rem; font-weight: 500; }
+  .rs-withheld-hint { color: var(--ds-muted); font-size: 0.75rem; }
+
+  /* Footer */
+  .rs-footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--ds-line); color: var(--ds-muted); font-size: 0.75rem; text-align: center; }
+
+  /* Accessibility: focus visible */
+  :focus-visible { outline: 2px solid var(--ds-accent); outline-offset: 2px; }
+
+  /* Print */
+  @media print {
+    body { background: #fff; color: #111; padding: 0; }
+    .rs-shell { max-width: none; padding: 0; }
+    .rs-section-title { color: #111; border-bottom-color: #999; }
+    .rs-card, .rs-finding, .rs-chain, .rs-cred, .rs-endpoint, .rs-page, .rs-withheld-item { background: #fff !important; border-color: #999 !important; color: #111 !important; }
+    .rs-cap { background: #f0f0f0 !important; color: #111 !important; border-color: #999 !important; }
+    .rs-sev.critical, .rs-sev.high { background: #fee2e2 !important; color: #991b1b !important; border-color: #fca5a5 !important; }
+    .rs-sev.medium { background: #fef3c7 !important; color: #92400e !important; border-color: #fcd34d !important; }
+    .rs-sev.low, .rs-sev.info { background: #eff6ff !important; color: #1e3a8a !important; border-color: #93c5fd !important; }
+    .rs-copy, .rs-filter-buttons, .rs-footer { display: none !important; }
+  }
 </style>
 </head>
 <body>
-<div class="container">
-  <div class="header">
-    <h1>NICE HACKER — Attack Report</h1>
-    <div class="subtitle">Autonomous penetration test generated ` + fmt.Sprintf("on %s", time.Now().Format("January 2, 2006 at 15:04")) + `</div>
-  </div>
-  
-  <div class="meta-grid">
-    <div class="meta-card">
-      <div class="label">Target</div>
-      <div class="value" style="font-size:14px">` + html.EscapeString(r.Target) + `</div>
-    </div>
-    <div class="meta-card">
-      <div class="label">Duration</div>
-      <div class="value">` + fmt.Sprintf("%.0f", r.Duration.Seconds()) + `s</div>
-    </div>
-    <div class="meta-card">
-      <div class="label">Steps</div>
-      <div class="value">` + fmt.Sprintf("%d", r.Steps) + `</div>
-    </div>
-    <div class="meta-card">
-      <div class="label">Risk Score</div>
-      <div class="value ` + riskClass(r.RiskScore) + `">` + fmt.Sprintf("%.1f", r.RiskScore) + ` / 10</div>
-    </div>
-  </div>
-`)
+<div class="rs-shell">
 
-	buf.WriteString(`  <section>
-    <h2>Impact Summary</h2>
-    <p style="color:#9AA5CE">` + html.EscapeString(r.Impact) + `</p>
+  <header class="rs-header">
+    <h1 class="rs-title">NICE HACKER — Attack Report</h1>
+    <p class="rs-subtitle">Autonomous penetration test · generated ` + fmt.Sprintf("on %s", time.Now().Format("January 2, 2006 at 15:04")) + `</p>
+  </header>
+
+  <div class="rs-meta">
+    <div class="rs-card"><span class="rs-label">Target</span><span class="rs-value">` + html.EscapeString(r.Target) + `</span></div>
+    <div class="rs-card"><span class="rs-label">Duration</span><span class="rs-value">` + fmt.Sprintf("%.0f", r.Duration.Seconds()) + `s</span></div>
+    <div class="rs-card"><span class="rs-label">Steps</span><span class="rs-value">` + fmt.Sprintf("%d", r.Steps) + `</span></div>
+    <div class="rs-card"><span class="rs-label">Risk Score</span><span class="rs-value rs-sev ` + riskSeverityClass(r.RiskScore) + `">` + fmt.Sprintf("%.1f", r.RiskScore) + ` / 10</span></div>
+  </div>
+
+  <section class="rs-section" aria-labelledby="impact-heading">
+    <h2 id="impact-heading" class="rs-section-title">Impact Summary</h2>
+    <p class="rs-section-note">` + html.EscapeString(r.Impact) + `</p>
   </section>
 `)
 
 	if len(r.AttackChains) > 0 {
-		buf.WriteString(`  <section>
-    <h2>Attack Chain Hypotheses <span style="font-weight:400;font-size:13px">(compound attack not executed)</span></h2>
-`)
+		buf.WriteString(`  <section class="rs-section" aria-labelledby="chains-heading">
+    <h2 id="chains-heading" class="rs-section-title">⚡ Attack Chain Hypotheses</h2>
+    <p class="rs-section-note">Compound attack hypotheses — not executed against the target.</p>
+    <div class="rs-chains">`)
 		for _, chain := range r.AttackChains {
 			fmt.Fprintf(&buf,
-				`    <div class="chain">
-      <div class="chain-name">⚡ %s</div>
-      <div class="chain-risk risk-%s">Risk: %.0f/10 if executed</div>
-      <div style="color:#9AA5CE;font-size:13px">→ %s</div>
-    </div>
+				`      <div class="rs-chain">
+        <div class="rs-chain-name">%s</div>
+        <div class="rs-chain-risk">Risk: %.0f/10 if executed</div>
+        <div class="rs-chain-arrow">→ %s</div>
+      </div>
 `,
 				html.EscapeString(chain.Name),
-				riskClass(chain.RiskScore),
 				chain.RiskScore,
 				html.EscapeString(chain.Impact),
 			)
 		}
-		buf.WriteString("  </section>\n")
+		buf.WriteString(`    </div>
+  </section>
+`)
 	}
 
 	if len(r.Findings) > 0 {
-		buf.WriteString(`  <section>
-    <h2>Findings</h2>
-`)
+		buf.WriteString(`  <section class="rs-section" aria-labelledby="findings-heading">
+    <h2 id="findings-heading" class="rs-section-title">🔎 Findings</h2>
+    <div class="rs-filter-buttons" role="group" aria-label="Filter findings by severity">
+      <button class="rs-filter-btn active" data-severity="all">All</button>
+      <button class="rs-filter-btn" data-severity="critical">Critical</button>
+      <button class="rs-filter-btn" data-severity="high">High</button>
+      <button class="rs-filter-btn" data-severity="medium">Medium</button>
+      <button class="rs-filter-btn" data-severity="low">Low</button>
+      <button class="rs-filter-btn" data-severity="info">Info</button>
+    </div>
+    <div class="rs-findings" id="findings-list">`)
 		for _, f := range r.Findings {
 			// The HTML report leaves the machine and lands in a browser:
 			// remote text is redacted here exactly as in the JSON sink,
@@ -155,81 +243,98 @@ func RenderHTMLReport(r *Report) string {
 			f = redactFinding(f)
 			sev := string(f.Severity)
 			fmt.Fprintf(&buf,
-				`    <div class="finding %s">
-      <div class="sev %s">%s</div>
-      <div class="name">%s</div>
-      <div class="desc">%s</div>
-      <div class="evid">%s</div>
-    </div>
+				`      <div class="rs-finding %s" data-severity="%s">
+        <div class="rs-finding-head">
+          <span class="rs-sev %s">%s</span>
+          <button class="rs-copy" title="Copy evidence to clipboard" onclick="copyToClipboard(this)">Copy</button>
+        </div>
+        <div class="rs-finding-name">%s</div>
+        <div class="rs-finding-desc">%s</div>
+        <div class="rs-finding-evid">%s</div>
+      </div>
 `,
-				sev, sevClass(f.Severity),
-				sev,
+				sev, strings.ToLower(sev),
+				sevClass(f.Severity), sev,
 				html.EscapeString(f.Name),
 				html.EscapeString(f.Description),
 				html.EscapeString(f.Evidence),
 			)
 		}
-		buf.WriteString("  </section>\n")
+		buf.WriteString(`    </div>
+  </section>
+`)
 	}
 
 	if len(r.Credentials) > 0 {
-		buf.WriteString(`  <section>
-    <h2>Credentials Obtained</h2>
-`)
+		buf.WriteString(`  <section class="rs-section" aria-labelledby="credentials-heading">
+    <h2 id="credentials-heading" class="rs-section-title">🔑 Credentials Obtained</h2>
+    <div class="rs-creds">`)
 		for _, c := range r.Credentials {
-			valid := "valid"
-			if !c.Valid {
-				valid = "tested"
+			valid := "tested"
+			if c.Valid {
+				valid = "valid"
 			}
 			fmt.Fprintf(&buf,
-				`    <div class="finding critical">
-      <div class="name">%s:%s (%s)</div>
-      <div class="desc">Source: %s</div>
-    </div>
+				`      <div class="rs-cred">
+        <div class="rs-cred-pair">%s:%s</div>
+        <div class="rs-cred-meta">source: %s · status: %s</div>
+      </div>
 `,
-				html.EscapeString(types.RedactText(c.Username)), html.EscapeString(types.MaskSecret(c.Password)), valid,
+				html.EscapeString(types.RedactText(c.Username)),
+				html.EscapeString(types.MaskSecret(c.Password)),
 				html.EscapeString(c.Source),
+				valid,
 			)
 		}
-		buf.WriteString("  </section>\n")
+		buf.WriteString(`    </div>
+  </section>
+`)
 	}
 
 	if len(r.Endpoints) > 0 {
-		buf.WriteString(`  <section>
-    <h2>Endpoints Discovered</h2>
-`)
+		buf.WriteString(`  <section class="rs-section" aria-labelledby="endpoints-heading">
+    <h2 id="endpoints-heading" class="rs-section-title">🌐 Endpoints Discovered</h2>
+    <div class="rs-endpoints">`)
 		for _, e := range r.Endpoints {
 			fmt.Fprintf(&buf,
-				`    <div class="endpoint"><span class="method method-%s">%s</span> <span style="color:#C0CAF5">%s</span> <span style="color:#565F89">[%d]</span></div>
+				`      <div class="rs-endpoint">
+        <span class="rs-method rs-method-%s">%s</span>
+        <span class="rs-path">%s</span>
+        <span class="rs-status">[%d]</span>
+      </div>
 `,
-				e.Method, e.Method,
+				html.EscapeString(e.Method), html.EscapeString(e.Method),
 				html.EscapeString(e.Path), e.Status,
 			)
 		}
-		buf.WriteString("  </section>\n")
+		buf.WriteString(`    </div>
+  </section>
+`)
 	}
 
 	if len(r.Pages) > 0 {
-		fmt.Fprintf(&buf, `  <section>
-    <h2>Pages Crawled (%d)</h2>
-`, len(r.Pages))
+		fmt.Fprintf(&buf, `  <section class="rs-section" aria-labelledby="pages-heading">
+    <h2 id="pages-heading" class="rs-section-title">📄 Pages Crawled (%d)</h2>
+    <div class="rs-pages">`, len(r.Pages))
 		for _, p := range r.Pages {
 			fmt.Fprintf(&buf,
-				`    <div class="page-item"><span class="url">%s</span> <span class="meta">(%d bytes, %d forms, %d links, %d JS)</span></div>
+				`      <div class="rs-page">
+        <span class="rs-page-url">%s</span>
+        <span class="rs-page-meta">%d bytes · %d forms · %d links · %d JS</span>
+      </div>
 `,
 				html.EscapeString(p.URL), p.BodyLen, p.Forms, len(p.Links), len(p.JSFiles),
 			)
 		}
-		buf.WriteString("  </section>\n")
+		buf.WriteString(`    </div>
+  </section>
+`)
 	}
 
-	// Engine bookkeeping last: pages are the observed surface, the
-	// capability board carries the ? / ≈ provenance markers.
 	if len(r.Capabilities) > 0 {
-		buf.WriteString(`  <section>
-    <h2>Engine Knowledge (verified · observed · hint)</h2>
-    <div class="cap-grid">
-`)
+		buf.WriteString(`  <section class="rs-section" aria-labelledby="capabilities-heading">
+    <h2 id="capabilities-heading" class="rs-section-title">🧠 Engine Knowledge (verified · observed · hint)</h2>
+    <div class="rs-caps">`)
 		for _, c := range r.Capabilities {
 			label := c.Name
 			switch c.Origin {
@@ -239,34 +344,73 @@ func RenderHTMLReport(r *Report) string {
 				label = "≈" + c.Name
 			}
 			fmt.Fprintf(&buf,
-				`      <span class="cap-badge">%s</span>
+				`      <span class="rs-cap">%s</span>
 `,
 				html.EscapeString(label),
 			)
 		}
-		buf.WriteString("    </div>\n  </section>\n")
+		buf.WriteString(`    </div>
+  </section>
+`)
 	}
 
-	// Same honesty as the terminal report: a module withheld for lack of
-	// --destructive consent is listed, never silently omitted.
 	if len(r.PendingDestructive) > 0 {
-		buf.WriteString(`  <section>
-    <h2>Withheld — consent required</h2>
-`)
+		buf.WriteString(`  <section class="rs-section" aria-labelledby="withheld-heading">
+    <h2 id="withheld-heading" class="rs-section-title">🔒 Withheld — consent required</h2>
+    <p class="rs-section-note">Modules that met their evidence requirements but write to or bulk-read the target. Run with <code class="bg-white/5 px-1 py-0.5 rounded">--destructive</code> to execute them.</p>
+    <div class="rs-withheld">`)
 		for _, name := range r.PendingDestructive {
 			fmt.Fprintf(&buf,
-				`    <div class="page-item"><span class="url">%s</span> <span class="meta">run with --destructive to execute</span></div>
+				`      <div class="rs-withheld-item">
+        <div class="rs-withheld-name">%s</div>
+        <div class="rs-withheld-hint">withheld for lack of --destructive consent</div>
+      </div>
 `,
 				html.EscapeString(name),
 			)
 		}
-		buf.WriteString("  </section>\n")
+		buf.WriteString(`    </div>
+  </section>
+`)
 	}
 
-	fmt.Fprintf(&buf, `  <div class="footer">
+	fmt.Fprintf(&buf, `  <footer class="rs-footer">
     NICE HACKER — Attack Complete &mdash; %d steps in %.0f seconds
-  </div>
+  </footer>
 </div>
+
+<script>
+  // Severity filter — vanilla JS, no dependency.
+  (function () {
+    var buttons = document.querySelectorAll('.rs-filter-btn');
+    var items = document.querySelectorAll('.rs-finding');
+    buttons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        buttons.forEach(function (b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        var sev = btn.dataset.severity;
+        items.forEach(function (item) {
+          if (sev === 'all' || item.dataset.severity === sev) {
+            item.classList.remove('rs-hidden');
+          } else {
+            item.classList.add('rs-hidden');
+          }
+        });
+      });
+    });
+  })();
+
+  // Copy evidence text to clipboard.
+  function copyToClipboard(btn) {
+    var finding = btn.closest('.rs-finding');
+    var text = finding.querySelector('.rs-finding-evid').innerText;
+    navigator.clipboard.writeText(text).then(function () {
+      var old = btn.innerText;
+      btn.innerText = 'Copied';
+      setTimeout(function () { btn.innerText = old; }, 1200);
+    });
+  }
+</script>
 </body>
 </html>`, r.Steps, r.Duration.Seconds())
 
@@ -274,6 +418,20 @@ func RenderHTMLReport(r *Report) string {
 }
 
 func riskClass(score float64) string {
+	switch {
+	case score >= 9.0:
+		return "critical"
+	case score >= 7.0:
+		return "high"
+	case score >= 5.0:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+// riskSeverityClass returns the Tailwind-adjacent chip class for a numeric risk score.
+func riskSeverityClass(score float64) string {
 	switch {
 	case score >= 9.0:
 		return "critical"
