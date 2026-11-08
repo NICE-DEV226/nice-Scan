@@ -142,6 +142,32 @@ Download the archive for your platform from the
 [Release verification](#release-verification)), and install it anywhere on your
 `PATH` — for example `/usr/local/bin` on Linux/macOS.
 
+### Air-gapped / on-premise install
+
+Hosts with no route to github.com can be provisioned entirely offline:
+copy the release archive plus `checksums.txt` (and `checksums.txt.sig`
+if you want signature verification) onto the machine — USB, internal
+artifact share, whatever your process allows — then:
+
+```bash
+install.sh --archive nice_scan_0.3.7_linux_amd64.tar.gz \
+           [--checksums checksums.txt] [--sig checksums.txt.sig]
+```
+
+The same fail-closed rules apply: the checksums file is mandatory and
+must cover the archive, and a supplied signature must verify against the
+pinned release key **already present in the local keyring** (an offline
+host cannot fetch it — import it from a trusted channel beforehand, see
+[SECURITY.md](SECURITY.md)). Once installed, disable the update check
+so the tool never tries to reach out:
+
+```bash
+nice_scan --no-update-check        # or: NICE_SCAN_NO_UPDATE_CHECK=1
+```
+
+Everything else is self-contained: single Go binary, no cloud service,
+no telemetry, reports written locally with `0600` permissions.
+
 ### Build from source
 
 ```bash

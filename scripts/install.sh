@@ -31,12 +31,21 @@ BINARY="nice_scan"
 APPNAME="NICE_SCAN"
 INSTALL_DIR="${HOME}/.local/bin"
 REQUESTED_VERSION="latest"
+LOCAL_ARCHIVE=""
+LOCAL_CHECKSUMS=""
+LOCAL_SIG=""
 
-# Parse arguments: --version vX.Y.Z
+# Parse arguments: --version vX.Y.Z | --archive <file> [--checksums f] [--sig f]
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --version) REQUESTED_VERSION="${2:-latest}"; shift 2 ;;
         --version=*) REQUESTED_VERSION="${1#--version=}"; shift ;;
+        --archive) LOCAL_ARCHIVE="${2:-}"; shift 2 ;;
+        --archive=*) LOCAL_ARCHIVE="${1#--archive=}"; shift ;;
+        --checksums) LOCAL_CHECKSUMS="${2:-}"; shift 2 ;;
+        --checksums=*) LOCAL_CHECKSUMS="${1#--checksums=}"; shift ;;
+        --sig) LOCAL_SIG="${2:-}"; shift 2 ;;
+        --sig=*) LOCAL_SIG="${1#--sig=}"; shift ;;
         *) break ;;
     esac
 done
@@ -114,6 +123,75 @@ case "$ARCH" in
     aarch64|arm64) ARCH="arm64" ;;
     *) die "Unsupported architecture: $ARCH" ;;
 esac
+
+# ── Air-gapped path: install from a local release archive ──
+# For hosts with no route to github.com: copy the release archive,
+# checksums.txt (and optionally checksums.txt.sig) onto the machine —
+# e.g. via USB — then:
+#   install.sh --archive nice_scan_0.3.7_linux_amd64.tar.gz \
+#              [--checksums checksums.txt] [--sig checksums.txt.sig]
+# The same fail-closed verification applies: checksums are mandatory,
+# the GPG signature is verified when supplied, and the pinned key must
+# already be in the local keyring (no keyserver fetch offline).
+if [ -n "$LOCAL_ARCHIVE" ]; then
+    [ -f "$LOCAL_ARCHIVE" ] || die "Archive not found: $LOCAL_ARCHIVE"
+    ARCHIVE_BASE=$(basename "$LOCAL_ARCHIVE")
+
+    if [ -z "$LOCAL_CHECKSUMS" ]; then
+        # Convention: checksums.txt next to the archive.
+        LOCAL_CHECKSUMS="$(dirname "$LOCAL_ARCHIVE")/checksums.txt"
+    fi
+    [ -f "$LOCAL_CHECKSUMS" ] || die "No checksums file. Refusing to install an unverifiable archive — pass --checksums <file>."
+
+    EXPECTED_HASH=$(grep -F "$ARCHIVE_BASE" "$LOCAL_CHECKSUMS" | awk '{print $1}')
+    [ -n "$EXPECTED_HASH" ] || die "checksums file does not cover ${ARCHIVE_BASE}. Refusing to install."
+
+    ACTUAL_HASH=$(sha256sum "$LOCAL_ARCHIVE" | awk '{print $1}')
+    if [ "$ACTUAL_HASH" != "$EXPECTED_HASH" ]; then
+        err "CHECKSUM MISMATCH — the archive may have been tampered with."
+        err "  Expected: ${EXPECTED_HASH}"
+        err "  Actual:   ${ACTUAL_HASH}"
+        die "Do NOT run the archive contents."
+    fi
+    ok "SHA256 checksum verified (${ARCHIVE_BASE})."
+
+    if [ -n "$LOCAL_SIG" ] && [ -f "$LOCAL_SIG" ]; then
+        command -v gpg >/dev/null 2>&1 || die "gpg is required to verify --sig. Install gpg or drop the signature."
+        GPG_FP="4CE466095C5B3185883288C593FBFE29F62FA4DB"
+        gpg --list-keys "$GPG_FP" >/dev/null 2>&1 || \
+            die "Pinned release key $GPG_FP not in the local keyring. Import it from a trusted channel first — offline installs cannot fetch it."
+        gpg --verify "$LOCAL_SIG" "$LOCAL_CHECKSUMS" >/dev/null 2>&1 || \
+            die "GPG signature verification FAILED. Refusing to install."
+        ok "GPG signature verified."
+    else
+        warn "No signature supplied/verified — SHA256-only. For air-gapped installs, ship checksums.txt.sig too."
+    fi
+
+    TMPDIR=$(mktemp -d)
+    trap 'rm -rf "$TMPDIR"' EXIT
+    info "Extracting ${ARCHIVE_BASE}..."
+    tar -xzf "$LOCAL_ARCHIVE" -C "$TMPDIR"
+    mkdir -p "$INSTALL_DIR"
+    if [ -f "${TMPDIR}/${BINARY}" ]; then
+        mv "${TMPDIR}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
+    else
+        find "$TMPDIR" -name "${BINARY}" -exec mv {} "${INSTALL_DIR}/" \;
+    fi
+    chmod 0755 "${INSTALL_DIR}/${BINARY}"
+    trap - EXIT
+
+    if ! echo ":$PATH:" | grep -q ":${INSTALL_DIR}:"; then
+        persist_path "$INSTALL_DIR"
+    fi
+    echo ""
+    ok "${BINARY} installed from local archive (${ARCHIVE_BASE})."
+    dim "  Location:  ${INSTALL_DIR}/${BINARY}"
+    dim "  SHA256:    ${FILE_HASH:-$(sha256sum "${INSTALL_DIR}/${BINARY}" | awk '{print $1}')}"
+    warn "Air-gapped: the tool will still try to check for updates."
+    dim "  Disable with: nice_scan --no-update-check  (or NICE_SCAN_NO_UPDATE_CHECK=1)"
+    echo ""
+    exit 0
+fi
 
 # ── Resolve the release tag FIRST (single trust anchor) ──
 # go install, binary download and the source fallback all anchor to the
