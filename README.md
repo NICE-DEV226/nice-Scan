@@ -215,6 +215,7 @@ nice_scan hack example.com --timeout 30s -R report.html --destructive
 | `exploit <target>` | Individual exploitation modules (login, IDOR, privesc, token/session reuse) — see below |
 | `tech <target>` | Technology fingerprinting only (165 signatures) |
 | `tls <target>` | TLS/SSL analysis — ciphers, certificates, protocol versions |
+| `subdomains <domain>` | Passive subdomain enumeration (crt.sh, Wayback, GitHub dorks) — zero requests to the target |
 | `shell` | Interactive REPL: run checks against one or more targets, with command history, clipboard copy, and a `consent` toggle |
 | `update` | Self-update to the latest release, checksum-verified, with the previous binary kept as `nice_scan.old` for rollback |
 
