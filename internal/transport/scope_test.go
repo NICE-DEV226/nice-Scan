@@ -370,3 +370,45 @@ func TestGuardSurfacesResolveFailure(t *testing.T) {
 		t.Fatalf("want the resolve failure attributed to the guard, got %v", err)
 	}
 }
+
+// The interactive shell re-arms the destination boundary per command through
+// SetTargetScope: an in-scope host must pass and an out-of-scope host must be
+// refused, and clearing the scope must restore fail-open behavior for callers
+// that opted out of enforcement.
+func TestSetTargetScopeRuntime(t *testing.T) {
+	allowed := false
+	// Two httptest servers share the 127.0.0.1 host; rewriting one to the
+	// "localhost" name makes them distinct hosts for the scope rule, the
+	// same trick the redirect tests use.
+	srvIn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { allowed = true }))
+	defer srvIn.Close()
+	srvOut := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srvOut.Close()
+	inURL := asLocalhost(srvIn.URL)
+
+	client := NewClient()
+	defer func() { _ = client.Close() }()
+
+	// Before any scope is set the out-of-scope host is reachable.
+	if _, err := client.Do(context.Background(), &types.Request{Method: "GET", URL: srvOut.URL}); err != nil {
+		t.Fatalf("unscoped client should reach srvOut: %v", err)
+	}
+
+	client.SetTargetScope(HostDomain(inURL))
+
+	if _, err := client.Do(context.Background(), &types.Request{Method: "GET", URL: inURL}); err != nil {
+		t.Fatalf("in-scope host refused: %v", err)
+	}
+	if !allowed {
+		t.Fatal("handler never hit")
+	}
+	if _, err := client.Do(context.Background(), &types.Request{Method: "GET", URL: srvOut.URL}); err == nil {
+		t.Fatal("out-of-scope host was not refused after SetTargetScope")
+	}
+
+	// Clearing restores the previous (unscoped) behavior.
+	client.SetTargetScope()
+	if _, err := client.Do(context.Background(), &types.Request{Method: "GET", URL: srvOut.URL}); err != nil {
+		t.Fatalf("cleared scope should restore reachability: %v", err)
+	}
+}

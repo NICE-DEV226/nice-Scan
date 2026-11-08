@@ -154,6 +154,20 @@ func (c *Client) admit(rawURL string) error {
 	return fmt.Errorf("%w: %s", types.ErrOutOfScope, HostDomain(rawURL))
 }
 
+// SetTargetScope installs (or, with no hosts, clears) the hard destination
+// allow-list at runtime. Interactive sessions learn their target per command,
+// the same way SetCredScope learns where credentials may go; an empty result
+// clears enforcement, so callers must fail closed on a degenerate target
+// rather than clearing silently. Unlike WithTargetScope it never touches
+// credScope: credentials keep their own, separately managed boundary.
+func (c *Client) SetTargetScope(hosts ...string) {
+	c.opts.mu.Lock()
+	defer c.opts.mu.Unlock()
+	scope := NormalizeScope(hosts)
+	c.opts.targetScope = scope
+	c.opts.enforceScope = len(scope) > 0
+}
+
 // envProxyActive reports whether HTTP_PROXY / HTTPS_PROXY (or their
 // lowercase forms) would route traffic at all. The question is asked of the
 // stdlib's own rule rather than a private re-read of the environment, so the

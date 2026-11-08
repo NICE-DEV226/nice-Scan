@@ -109,7 +109,7 @@ func (r *Report) RenderHTML() string {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NICE_SCAN Security Report — `)
-	b.WriteString(r.Target)
+	b.WriteString(html.EscapeString(r.Target))
 	b.WriteString(`</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -187,7 +187,7 @@ func (r *Report) RenderHTML() string {
     <h1>🔍 NICE_SCAN — Security Report</h1>
     <div class="meta">
       Target: <span>`)
-	b.WriteString(r.Target)
+	b.WriteString(html.EscapeString(r.Target))
 	b.WriteString(`</span><br>
       Scan Time: <span>`)
 	b.WriteString(r.ScanTime.Format("2006-01-02 15:04:05"))
@@ -311,6 +311,9 @@ func (r *Report) renderSection(b *strings.Builder, title string, findings []type
 	fmt.Fprintf(b, ` <span style="color:#565f89;font-size:14px;">(%d)</span></h2>`, len(findings))
 
 	for _, f := range findings {
+		// Same redaction rule as the JSON sink: this HTML leaves the
+		// machine too, so credential-shaped values must not be recopied.
+		f = types.RedactFinding(f)
 		sevClass := "severity-" + string(f.Severity)
 		b.WriteString(`<div class="finding"><div class="f-name">`)
 		b.WriteString(`<span class="tag `)

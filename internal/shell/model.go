@@ -157,6 +157,10 @@ func NewModel(cfg *types.Config) (*Model, error) {
 		// like an unauthenticated client (missed findings / different
 		// server behavior).
 		transport.WithProxy(cfg.Proxy),
+		// --block-internal is baked into the dialer at construction: the
+		// shell previously dropped it, so the guard the flag promises was
+		// silently disarmed for every interactive scan.
+		transport.WithPrivateNetworkAllowed(!cfg.BlockInternal),
 	}
 	if cfg.Cookie != "" {
 		shellClientOpts = append(shellClientOpts, transport.WithCookie(cfg.Cookie))
@@ -461,6 +465,19 @@ func (m *Model) exec(cmd string, target string, o runOpts) tea.Cmd {
 		// that host for this command: the shared shell client must not send
 		// them to other origins the scan may touch (redirects, crawl).
 		target, scope := shellTargetScope(target)
+		// The interactive scan commands share one client across targets, so
+		// the destination boundary is re-armed per command exactly like the
+		// credential scope. Without this the shell silently ran with no
+		// target allow-list: redirects could carry probes to any host even
+		// though the CLI defaults EnforceScope on.
+		if m.cfg.EnforceScope {
+			if scope == "" {
+				return cmdResultMsg{
+					output.WarnStyle.Render("  refused: target has no usable host for the scope boundary — not scanned"),
+				}
+			}
+			m.client.SetTargetScope(scope)
+		}
 		if scope != "" {
 			m.client.SetCredScope(scope)
 		}

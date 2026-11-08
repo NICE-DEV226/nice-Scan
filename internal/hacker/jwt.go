@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/NICE-DEV226/nice-Scan/internal/transport"
+	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
 
 type JWTForgeAction struct{}
@@ -71,7 +72,10 @@ func (a *JWTForgeAction) Execute(ctx context.Context, target string, kb *Knowled
 				Name:        "JWT carries alg=none — unsigned token, acceptance unprobed",
 				Severity:    SevMedium,
 				Description: "Observed token needs no signature; verify whether the server accepts a re-issued none-alg token before treating this as a forge",
-				Evidence:    jwt.Raw,
+				// A JWT is a bearer credential: the engine's token
+				// analyzer refuses to put the signed blob in a report,
+				// and this sink must not be the weaker one.
+				Evidence: types.RedactSecretValue(jwt.Raw),
 			})
 			spawned = append(spawned, &JWTForgeNoneAction{original: jwt.Raw, header: header, payload: payload})
 			continue
@@ -204,7 +208,7 @@ func (a *JWTForgeNoneAction) Execute(ctx context.Context, target string, kb *Kno
 			Name:        "alg=none admin token prepared — acceptance unprobed",
 			Severity:    SevMedium,
 			Description: "Forged locally with alg=none and escalated role; no request carrying it was ever validated by the target",
-			Evidence:    tokens[0],
+			Evidence:    types.RedactSecretValue(tokens[0]),
 			Details:     map[string]string{"tokens": fmt.Sprintf("%d variants generated", len(tokens))},
 		},
 	}
