@@ -29,6 +29,10 @@ you what is real, not what is scary.
 > **Use only on systems you own or are explicitly authorized to test.** See
 > [Responsible use](#responsible-use).
 
+<p align="center">
+  <img src="assets/terminal-scan.png" alt="nice_scan terminal output on a live target — findings grouped by severity with confidence and evidence" width="820"/>
+</p>
+
 ## Table of contents
 
 - [Why this design](#why-this-design)
@@ -397,6 +401,15 @@ as reflected.
   ○  XSS reflection (escaped)                                45% confidence
      search=&lt;svg onload=alert(…)&gt;   (entity-encoded — does not execute)
 ```
+
+The `--client-report` output is a standalone, print-ready HTML document —
+cover block, risk banner, severity table, and numbered findings (`F-001`…)
+each with its proof, provenance grade, and remediation. No external assets;
+it opens anywhere and exports cleanly to PDF.
+
+<p align="center">
+  <img src="assets/report-client.png" alt="Client report cover and findings — professional assessment document layout" width="720"/>
+</p>
 
 ## Supply chain and release integrity
 
