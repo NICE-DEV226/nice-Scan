@@ -97,7 +97,7 @@ ul.tight { margin: 6px 0; padding-left: 22px; }
 	case r.Summary.Total > 0:
 		scoreClass = "score-low"
 	}
-	b.WriteString(fmt.Sprintf(`<div class="score %s">%s</div>`, scoreClass, esc(r.Summary.Risk)))
+	fmt.Fprintf(&b, `<div class="score %s">%s</div>`, scoreClass, esc(r.Summary.Risk))
 	b.WriteString(`<p>Overall risk score: <strong>` + esc(r.Summary.Score) + `</strong></p>`)
 
 	b.WriteString(`<h2>Summary</h2><table><tr>
@@ -127,8 +127,8 @@ ul.tight { margin: 6px 0; padding-left: 22px; }
 				grade = fmt.Sprintf(` <span class="grade">%s</span>`, esc(string(f.Prov.Grade)))
 			}
 			sevClass := "s-" + strings.ToLower(string(f.Severity))
-			b.WriteString(fmt.Sprintf(`<div class="finding"><h3>%d. %s <span class="sev %s">%s</span>%s</h3>`,
-				i+1, esc(f.Name), sevClass, esc(string(f.Severity)), grade))
+			fmt.Fprintf(&b, `<div class="finding"><h3>%d. %s <span class="sev %s">%s</span>%s</h3>`,
+				i+1, esc(f.Name), sevClass, esc(string(f.Severity)), grade)
 			if f.Description != "" {
 				b.WriteString(`<p>` + esc(f.Description) + `</p>`)
 			}
