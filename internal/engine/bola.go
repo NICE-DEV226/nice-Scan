@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
-	"strings"
 
 	"github.com/NICE-DEV226/nice-Scan/internal/types"
 )
@@ -150,24 +149,4 @@ func (s *Scanner) runBOLADiff(ctx context.Context, result *ScanResult) {
 		})
 		result.Stats.Findings++
 	}
-}
-
-// bolaSummaryLine renders a one-line note for operators who configured a
-// single session only — the feature exists but stayed silent, and silence
-// should be explainable.
-func bolaSummaryLine(opts *types.Config) string {
-	if opts == nil {
-		return ""
-	}
-	missing := []string{}
-	if opts.IdentityA == "" || opts.IdentityB == "" {
-		missing = append(missing, "--identity-a/--identity-b")
-	}
-	if len(opts.SessionA) == 0 || len(opts.SessionB) == 0 {
-		missing = append(missing, "--session-a/--session-b")
-	}
-	if len(missing) == 0 {
-		return ""
-	}
-	return "BOLA differential armed only with two identities — missing " + strings.Join(missing, " and ")
 }

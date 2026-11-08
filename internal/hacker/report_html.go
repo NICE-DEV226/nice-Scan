@@ -413,19 +413,6 @@ func RenderHTMLReport(r *Report) string {
 	return buf.String()
 }
 
-func riskClass(score float64) string {
-	switch {
-	case score >= 9.0:
-		return "critical"
-	case score >= 7.0:
-		return "high"
-	case score >= 5.0:
-		return "medium"
-	default:
-		return "low"
-	}
-}
-
 // riskSeverityClass returns the Tailwind-adjacent chip class for a numeric risk score.
 func riskSeverityClass(score float64) string {
 	switch {

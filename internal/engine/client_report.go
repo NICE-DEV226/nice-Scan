@@ -79,11 +79,11 @@ ul.tight { margin: 6px 0; padding-left: 22px; }
 	// ── Cover / executive summary ──────────────────────────────────────
 	b.WriteString(`<h1>Security Assessment Report</h1>`)
 	b.WriteString(`<div class="meta">`)
-	b.WriteString(fmt.Sprintf("<strong>Target:</strong> %s<br>", esc(r.Target)))
-	b.WriteString(fmt.Sprintf("<strong>Date:</strong> %s<br>",
-		r.ScanTime.Format("2006-01-02 15:04 MST")))
-	b.WriteString(fmt.Sprintf("<strong>Duration:</strong> %s &middot; <strong>Requests:</strong> %d (%d failed)<br>",
-		r.Duration.Round(time.Second), r.TotalReqs, r.FailedReqs))
+	fmt.Fprintf(&b, "<strong>Target:</strong> %s<br>", esc(r.Target))
+	fmt.Fprintf(&b, "<strong>Date:</strong> %s<br>",
+		r.ScanTime.Format("2006-01-02 15:04 MST"))
+	fmt.Fprintf(&b, "<strong>Duration:</strong> %s &middot; <strong>Requests:</strong> %d (%d failed)<br>",
+		r.Duration.Round(time.Second), r.TotalReqs, r.FailedReqs)
 	b.WriteString("</div>")
 
 	scoreClass := "score-clean"
