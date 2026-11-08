@@ -50,6 +50,9 @@ var (
 	// failOnSeverity gates the exit code for CI: a scan that finds
 	// anything at or above it exits non-zero, like grep -q.
 	failOnSeverity string
+	// Two-identity differential inputs: private markers + per-session
+	// header sets. Sessions are repeatable "Name: value" flags.
+	sessionA, sessionB []string
 )
 
 // version is the ldflags stamp set by the release workflow; source
@@ -123,6 +126,10 @@ func main() {
 				slog.Error("invalid --fail-on-severity", "value", failOnSeverity, "want", "info|low|medium|high|critical")
 				os.Exit(2)
 			}
+			// BOLA differential needs all four pieces; partial config
+			// would scan normally but silently skip the check.
+			cfg.SessionA = parseHeaderFlags(sessionA)
+			cfg.SessionB = parseHeaderFlags(sessionB)
 			notifyNewRelease(cmd)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -169,6 +176,10 @@ func main() {
 	root.PersistentFlags().StringVarP(&reportFile, "report", "R", "", "save detailed HTML report to file")
 	root.PersistentFlags().StringVar(&sarifFile, "sarif", "", "write SARIF 2.1.0 report to file ('-' for stdout) — scan/audit, for CI pipelines")
 	root.PersistentFlags().StringVar(&failOnSeverity, "fail-on-severity", "", "exit non-zero when a finding at or above this severity exists (info|low|medium|high|critical)")
+	root.PersistentFlags().StringVar(&cfg.IdentityA, "identity-a", "", "private identifier of user A (email/internal id — never a public username) for the BOLA differential")
+	root.PersistentFlags().StringVar(&cfg.IdentityB, "identity-b", "", "private identifier of user B for the BOLA differential")
+	root.PersistentFlags().StringArrayVar(&sessionA, "session-a", nil, "session A header, 'Name: value' (repeatable, e.g. --session-a 'Cookie: sid=A')")
+	root.PersistentFlags().StringArrayVar(&sessionB, "session-b", nil, "session B header, 'Name: value' (repeatable)")
 	root.PersistentFlags().BoolVar(&cfg.Destructive, "destructive", false, "consent to state-modifying actions (command upload/registration spawns) — modifies target state, authorized targets only")
 	root.PersistentFlags().BoolVar(&noUpdateCheck, "no-update-check", false, "disable the automatic new-release check (also honored via NICE_SCAN_NO_UPDATE_CHECK=1)")
 

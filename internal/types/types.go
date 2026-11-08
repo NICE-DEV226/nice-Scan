@@ -140,4 +140,17 @@ type Config struct {
 	// address, CGNAT). Off by default: scanning one's own dev server is a
 	// legitimate use of this tool, so the operator opts in.
 	BlockInternal bool
+	// Two-identity differential (BOLA/IDOR): when all four fields are set,
+	// the engine replays object-carrying URLs under each session and checks
+	// whether session B receives content marked with identity A. The check
+	// only fires on a positive marker match — "both sessions got 200" is
+	// not evidence of broken access control.
+	IdentityA string
+	IdentityB string
+	// SessionA/SessionB are per-request header sets ("Cookie: …",
+	// "Authorization: Bearer …") replayed via Request.Headers, which the
+	// transport applies after operator credentials — a session header wins
+	// over --cookie/--header for the same key.
+	SessionA map[string]string
+	SessionB map[string]string
 }

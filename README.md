@@ -214,6 +214,8 @@ Run `nice_scan <command> --help` for each command's full flag set.
 | `-R, --report <file>` | — | Write a detailed HTML report |
 | `--sarif <file>` | — | Write a SARIF 2.1.0 report (`-` for stdout) — feeds GitHub Code Scanning, GitLab and Azure DevOps; `scan`/`audit` only |
 | `--fail-on-severity <sev>` | — | Exit non-zero when a finding at or above `info\|low\|medium\|high\|critical` exists — CI gate |
+| `--identity-a <id>` / `--identity-b <id>` | — | Private identifiers (email/internal id — never public usernames) for the two-session BOLA differential |
+| `--session-a <hdr>` / `--session-b <hdr>` | — | Per-session header, `Name: value`, repeatable (e.g. `--session-a 'Cookie: sid=A'`). All four flags together arm the cross-session object-access check |
 | `-v, --verbose` | `false` | Verbose output |
 | `--destructive` | `false` | **Consent to state-modifying actions** (login spray, role tamper, registration, discovered-credential attempts). Required to enable them; targets must be authorized |
 | `--no-update-check` | `false` | Disable the automatic new-release check (also `NICE_SCAN_NO_UPDATE_CHECK=1`) |

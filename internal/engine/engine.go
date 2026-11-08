@@ -170,6 +170,10 @@ func (s *Scanner) Scan(ctx context.Context, targets []string) *ScanResult {
 	}
 	s.mu.Unlock()
 
+	// Two-identity differential: replays object URLs under both sessions
+	// after the scan so the finding can cite both exchanges as evidence.
+	s.runBOLADiff(ctx, result)
+
 	return result
 }
 
