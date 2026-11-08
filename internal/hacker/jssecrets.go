@@ -421,6 +421,15 @@ func (a *JSSecretsAction) Execute(ctx context.Context, target string, kb *Knowle
 			body = body[:jsScanCap]
 		}
 
+		// SPA coverage: the bundle declares its API surface as string
+		// literals — harvest same-origin paths into the endpoint
+		// inventory so sqli/lfi/graphql probes can reach routes no
+		// crawler ever saw. Declared surface only: nothing here is a
+		// finding until an action exercises it.
+		for _, ep := range extractJSEndpoints(string(body), target) {
+			kb.AddEndpoint(Endpoint{Path: ep, Method: "GET"})
+		}
+
 		for _, hit := range scanSecrets(string(body)) {
 			if seenLiteral[hit.Literal] {
 				continue
