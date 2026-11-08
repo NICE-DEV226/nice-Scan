@@ -219,6 +219,49 @@ Run `nice_scan <command> --help` for each command's full flag set.
 | `--no-update-check` | `false` | Disable the automatic new-release check (also `NICE_SCAN_NO_UPDATE_CHECK=1`) |
 | `--version` | — | Print the version |
 
+### GitHub Action — scan on every PR
+
+The repo ships a composite action at the root, so `uses:` works with no
+subdirectory. It downloads the pinned release binary, verifies SHA256
+against the published checksums (fail-closed, same rule as the installers),
+runs the scan, uploads SARIF to code scanning, then applies the severity
+gate — the report is never lost to a failing gate.
+
+```yaml
+name: Security scan
+on:
+  pull_request:
+  schedule: [{ cron: "0 6 * * 1" }]
+
+permissions:
+  security-events: write   # required for the SARIF upload
+
+jobs:
+  nice-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: NICE-DEV226/nice-Scan@v0.3.7
+        with:
+          target: https://staging.example.com   # staging/dev, never prod
+          fail_on_severity: high
+          version: v0.3.7                        # pin the release you trust
+```
+
+| Input | Default | Purpose |
+|---|---|---|
+| `target` | — (required) | URL to scan |
+| `command` | `scan` | `scan` or `audit` |
+| `version` | `latest` | Release tag or `latest` |
+| `sarif_file` | `nice-scan-results.sarif` | Output path |
+| `fail_on_severity` | — | Gate the job at `info`…`critical` |
+| `extra_args` | — | Extra flags (`--destructive`, `--cookie …`) |
+| `timeout` | — | Per-request timeout |
+| `upload_sarif` | `true` | Upload to code scanning |
+| `category` | `nice_scan` | Code-scanning category |
+
+A minimal copy-paste workflow lives in
+[`examples/github-action-scan.yml`](examples/github-action-scan.yml).
+
 ## The `exploit` modules
 
 Non-destructive by default. Modules that modify target state refuse to run
@@ -378,7 +421,7 @@ internal/
   transport/       HTTP client: pooling, retries, HTTP/2, session/redirect hops, credentials
   shell/           Interactive REPL (history, clipboard copy, consent toggle)
   tui/             Live terminal dashboard (BubbleTea)
-  output/          Renderers: terminal, JSON, HTML
+  output/          Renderers: terminal, JSON, SARIF, HTML
   types/           Shared types, sanitization, secret masking
   update/          Self-update with checksum verification and rollback
 scripts/           Install scripts (install.sh, install.ps1)

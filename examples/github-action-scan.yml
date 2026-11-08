@@ -1,0 +1,27 @@
+# Minimal NICE_SCAN GitHub Action workflow — copy into .github/workflows/.
+#
+# Scans a deployed target on every pull request and weekly, uploads SARIF
+# to code scanning, and fails the job when a finding at or above the
+# threshold exists. Point `target` at a staging/dev environment — the scan
+# sends real probes.
+name: Security scan
+
+on:
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+
+permissions:
+  security-events: write # required by the SARIF upload step
+
+jobs:
+  nice-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scan target
+        uses: NICE-DEV226/nice-Scan@v0.3.7
+        with:
+          target: https://staging.example.com
+          version: v0.3.7
+          fail_on_severity: high
+          # extra_args: "--cookie session=… --timeout 30s"

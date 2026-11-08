@@ -1,0 +1,185 @@
+name: nice_scan
+description: >-
+  Run a NICE_SCAN dynamic security scan against a deployed target and upload
+  SARIF 2.1.0 results to GitHub code scanning. Every finding carries the
+  evidence that produced it; --fail-on-severity-equivalent gating happens
+  after upload so a failing gate never swallows the report.
+author: NICE-DEV226
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  target:
+    description: URL of the application to scan (staging/dev — never production)
+    required: true
+  command:
+    description: nice_scan subcommand to run
+    required: false
+    default: scan
+  version:
+    description: Release tag to run (e.g. v0.3.7) or 'latest'
+    required: false
+    default: latest
+  sarif_file:
+    description: Path the SARIF report is written to (relative to workspace)
+    required: false
+    default: nice-scan-results.sarif
+  fail_on_severity:
+    description: >-
+      Fail the step when a finding at or above this severity exists
+      (info|low|medium|high|critical). Evaluated AFTER the SARIF upload so
+      the report is never lost to the gate.
+    required: false
+    default: ""
+  extra_args:
+    description: Additional flags appended to the nice_scan invocation
+    required: false
+    default: ""
+  timeout:
+    description: Per-request timeout (e.g. 30s)
+    required: false
+    default: ""
+  upload_sarif:
+    description: >-
+      Upload results to GitHub code scanning. Requires the job to grant
+      `security-events: write`. Set to 'false' to only produce the file.
+    required: false
+    default: "true"
+  category:
+    description: Category tag for code scanning results
+    required: false
+    default: nice_scan
+
+outputs:
+  sarif_file:
+    description: Path of the SARIF report produced
+    value: ${{ inputs.sarif_file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve release
+      id: rel
+      shell: bash
+      env:
+        REQUESTED: ${{ inputs.version }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        if [ "$REQUESTED" = "latest" ]; then
+          tag="$(gh release view --repo NICE-DEV226/nice-Scan --json tagName -q .tagName)"
+        else
+          tag="$REQUESTED"
+        fi
+        echo "tag=$tag" >> "$GITHUB_OUTPUT"
+        # GoReleaser names assets with the bare semver (no leading v).
+        echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+    - name: Download and verify nice_scan
+      shell: bash
+      env:
+        TAG: ${{ steps.rel.outputs.tag }}
+        VERSION: ${{ steps.rel.outputs.version }}
+      run: |
+        set -euo pipefail
+
+        # Runner env → GoReleaser GOOS/GOARCH names.
+        case "${RUNNER_OS}" in
+          Linux)   goos=linux ;;
+          Windows) goos=windows ;;
+          macOS)   goos=darwin ;;
+          *) echo "unsupported runner OS: ${RUNNER_OS}" >&2; exit 1 ;;
+        esac
+        case "${RUNNER_ARCH}" in
+          X64)  goarch=amd64 ;;
+          ARM64) goarch=arm64 ;;
+          *) echo "unsupported runner arch: ${RUNNER_ARCH}" >&2; exit 1 ;;
+        esac
+
+        ext=tar.gz
+        [ "$goos" = "windows" ] && ext=zip
+        base="nice_scan_${VERSION}_${goos}_${goarch}"
+        work="$(mktemp -d)"
+
+        base_url="https://github.com/NICE-DEV226/nice-Scan/releases/download/${TAG}"
+        curl -fsSL "${base_url}/${base}.${ext}" -o "${work}/archive.${ext}"
+        curl -fsSL "${base_url}/nice_scan_${VERSION}_checksums.txt" -o "${work}/checksums.txt"
+
+        # Fail-closed: the archive must be covered by the published
+        # checksums, same rule the installers enforce.
+        want="$(awk -v f="${base}.${ext}" '$2 == f {print $1}' "${work}/checksums.txt")"
+        if [ -z "$want" ]; then
+          echo "checksums.txt does not cover ${base}.${ext}" >&2
+          exit 1
+        fi
+        got="$(sha256sum "${work}/archive.${ext}" | awk '{print $1}')"
+        if [ "$want" != "$got" ]; then
+          echo "checksum mismatch for ${base}.${ext}" >&2
+          exit 1
+        fi
+
+        mkdir -p "${work}/bin"
+        case "$ext" in
+          zip) unzip -o "${work}/archive.${ext}" -d "${work}/bin" >/dev/null || tar -xf "${work}/archive.${ext}" -C "${work}/bin" ;;
+          *)   tar -xzf "${work}/archive.${ext}" -C "${work}/bin" ;;
+        esac
+
+        exe=nice_scan
+        [ "$goos" = "windows" ] && exe=nice_scan.exe
+        if [ ! -x "${work}/bin/${exe}" ]; then
+          echo "archive did not contain ${exe}" >&2
+          ls -la "${work}/bin" >&2
+          exit 1
+        fi
+        cp "${work}/bin/${exe}" "${GITHUB_WORKSPACE}/${exe}"
+        echo "${GITHUB_WORKSPACE}" >> "$GITHUB_PATH"
+
+    - name: Run nice_scan
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+        COMMAND: ${{ inputs.command }}
+        SARIF: ${{ inputs.sarif_file }}
+        EXTRA_ARGS: ${{ inputs.extra_args }}
+        TIMEOUT: ${{ inputs.timeout }}
+      run: |
+        set -euo pipefail
+        case "$COMMAND" in scan|audit) ;; *) echo "command must be scan or audit" >&2; exit 2 ;; esac
+        # No --fail-on-severity here: the gate runs AFTER the SARIF upload
+        # so a red pipeline never loses its report.
+        args=("$COMMAND" "$TARGET" --sarif "$SARIF" --no-update-check)
+        [ -n "$TIMEOUT" ] && args+=(--timeout "$TIMEOUT")
+        # shellcheck disable=SC2206
+        [ -n "$EXTRA_ARGS" ] && args+=($EXTRA_ARGS)
+        nice_scan "${args[@]}"
+
+    - name: Upload SARIF to code scanning
+      if: inputs.upload_sarif == 'true'
+      uses: github/codeql-action/upload-sarif@v4
+      with:
+        sarif_file: ${{ inputs.sarif_file }}
+        category: ${{ inputs.category }}
+
+    - name: Enforce severity gate
+      if: inputs.fail_on_severity != ''
+      shell: bash
+      env:
+        SARIF: ${{ inputs.sarif_file }}
+        MIN: ${{ inputs.fail_on_severity }}
+      run: |
+        set -euo pipefail
+        case "$MIN" in
+          info|low|medium|high|critical) ;;
+          *) echo "invalid fail_on_severity: $MIN (want info|low|medium|high|critical)" >&2; exit 2 ;;
+        esac
+        count="$(jq -r --arg t "$MIN" '
+          def rank: {"info":0,"low":1,"medium":2,"high":3,"critical":4}[.] // -1;
+          ({"info":0,"low":1,"medium":2,"high":3,"critical":4}[$t]) as $tr |
+          [.runs[].results[]?.properties.severity // empty | rank | select(. >= $tr)] | length
+        ' "$SARIF")"
+        echo "findings at or above $MIN: $count"
+        if [ "$count" -gt 0 ]; then
+          echo "::error::nice_scan gate failed: $count finding(s) at or above $MIN"
+          exit 1
+        fi
